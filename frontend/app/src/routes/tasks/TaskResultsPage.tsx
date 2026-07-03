@@ -15,7 +15,6 @@ import {
   UsersRound,
   XCircle,
 } from "lucide-react";
-import ReactMarkdown, { type Components } from "react-markdown";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { normalizeAPIError } from "@/api/client";
@@ -38,6 +37,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { Textarea } from "@/components/ui/Input";
 import { StatTile } from "@/components/ui/StatTile";
 import { cn } from "@/lib/cn";
@@ -53,15 +53,6 @@ type PlotDatum = {
 };
 
 const ALLOWED_CHART_TRACE_TYPES = new Set<ChartTraceType>(["bar", "scatter", "pie", "histogram", "box"]);
-
-const markdownComponents: Components = {
-  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-  ul: ({ children }) => <ul className="mb-2 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>,
-  ol: ({ children }) => <ol className="mb-2 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
-  li: ({ children }) => <li className="leading-6">{children}</li>,
-  strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-  code: ({ children }) => <code className="rounded bg-muted px-1 py-0.5 text-xs">{children}</code>,
-};
 
 const STATUS_LABELS: Partial<Record<TaskStatus | "completed" | "not_found", string>> = {
   draft: "草稿",
@@ -858,7 +849,7 @@ function QuestionSummaryRow({ taskId, question }: { taskId: string; question: Qu
             </span>
           ) : null}
         </div>
-        {question.stem ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{question.stem}</p> : null}
+        {question.stem ? <MarkdownMath className="mt-2 text-muted-foreground">{question.stem}</MarkdownMath> : null}
       </div>
       <div className="grid content-center gap-1 text-sm">
         <div className="flex items-center justify-between gap-3">
@@ -989,7 +980,7 @@ function MarkdownBlock({ markdown }: { markdown: string }) {
 
   return (
     <div className="rounded-md border bg-muted/30 p-3 text-sm leading-6">
-      <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
+      <MarkdownMath>{content}</MarkdownMath>
     </div>
   );
 }

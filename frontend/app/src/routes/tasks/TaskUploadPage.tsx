@@ -30,6 +30,7 @@ import { Card, SectionHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Field } from "@/components/ui/Field";
 import { Textarea } from "@/components/ui/Input";
+import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { useTaskProgress } from "@/hooks/useTaskProgress";
 import { cn } from "@/lib/cn";
 import type { ProblemInfo, StudentAnswerInfo, StudentSubmission, TaskStatus } from "@/types";
@@ -822,12 +823,14 @@ function DetailSyncState({ title, description }: { title: string; description: s
 }
 
 function PreviewBlock({ label, value, emptyText }: { label: string; value?: string | null; emptyText: string }) {
+  const content = value?.trim() ? value : emptyText;
+
   return (
     <div>
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="mt-1 whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 text-sm leading-6">
-        {value?.trim() ? value : emptyText}
-      </p>
+      <div className="mt-1 rounded-md bg-muted/50 p-3">
+        <MarkdownMath>{content}</MarkdownMath>
+      </div>
     </div>
   );
 }

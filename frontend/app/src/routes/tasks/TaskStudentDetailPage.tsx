@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import type { Correction } from "@/types";
 
 export function TaskStudentDetailPage() {
@@ -257,10 +258,12 @@ function ReviewReasons({ correction }: { correction: Correction }) {
 }
 
 function TextBlock({ title, body, empty }: { title: string; body?: string | null; empty: string }) {
+  const content = body?.trim() || empty;
+
   return (
     <div className="rounded-lg border bg-muted/30 p-3">
       <p className="text-xs font-medium text-muted-foreground">{title}</p>
-      <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{body?.trim() || empty}</p>
+      <MarkdownMath className="mt-2">{content}</MarkdownMath>
     </div>
   );
 }

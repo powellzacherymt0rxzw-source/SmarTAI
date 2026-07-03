@@ -74,6 +74,25 @@ def _is_valid_file(name: str) -> bool:
     return not (name.startswith("__MACOSX") or ".DS_Store" in name)
 
 
+def _has_cjk(text: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in text)
+
+
+def _looks_like_cp437_mojibake(text: str) -> bool:
+    return any(0x2500 <= ord(ch) <= 0x259F for ch in text)
+
+
+def _repair_zip_member_name(name: str) -> str:
+    """Repair GBK zip member names that Python decoded as CP437 mojibake."""
+    if _has_cjk(name) or not _looks_like_cp437_mojibake(name):
+        return name
+    try:
+        repaired = name.encode("cp437").decode("gbk")
+    except UnicodeError:
+        return name
+    return repaired if _has_cjk(repaired) else name
+
+
 async def extract_files_from_archive(file_bytes: bytes, filename: str) -> List[Dict[str, str]]:
     """
     Extract all text files from an archive (zip/rar/7z/tar.*) or wrap a single
@@ -88,7 +107,7 @@ async def extract_files_from_archive(file_bytes: bytes, filename: str) -> List[D
             valid = [i for i in zf.infolist() if not i.is_dir() and _is_valid_file(i.filename)]
 
             async def process(info):
-                clean = info.filename.split("/")[-1]
+                clean = _repair_zip_member_name(info.filename).split("/")[-1]
                 content = await decode_text_bytes(zf.read(info.filename))
                 return {"filename": clean, "content": content}
 

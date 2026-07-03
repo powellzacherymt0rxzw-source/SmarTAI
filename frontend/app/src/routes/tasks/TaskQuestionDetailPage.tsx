@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import type { Correction } from "@/types";
 
 export function TaskQuestionDetailPage() {
@@ -134,13 +135,13 @@ function QuestionContent({
             {question.stem ? (
               <div className="mt-3 rounded-lg border bg-muted/30 p-3">
                 <p className="text-xs font-medium text-muted-foreground">题干</p>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{question.stem}</p>
+                <MarkdownMath className="mt-2">{question.stem}</MarkdownMath>
               </div>
             ) : null}
             {question.criterion ? (
               <div className="mt-3 rounded-lg border bg-muted/30 p-3">
                 <p className="text-xs font-medium text-muted-foreground">评分标准</p>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{question.criterion}</p>
+                <MarkdownMath className="mt-2">{question.criterion}</MarkdownMath>
               </div>
             ) : null}
           </div>
@@ -193,7 +194,7 @@ function QuestionContent({
       {commonMistakes ? (
         <Card className="grid gap-2">
           <h2 className="text-base font-semibold">全班易错点</h2>
-          <div className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{commonMistakes}</div>
+          <MarkdownMath className="text-muted-foreground">{commonMistakes}</MarkdownMath>
         </Card>
       ) : null}
 
@@ -306,10 +307,12 @@ function ReviewReasons({ correction }: { correction: Correction }) {
 }
 
 function TextBlock({ title, body, empty }: { title: string; body?: string | null; empty: string }) {
+  const content = body?.trim() || empty;
+
   return (
     <div className="rounded-lg border bg-muted/30 p-3">
       <p className="text-xs font-medium text-muted-foreground">{title}</p>
-      <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{body?.trim() || empty}</p>
+      <MarkdownMath className="mt-2">{content}</MarkdownMath>
     </div>
   );
 }
