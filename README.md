@@ -16,33 +16,22 @@
 
 ## 本地运行（开发与测试）
 
-### 先切到 React 新前端分支
+### 当前代码状态
 
-React 新前端目前在这个分支：
+当前 `main` 已包含三部分：
 
-```bash
-cd /Users/annie/code/SmarTAI
-git status
-git switch codex/vite-react-frontend
-```
-
-如果本地还没有这个分支，用：
-
-```bash
-cd /Users/annie/code/SmarTAI
-git fetch origin
-git switch -c codex/vite-react-frontend --track origin/codex/vite-react-frontend
-```
-
-切换前如果 `git status` 显示有未提交修改，先提交或暂存，避免切分支时把工作区弄乱。
+- **FastAPI 后端**：`backend/`，提供 `/tasks/*`、`/analytics/*`、`/experts/*`、认证、RAG、批改等 API。
+- **旧 Reflex 前端**：`frontend/`，保留为回退和对照路径，仍依赖 Python/Reflex 状态服务器。
+- **新 Vite React 前端**：`frontend/app/`，已合并进 `main`，是当前推荐的教师端本地开发与验收入口。
 
 ### 环境分工
 
 - **后端需要 `smartai` Conda 环境**：FastAPI、LLM、RAG、SymPy 等 Python 依赖都在这里跑。
-- **React 新前端不需要 `smartai` Conda 环境**：它只需要 Node.js + npm，依赖由 `frontend/app/package-lock.json` 锁定。
-- 可以在激活 `smartai` 的终端里跑前端，但这不是必需条件；前端包不要用 `pip/conda` 装。
+- **旧 Reflex 前端需要 `smartai` Conda 环境**：它是 Python/Reflex 应用，运行 `reflex run` 前需要安装 `frontend/requirements.txt`。
+- **新 Vite React 前端不需要 `smartai` Conda 环境**：它只需要 Node.js + npm，依赖由 `frontend/app/package-lock.json` 锁定。
+- 可以在激活 `smartai` 的终端里跑 React 前端，但这不是必需条件；React 前端包不要用 `pip/conda` 装。
 
-### 环境准备
+### 准备后端与旧前端的 Python 环境
 
 推荐使用 Conda 创建并激活专用 Python 环境（项目内统一称为 `smartai`，Python 3.11 推荐）：
 
@@ -95,11 +84,31 @@ React 新前端默认连接：
 http://localhost:8000
 ```
 
-如需改后端地址，在 `frontend/app/.env` 中设置：
+如果没有 `frontend/app/.env`，会使用上面的默认值，因此本地 `npm run dev`
+默认连接本地 FastAPI 后端。若要明确指定后端地址，可从示例文件复制一份本地
+配置：
 
 ```bash
+cd /Users/annie/code/SmarTAI/frontend/app
+cp .env.example .env
+```
+
+连本地后端时写：
+
+```text
 VITE_SMARTAI_BACKEND_URL=http://localhost:8000
 ```
+
+连 Render 公网后端时改为：
+
+```text
+VITE_SMARTAI_BACKEND_URL=https://<your-backend>.onrender.com
+```
+
+`frontend/app/.env` 会被 git 忽略，只影响本机；`VITE_*` 变量由 Vite 在启动
+开发服务器或生产构建时读取，修改后需要重启 `npm run dev` 或重新构建/部署。
+React 设置页会显示当前前端正在使用的后端地址，后端日志里出现请求也能确认实
+际连到的是本地还是公网后端。
 
 本地测试账号可生成：
 
@@ -110,7 +119,7 @@ python scripts/generate_test_users.py
 
 生成后查看 `data/test_users.json`，用里面的 `username/password` 登录。生成文件已被 git 忽略，不会提交到仓库。
 
-### 旧 Reflex 前端（当前主版本）
+### 旧 Reflex 前端（保留回退路径）
 
 如果要跑旧 Reflex 前端，需要在 `smartai` Conda 环境中安装它自己的 Python 前端依赖：
 
@@ -134,15 +143,46 @@ pytest backend/tests
 
 ## 部署到公网
 
-仓库已附带 Render 的部署配置，可直接连接 GitHub 仓库一键部署：
+仓库已附带 Render 部署配置；当前配置主要覆盖 FastAPI 后端与旧 Reflex 前端：
 
 - **后端**：`backend/render.yaml`，根目录读取 `render-requirements.txt`
-- **前端**：`frontend/render.yaml`，`rootDir` 设为 `frontend`
+- **旧 Reflex 前端状态服务器**：`frontend/render.yaml`，`rootDir` 设为 `frontend`
+- **旧 Reflex 静态导出站点**：`frontend/render-static.yaml`，`rootDir` 设为 `frontend`
 
-部署完成后，需要将下列三个环境变量填为真实的 Render 服务 URL（占位值在 yaml 中用 `TODO` 标记）：
+新 Vite React 前端位于 `frontend/app/`，它是纯静态前端：本地使用
+`npm run dev`，生产部署使用 `npm run build` 生成 `dist/`。推荐把 React 前端
+部署到 Cloudflare Pages、Vercel 或 Render Static Site，后端继续部署为 Render
+Web Service。
 
-- `SMARTAI_BACKEND_URL`（前端配置）
-- `REFLEX_API_URL`（前端配置）
+React 静态前端的公网构建配置：
+
+```text
+Root directory: frontend/app
+Build command: npm ci && npm run build
+Build output directory: dist
+VITE_SMARTAI_BACKEND_URL=https://<your-backend>.onrender.com
+```
+
+旧 Reflex 前端仍需要自己的 `SMARTAI_BACKEND_URL` 和 `REFLEX_API_URL`；React
+前端不使用 `REFLEX_API_URL`。
+
+后端的 `FRONTEND_URLS` 是 CORS 白名单，要包含所有允许访问该后端的前端源。可
+以同时保留旧 Reflex 前端、本地开发地址和新的 React 公网地址，例如：
+
+```text
+FRONTEND_URLS=https://smartai-course.pages.dev,https://smartai.pages.dev,https://smartai-l6zw.onrender.com,https://smartai-frontend-94ya.onrender.com,http://localhost:3000,http://localhost:8001,http://localhost:5173,http://127.0.0.1:5173
+```
+
+注意每个 URL 之间只用英文逗号，不要在逗号后加空格，也不要带结尾 `/`。
+`http://localhost:5173` 与 `http://127.0.0.1:5173` 只用于本地 React 前端直连
+线上后端的调试；公网用户访问不依赖这两项。修改 Render 环境变量后需要
+redeploy/restart 后端服务。
+
+部署完成后，需要将下列环境变量填为真实服务 URL：
+
+- `VITE_SMARTAI_BACKEND_URL`（React 静态前端构建时配置）
+- `SMARTAI_BACKEND_URL`（旧 Reflex 前端配置）
+- `REFLEX_API_URL`（旧 Reflex 前端配置）
 - `FRONTEND_URLS`（后端配置，前端域名白名单）
 
 部署成功后，任意教师可通过公网 URL 直接访问完整功能，无需任何本地环境准备；同时建议将公网 URL、演示账号、示例题目压缩包同步填入本 README 顶部「在线 Demo」一节，以便评审专家与试用教师以零工程成本体验完整批改流程。

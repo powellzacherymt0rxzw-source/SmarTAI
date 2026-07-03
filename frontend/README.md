@@ -1,6 +1,7 @@
-# SmarTAI Frontend v2 (Reflex)
+# SmarTAI Legacy Reflex Frontend
 
-> 替换 `frontend/`（Streamlit）的 Reflex 重构版本。在切换流量之前与旧版并存。
+> 旧 Reflex 前端，当前保留为回退和对照路径。新的教师端 React 前端在
+> [app/](app/)；React 前端不需要 `smartai` Conda 环境。
 
 ## 架构
 
@@ -12,8 +13,11 @@
 
 ## 启动
 
+旧 Reflex 前端需要先进入仓库约定的 `smartai` Conda 环境：
+
 ```bash
-cd frontend_v2
+conda activate smartai
+cd frontend
 pip install -r requirements.txt
 reflex run
 ```
@@ -27,7 +31,7 @@ reflex run
 
 | 路径 | 作用 |
 |---|---|
-| 项目根 [ROADMAP.md](../ROADMAP.md) | **所有未完成功能 P0/P1/P2 优先级清单 + 工时估算** |
+| 项目根 [docs/20260620/PROJECT_STATUS_AND_ROADMAP_CN.md](../docs/20260620/PROJECT_STATUS_AND_ROADMAP_CN.md) | 当前项目状态与优先级 |
 | [docs/](docs/) | 8 篇按层次递进的中文模块文档 |
 | [STAGE_0_DESIGN.md](STAGE_0_DESIGN.md) | Stage 0 详细设计与决策依据 |
 | [BACKEND_STUB_ENDPOINTS.md](BACKEND_STUB_ENDPOINTS.md) | 后端待实现接口契约（auth/users/courses 等） |
