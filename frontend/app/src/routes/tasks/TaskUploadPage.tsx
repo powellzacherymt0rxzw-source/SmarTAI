@@ -33,18 +33,8 @@ import { Textarea } from "@/components/ui/Input";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { useTaskProgress } from "@/hooks/useTaskProgress";
 import { cn } from "@/lib/cn";
+import { getTaskStatusMeta, isTaskProcessing } from "@/lib/taskFlow";
 import type { ProblemInfo, StudentAnswerInfo, StudentSubmission, TaskStatus } from "@/types";
-
-const STATUS_LABELS: Partial<Record<TaskStatus, string>> = {
-  draft: "草稿",
-  extracting_problems: "正在识别题目",
-  problems_ready: "题目已就绪",
-  parsing_submissions: "正在解析作答",
-  submissions_ready: "作答已就绪",
-  grading: "批改中",
-  graded: "已完成",
-  error: "出错",
-};
 
 const ACTIVE_STATUS = new Set<TaskStatus>(["extracting_problems", "parsing_submissions", "grading"]);
 const PROBLEMS_ACCEPT = ".pdf,.doc,.docx,.txt,.md";
@@ -77,7 +67,7 @@ export function TaskUploadPage() {
 
   const task = taskQuery.data;
   const currentStatus = (progressQuery.data?.status ?? task?.status ?? "draft") as TaskStatus;
-  const isProcessing = progressQuery.isActive || ACTIVE_STATUS.has(currentStatus);
+  const isProcessing = progressQuery.isActive || isTaskProcessing(currentStatus);
   const isUploading = extractProblems.isPending || parseSubmissions.isPending;
 
   const problems = useMemo(
@@ -257,7 +247,7 @@ export function TaskUploadPage() {
     try {
       const response = await startGrading.mutateAsync({ taskId });
       if (response.status === "already_done") {
-        toast.success("该任务已完成批改。");
+        toast.success("该任务已完成批改，可进入结果复核。");
         navigate(`/tasks/${taskId}/results`);
       } else if (response.status === "already_running") {
         toast.info("批改已在进行中", { description: "页面会继续轮询进度。" });
@@ -275,7 +265,7 @@ export function TaskUploadPage() {
     return (
       <EmptyState
         title="缺少任务 ID"
-        description="请从教师工作台或任务列表进入上传流程。"
+        description="请从任务总览或历史任务进入上传流程。"
         action={
           <Link to="/">
             <Button variant="secondary">返回工作台</Button>
@@ -324,7 +314,7 @@ export function TaskUploadPage() {
       {taskQuery.isError ? <InlineAlert message={getErrorMessage(taskQuery.error)} /> : null}
       {progressQuery.isError ? <InlineAlert message={getErrorMessage(progressQuery.error)} /> : null}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
+      <div className="grid gap-4">
         <UploadCard
           accept={isProblems ? PROBLEMS_ACCEPT : SUBMISSIONS_ACCEPT}
           currentFileName={isProblems ? task?.problem_file_name : task?.submission_file_name}
@@ -395,7 +385,7 @@ export function TaskUploadPage() {
           </Button>
         ) : currentStatus === "grading" || currentStatus === "graded" ? (
           <Button type="button" onClick={() => navigate(`/tasks/${safeTaskId}/results`)}>
-            {currentStatus === "graded" ? "查看结果" : "查看批改进度"}
+            {currentStatus === "graded" ? "复核结果" : "查看批改进度"}
             <ChevronRight className="h-4 w-4" />
           </Button>
         ) : (
@@ -456,7 +446,7 @@ function UploadCard({
         <h2 className="mt-3 text-base font-semibold">{isProblems ? "拖入题目文件" : "拖入作答文件或压缩包"}</h2>
         <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
           {isProblems
-            ? "支持上传 PDF、文档或文本格式的题目材料；图片题面与 OCR 识别仍是后续接入项。"
+            ? "支持上传 PDF、文档或文本格式的题目文件；图片题面与 OCR 识别仍是后续接入项。"
             : "支持上传按学生整理的文件、压缩包或表格索引；图片与手写 OCR 仍是后续接入项。"}
         </p>
         <input ref={fileInputRef} type="file" accept={accept} className="hidden" onChange={onFileInput} />
@@ -854,7 +844,7 @@ function InlineAlert({ message }: { message: string }) {
 }
 
 function formatStatus(status: string) {
-  return STATUS_LABELS[status as TaskStatus] ?? status;
+  return getTaskStatusMeta(status).label;
 }
 
 function problemLabel(problem: ProblemInfo) {

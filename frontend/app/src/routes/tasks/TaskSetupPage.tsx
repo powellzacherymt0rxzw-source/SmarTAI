@@ -15,11 +15,13 @@ import {
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useDeleteKBDoc, useExperts, useKBDocs, useTask, useUploadKBDoc } from "@/api/hooks";
+import { TaskStatusIndicator } from "@/components/tasks/TaskStatusIndicator";
 import { TaskStepper } from "@/components/tasks/TaskStepper";
 import { Button } from "@/components/ui/Button";
 import { Card, SectionHeader } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
 import { Textarea } from "@/components/ui/Input";
+import { formatTaskTime, getTaskNextStep, type TaskNextStep } from "@/lib/taskFlow";
 import {
   addPersonalKBDoc,
   getTaskPersonalKBSelection,
@@ -27,22 +29,11 @@ import {
   setTaskPersonalKBSelection,
   type PersonalKBDoc,
 } from "@/lib/personalKnowledgeBase";
-import type { ExpertConfig, KBDoc, Task, TaskStatus } from "@/types";
+import type { ExpertConfig, KBDoc, Task } from "@/types";
 
 const MAX_KB_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_KB_DOCS = 3;
 const KB_ACCEPT = ".pdf,.txt,.md,.markdown,.rst,text/plain,text/markdown,application/pdf";
-
-const statusMeta: Record<TaskStatus, { label: string; className: string }> = {
-  draft: { label: "草稿", className: "border-muted bg-muted text-muted-foreground" },
-  extracting_problems: { label: "题目识别中", className: "border-warning/40 bg-warning/10 text-warning" },
-  problems_ready: { label: "题目已就绪", className: "border-accent/40 bg-accent/10 text-accent" },
-  parsing_submissions: { label: "作答解析中", className: "border-warning/40 bg-warning/10 text-warning" },
-  submissions_ready: { label: "作答已就绪", className: "border-accent/40 bg-accent/10 text-accent" },
-  grading: { label: "批改中", className: "border-primary/40 bg-primary/10 text-primary" },
-  graded: { label: "已完成", className: "border-accent/40 bg-accent/10 text-accent" },
-  error: { label: "需要处理", className: "border-danger/40 bg-danger/10 text-danger" },
-};
 
 export function TaskSetupPage() {
   const { taskId = "" } = useParams();
@@ -65,8 +56,8 @@ export function TaskSetupPage() {
   const docs = kbQuery.data?.docs ?? [];
   const experts = expertsQuery.data ?? [];
   const enabledExperts = experts.filter((expert) => expert.enabled);
-  const nextStep = getNextStep(task, taskId);
-  const uploadDisabledReason = getUploadDisabledReason(taskId, docs, experts, expertsQuery.isSuccess);
+  const nextStep = getTaskNextStep(task, taskId);
+  const uploadDisabledReason = getUploadDisabledReason(taskId, docs, enabledExperts.length, expertsQuery.isSuccess);
 
   useEffect(() => {
     setPersonalDocs(listPersonalKBDocs());
@@ -170,8 +161,8 @@ export function TaskSetupPage() {
     <div className="grid gap-5">
       <TaskStepper current="setup" />
       <SectionHeader
-        title="批改配置"
-        description="先确认任务状态、BYOK 专家、本任务资料与补充规则，再进入上传题目。"
+        title="资料配置"
+        description="先把本次任务会用到的资料、BYOK 专家和补充规则放清楚；题目识别后再逐题补评分标准、标答与测试样例。"
       />
       <TaskSummaryCard
         task={task}
@@ -182,7 +173,7 @@ export function TaskSetupPage() {
         nextStep={nextStep}
         onRetry={() => void taskQuery.refetch()}
       />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+      <div className="grid gap-4">
         <Card className="grid gap-4">
           <div className="flex items-start gap-3">
             <span className="rounded-md bg-muted p-2 text-accent">
@@ -272,52 +263,50 @@ export function TaskSetupPage() {
           </div>
         </Card>
 
-        <div className="grid gap-4">
-          <PersonalKBPicker
-            docs={personalDocs}
-            selectedDocIds={selectedPersonalDocIds}
-            onToggle={handleTogglePersonalDoc}
+        <PersonalKBPicker
+          docs={personalDocs}
+          selectedDocIds={selectedPersonalDocIds}
+          onToggle={handleTogglePersonalDoc}
+        />
+
+        <Card className="grid gap-4">
+          <div className="flex items-start gap-3">
+            <span className="rounded-md bg-muted p-2 text-primary">
+              <BrainCircuit className="h-5 w-5" />
+            </span>
+            <div>
+              <h2 className="text-base font-semibold">BYOK 专家概览</h2>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                显示当前已注册专家的 provider、模型与启用状态，用于判断本次批改是否已经具备模型来源。
+              </p>
+            </div>
+          </div>
+          <ExpertsOverview
+            experts={experts}
+            enabledCount={enabledExperts.length}
+            isLoading={expertsQuery.isLoading}
+            isError={expertsQuery.isError}
+            error={expertsQuery.error}
+            onRetry={() => void expertsQuery.refetch()}
           />
+        </Card>
 
-          <Card className="grid gap-4">
-            <div className="flex items-start gap-3">
-              <span className="rounded-md bg-muted p-2 text-primary">
-                <BrainCircuit className="h-5 w-5" />
-              </span>
-              <div>
-                <h2 className="text-base font-semibold">BYOK 专家概览</h2>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  显示当前已注册专家的 provider、模型与启用状态，用于判断本次批改是否已经具备模型来源。
-                </p>
-              </div>
+        <Card className="grid gap-4">
+          <div className="flex items-start gap-3">
+            <span className="rounded-md bg-muted p-2 text-warning">
+              <SlidersHorizontal className="h-5 w-5" />
+            </span>
+            <div>
+              <h2 className="text-base font-semibold">批改注意事项</h2>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                可记录本次批改希望特别关注的规则；题干与评分标准仍在题目校对页逐题维护。
+              </p>
             </div>
-            <ExpertsOverview
-              experts={experts}
-              enabledCount={enabledExperts.length}
-              isLoading={expertsQuery.isLoading}
-              isError={expertsQuery.isError}
-              error={expertsQuery.error}
-              onRetry={() => void expertsQuery.refetch()}
-            />
-          </Card>
-
-          <Card className="grid gap-4">
-            <div className="flex items-start gap-3">
-              <span className="rounded-md bg-muted p-2 text-warning">
-                <SlidersHorizontal className="h-5 w-5" />
-              </span>
-              <div>
-                <h2 className="text-base font-semibold">批改注意事项</h2>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  可记录本次批改希望特别关注的规则；题干与评分标准仍在题目校对页逐题维护。
-                </p>
-              </div>
-            </div>
-            <Field label="教师补充规则">
-              <Textarea placeholder="例：请重点检查推导步骤；忽略书写规范；某概念允许同义表达。" />
-            </Field>
-          </Card>
-        </div>
+          </div>
+          <Field label="教师补充规则">
+            <Textarea placeholder="例：请重点检查推导步骤；忽略书写规范；某概念允许同义表达。" />
+          </Field>
+        </Card>
       </div>
       <div className="flex flex-wrap justify-end gap-2">
         <Link to={nextStep.to}>
@@ -345,7 +334,7 @@ function TaskSummaryCard({
   isLoading: boolean;
   isError: boolean;
   error: unknown;
-  nextStep: NextStep;
+  nextStep: TaskNextStep;
   onRetry: () => void;
 }) {
   if (isLoading) {
@@ -378,7 +367,7 @@ function TaskSummaryCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="break-words text-lg font-semibold">{task?.name ?? "未命名任务"}</h2>
-            {task ? <StatusBadge status={task.status} /> : null}
+            {task ? <TaskStatusIndicator status={task.status} variant="chip" /> : null}
           </div>
           <p className="mt-1 break-all text-xs text-muted-foreground">任务 ID：{taskId || "-"}</p>
         </div>
@@ -393,7 +382,7 @@ function TaskSummaryCard({
         <TaskMetric label="题目" value={String(task?.problem_count ?? 0)} />
         <TaskMetric label="学生作答" value={String(task?.student_count ?? 0)} />
         <TaskMetric label="本任务资料" value={String(task?.kb_doc_count ?? 0)} />
-        <TaskMetric label="更新时间" value={formatTimestamp(task?.updated_at)} />
+        <TaskMetric label="更新时间" value={formatTaskTime(task?.updated_at)} />
       </div>
       <div className="rounded-md border bg-background p-3">
         <div className="text-xs font-medium text-muted-foreground">下一步</div>
@@ -666,15 +655,6 @@ function ExpertsOverview({
   );
 }
 
-function StatusBadge({ status }: { status: TaskStatus }) {
-  const meta = statusMeta[status];
-  return (
-    <span className={`rounded-full border px-2 py-1 text-xs font-medium ${meta.className}`}>
-      {meta.label}
-    </span>
-  );
-}
-
 function TaskMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border bg-background p-3">
@@ -684,91 +664,10 @@ function TaskMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-interface NextStep {
-  title: string;
-  description: string;
-  buttonLabel: string;
-  to: string;
-}
-
-function getNextStep(task: Task | undefined, taskId: string): NextStep {
-  if (!task || !taskId) {
-    return {
-      title: "读取任务后继续",
-      description: "任务信息读取完成后，会根据当前状态跳到对应环节。",
-      buttonLabel: "前往任务列表",
-      to: "/history",
-    };
-  }
-
-  const problemUpload = `/tasks/${taskId}/upload/problems`;
-  const submissionUpload = `/tasks/${taskId}/upload/submissions`;
-  const results = `/tasks/${taskId}/results`;
-
-  switch (task.status) {
-    case "draft":
-      return {
-        title: "上传题目",
-        description: "当前任务仍是草稿，下一步上传题目文件并进入题目校对。",
-        buttonLabel: "继续上传题目",
-        to: problemUpload,
-      };
-    case "extracting_problems":
-      return {
-        title: "等待题目识别",
-        description: "题目正在处理，完成后可以继续上传学生作答。",
-        buttonLabel: "查看题目上传",
-        to: problemUpload,
-      };
-    case "problems_ready":
-      return {
-        title: "上传学生作答",
-        description: "题目已就绪，下一步上传学生作答并校对识别结果。",
-        buttonLabel: "继续上传作答",
-        to: submissionUpload,
-      };
-    case "parsing_submissions":
-      return {
-        title: "等待作答解析",
-        description: "学生作答正在解析，完成后可以进入批改进度页。",
-        buttonLabel: "查看作答上传",
-        to: submissionUpload,
-      };
-    case "submissions_ready":
-      return {
-        title: "进入批改",
-        description: "题目与学生作答都已就绪，可以进入批改页启动或查看任务。",
-        buttonLabel: "进入批改",
-        to: results,
-      };
-    case "grading":
-      return {
-        title: "查看批改进度",
-        description: "任务正在批改中，可以在结果页查看进度与后续结果。",
-        buttonLabel: "查看进度",
-        to: results,
-      };
-    case "graded":
-      return {
-        title: "查看批改结果",
-        description: "任务已完成批改，可以查看总览、按题分析和学生详情。",
-        buttonLabel: "查看结果",
-        to: results,
-      };
-    case "error":
-      return {
-        title: "处理任务错误",
-        description: "任务当前需要处理。可回到最近的上传环节检查文件或重新上传。",
-        buttonLabel: "返回上传环节",
-        to: task.problem_count > 0 ? submissionUpload : problemUpload,
-      };
-  }
-}
-
 function getUploadDisabledReason(
   taskId: string,
   docs: KBDoc[],
-  experts: ExpertConfig[],
+  enabledExpertCount: number,
   expertsLoaded: boolean,
 ) {
   if (!taskId) {
@@ -777,7 +676,7 @@ function getUploadDisabledReason(
   if (docs.length >= MAX_KB_DOCS) {
     return "本任务资料已达到 3 份上限。";
   }
-  if (expertsLoaded && experts.length === 0) {
+  if (expertsLoaded && enabledExpertCount === 0) {
     return "需要先配置 BYOK 专家，才能为本任务资料建立索引。";
   }
   return null;

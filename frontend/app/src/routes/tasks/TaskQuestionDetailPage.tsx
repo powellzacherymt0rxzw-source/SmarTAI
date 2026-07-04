@@ -36,7 +36,7 @@ export function TaskQuestionDetailPage() {
   const commonMistakes = breakdownQuery.data?.common_mistakes_md?.trim() ?? "";
 
   if (!taskId) {
-    return <EmptyState title="缺少任务 ID" description="请从教师工作台或任务列表进入题目详情。" />;
+    return <EmptyState title="缺少任务 ID" description="请从任务总览或历史任务进入题目详情。" />;
   }
 
   return (

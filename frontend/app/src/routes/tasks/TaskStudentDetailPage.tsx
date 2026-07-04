@@ -31,7 +31,7 @@ export function TaskStudentDetailPage() {
   const firstQuestionId = student?.corrections[0]?.q_id ?? model.questions[0]?.id ?? null;
 
   if (!taskId) {
-    return <EmptyState title="缺少任务 ID" description="请从教师工作台或任务列表进入学生详情。" />;
+    return <EmptyState title="缺少任务 ID" description="请从任务总览或历史任务进入学生详情。" />;
   }
 
   return (

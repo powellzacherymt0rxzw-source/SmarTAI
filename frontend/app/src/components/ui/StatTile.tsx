@@ -13,10 +13,10 @@ export function StatTile({
   tone?: "primary" | "accent" | "warning" | "danger";
 }) {
   const toneClass = {
-    primary: "bg-primary text-primary-foreground",
-    accent: "bg-accent text-white",
-    warning: "bg-warning text-white",
-    danger: "bg-danger text-white",
+    primary: "border border-primary/30 bg-primary/10 text-primary",
+    accent: "border border-accent/30 bg-accent/10 text-accent",
+    warning: "border border-warning/30 bg-warning/10 text-warning",
+    danger: "border border-danger/30 bg-danger/10 text-danger",
   }[tone];
 
   return (
@@ -31,4 +31,3 @@ export function StatTile({
     </div>
   );
 }
-

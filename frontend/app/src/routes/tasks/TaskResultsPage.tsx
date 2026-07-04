@@ -41,6 +41,7 @@ import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { Textarea } from "@/components/ui/Input";
 import { StatTile } from "@/components/ui/StatTile";
 import { cn } from "@/lib/cn";
+import { getTaskStatusMeta } from "@/lib/taskFlow";
 import type { ChartAnalyticsResult, ChartTrace, ChartTraceType, Correction, TaskStatus } from "@/types";
 
 type PlotDatum = {
@@ -53,19 +54,6 @@ type PlotDatum = {
 };
 
 const ALLOWED_CHART_TRACE_TYPES = new Set<ChartTraceType>(["bar", "scatter", "pie", "histogram", "box"]);
-
-const STATUS_LABELS: Partial<Record<TaskStatus | "completed" | "not_found", string>> = {
-  draft: "草稿",
-  extracting_problems: "题目识别中",
-  problems_ready: "题目已就绪",
-  parsing_submissions: "作答解析中",
-  submissions_ready: "作答已就绪",
-  grading: "批改中",
-  graded: "已完成",
-  completed: "已完成",
-  error: "出错",
-  not_found: "结果记录不可用",
-};
 
 export function TaskResultsPage() {
   const { taskId } = useParams();
@@ -88,7 +76,7 @@ export function TaskResultsPage() {
   const firstQuestionId = model.questions[0]?.id ?? null;
 
   if (!taskId) {
-    return <EmptyState title="缺少任务 ID" description="请从教师工作台或任务列表进入结果页。" />;
+    return <EmptyState title="缺少任务 ID" description="请从任务总览或历史任务进入结果页。" />;
   }
 
   return (
@@ -144,7 +132,7 @@ function ResultsContent({
     return (
       <EmptyState
         title="结果尚未生成"
-        description={`当前任务状态：${STATUS_LABELS[status ?? "draft"] ?? status ?? "未知"}。批改完成后这里会显示真实结果。`}
+        description={`当前任务阶段：${getTaskStatusMeta(status ?? "draft").label}。批改完成后这里会显示真实结果。`}
         action={
           <Link to={`/tasks/${taskId}/upload/submissions`}>
             <Button type="button" variant="secondary">

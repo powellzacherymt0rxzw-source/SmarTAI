@@ -3,7 +3,7 @@ export type Locale = "zh-CN" | "en-US";
 export const messages = {
   "zh-CN": {
     appName: "SmarTAI",
-    dashboard: "总览",
+    dashboard: "任务总览",
     history: "历史",
     newTask: "新建任务",
     knowledgeBase: "知识库",

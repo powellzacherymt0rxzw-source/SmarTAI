@@ -12,32 +12,32 @@ const steps: Array<{
 }> = [
   {
     key: "setup",
-    label: "配置",
-    description: "专家、规则、本任务资料",
+    label: "资料配置",
+    description: "专家与任务资料",
     href: (taskId) => `/tasks/${taskId}/setup`,
   },
   {
     key: "problems",
-    label: "题目",
-    description: "上传与校对题干",
+    label: "题目准备",
+    description: "添加与校对题目",
     href: (taskId) => `/tasks/${taskId}/upload/problems`,
   },
   {
     key: "submissions",
-    label: "作答",
-    description: "上传与校对识别结果",
+    label: "作答校对",
+    description: "添加与校对作答",
     href: (taskId) => `/tasks/${taskId}/upload/submissions`,
   },
   {
     key: "grading",
-    label: "批改",
-    description: "启动后查看进度",
+    label: "批改确认",
+    description: "策略与进度",
     href: (taskId) => `/tasks/${taskId}/results`,
   },
   {
     key: "results",
-    label: "结果",
-    description: "分析、图表与详情",
+    label: "复核分析",
+    description: "复核后分析导出",
     href: (taskId) => `/tasks/${taskId}/results`,
   },
 ];
@@ -61,9 +61,9 @@ export function TaskStepper({ current }: { current: StepKey }) {
               <Link
                 to={step.href(taskId)}
                 className={cn(
-                  "flex min-w-44 items-center gap-3 rounded-md px-3 py-2 text-left transition",
+                  "flex min-w-44 items-center gap-3 rounded-md border border-transparent px-3 py-2 text-left transition",
                   isActive
-                    ? "bg-primary text-primary-foreground"
+                    ? "border-primary/30 bg-primary/10 text-primary"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
                 aria-current={isActive ? "step" : undefined}
@@ -72,7 +72,7 @@ export function TaskStepper({ current }: { current: StepKey }) {
                   className={cn(
                     "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border",
                     isActive
-                      ? "border-primary-foreground/70"
+                      ? "border-primary/60"
                       : isComplete
                         ? "border-accent text-accent"
                         : "border-border",
@@ -85,7 +85,7 @@ export function TaskStepper({ current }: { current: StepKey }) {
                   <span
                     className={cn(
                       "text-xs leading-4",
-                      isActive ? "text-primary-foreground/80" : "text-muted-foreground",
+                      isActive ? "text-primary/80" : "text-muted-foreground",
                     )}
                   >
                     {step.description}
