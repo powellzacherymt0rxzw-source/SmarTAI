@@ -4,13 +4,9 @@
 
 ## 在线 Demo
 
-🔗 **当前主版本在线体验**：TODO（部署后填入）
+🔗 **当前主版本在线体验**：[https://smartai-course.pages.dev](https://smartai-course.pages.dev)
 
-🔗 **测试账号**：TODO（部署后填入）
-
-🔗 **早期概念验证版本（SmarTAI-Gemini）**：[https://smartai-gemini3.streamlit.app](https://smartai-gemini3.streamlit.app)
-
-> 主版本线上部署仍在排期中，目前最便捷的体验方式是按照下文「本地运行（开发与测试）」一节自行启动；早期概念验证版本可作为评审专家了解项目最初形态的便捷入口。
+🔗 **测试账号**：等待邀请发放
 
 ---
 
@@ -102,7 +98,7 @@ VITE_SMARTAI_BACKEND_URL=http://localhost:8000
 连 Render 公网后端时改为：
 
 ```text
-VITE_SMARTAI_BACKEND_URL=https://<your-backend>.onrender.com
+VITE_SMARTAI_BACKEND_URL=https://smartai-backend-z2zu.onrender.com
 ```
 
 `frontend/app/.env` 会被 git 忽略，只影响本机；`VITE_*` 变量由 Vite 在启动
@@ -160,7 +156,7 @@ React 静态前端的公网构建配置：
 Root directory: frontend/app
 Build command: npm ci && npm run build
 Build output directory: dist
-VITE_SMARTAI_BACKEND_URL=https://<your-backend>.onrender.com
+VITE_SMARTAI_BACKEND_URL=https://smartai-backend-z2zu.onrender.com
 ```
 
 旧 Reflex 前端仍需要自己的 `SMARTAI_BACKEND_URL` 和 `REFLEX_API_URL`；React
@@ -170,7 +166,7 @@ VITE_SMARTAI_BACKEND_URL=https://<your-backend>.onrender.com
 以同时保留旧 Reflex 前端、本地开发地址和新的 React 公网地址，例如：
 
 ```text
-FRONTEND_URLS=https://smartai-course.pages.dev,https://smartai.pages.dev,https://smartai-l6zw.onrender.com,https://smartai-frontend-94ya.onrender.com,http://localhost:3000,http://localhost:8001,http://localhost:5173,http://127.0.0.1:5173
+FRONTEND_URLS=https://smartai-course.pages.dev,https://smartai-l6zw.onrender.com,https://smartai-frontend-94ya.onrender.com,http://localhost:3000,http://localhost:8001,http://localhost:5173,http://127.0.0.1:5173
 ```
 
 注意每个 URL 之间只用英文逗号，不要在逗号后加空格，也不要带结尾 `/`。
