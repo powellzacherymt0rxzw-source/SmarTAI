@@ -3,6 +3,7 @@ import type { TaskLite, TaskStatus } from "@/types";
 export type TaskDisplayStatus = TaskStatus | "completed" | "not_found" | "review_confirmed" | "generating_analysis" | "finalized";
 
 export type TaskStatusTone = "neutral" | "primary" | "accent" | "warning" | "danger";
+export type TaskWorkflowStepKey = "setup" | "problems" | "submissions" | "grading" | "results";
 
 export interface TaskStatusMeta {
   label: string;
@@ -114,6 +115,46 @@ export const TASK_STATUS_META: Record<TaskDisplayStatus, TaskStatusMeta> = {
   },
 };
 
+export const TASK_WORKFLOW_STEPS: Array<{
+  key: TaskWorkflowStepKey;
+  label: string;
+  description: string;
+  href: (taskId: string) => string;
+}> = [
+  {
+    key: "setup",
+    label: "资料配置",
+    description: "专家与任务资料",
+    href: (taskId) => `/tasks/${taskId}/setup`,
+  },
+  {
+    key: "problems",
+    label: "题目准备",
+    description: "添加与校对题目",
+    href: (taskId) => `/tasks/${taskId}/upload/problems`,
+  },
+  {
+    key: "submissions",
+    label: "作答校对",
+    description: "添加与校对作答",
+    href: (taskId) => `/tasks/${taskId}/upload/submissions`,
+  },
+  {
+    key: "grading",
+    label: "批改确认",
+    description: "策略与进度",
+    href: (taskId) => `/tasks/${taskId}/results`,
+  },
+  {
+    key: "results",
+    label: "复核分析",
+    description: "复核后分析导出",
+    href: (taskId) => `/tasks/${taskId}/results`,
+  },
+];
+
+const STEP_ORDER = TASK_WORKFLOW_STEPS.map((step) => step.key);
+
 export function getTaskStatusMeta(status?: string | null): TaskStatusMeta {
   if (!status) {
     return DEFAULT_STATUS_META;
@@ -127,6 +168,109 @@ export function getTaskStatusMeta(status?: string | null): TaskStatusMeta {
 
 export function isTaskProcessing(status?: string | null): boolean {
   return getTaskStatusMeta(status).isProcessing;
+}
+
+export function getTaskCurrentStep(status?: string | null): TaskWorkflowStepKey {
+  switch (status) {
+    case "draft":
+      return "setup";
+    case "extracting_problems":
+    case "problems_ready":
+      return "problems";
+    case "parsing_submissions":
+    case "submissions_ready":
+      return "submissions";
+    case "grading":
+      return "grading";
+    case "graded":
+    case "completed":
+    case "review_confirmed":
+    case "generating_analysis":
+    case "finalized":
+      return "results";
+    case "error":
+    default:
+      return "setup";
+  }
+}
+
+export function getTaskStepIndex(step: TaskWorkflowStepKey): number {
+  return STEP_ORDER.indexOf(step);
+}
+
+export function getTaskStepHref(step: TaskWorkflowStepKey, taskId: string): string {
+  return TASK_WORKFLOW_STEPS.find((item) => item.key === step)?.href(taskId) ?? `/tasks/${taskId}/setup`;
+}
+
+export function isTaskStepAvailable(status: TaskStatus | string | undefined, step: TaskWorkflowStepKey): boolean {
+  if (!status || status === "error") {
+    return step === "setup";
+  }
+
+  switch (step) {
+    case "setup":
+      return true;
+    case "problems":
+      return true;
+    case "submissions":
+      return [
+        "problems_ready",
+        "parsing_submissions",
+        "submissions_ready",
+        "grading",
+        "graded",
+        "completed",
+        "review_confirmed",
+        "generating_analysis",
+        "finalized",
+      ].includes(status);
+    case "grading":
+      return ["submissions_ready", "grading", "graded", "completed", "review_confirmed", "generating_analysis", "finalized"].includes(status);
+    case "results":
+      return ["grading", "graded", "completed", "review_confirmed", "generating_analysis", "finalized"].includes(status);
+  }
+}
+
+export function isTaskStepComplete(status: TaskStatus | string | undefined, step: TaskWorkflowStepKey): boolean {
+  if (!status) {
+    return false;
+  }
+
+  const currentStep = getTaskCurrentStep(status);
+  return getTaskStepIndex(step) < getTaskStepIndex(currentStep);
+}
+
+export interface TaskStepGateResult {
+  available: boolean;
+  currentStep: TaskWorkflowStepKey;
+  currentStepLabel: string;
+  currentStepHref: string;
+  requestedStepLabel: string;
+  title: string;
+  description: string;
+  actionLabel: string;
+}
+
+export function getTaskStepGate(task: TaskLite | undefined, requestedStep: TaskWorkflowStepKey): TaskStepGateResult {
+  const taskId = task?.task_id ?? "";
+  const status = task?.status;
+  const currentStep = getTaskCurrentStep(status);
+  const currentStepConfig = TASK_WORKFLOW_STEPS.find((step) => step.key === currentStep) ?? TASK_WORKFLOW_STEPS[0];
+  const requestedStepConfig = TASK_WORKFLOW_STEPS.find((step) => step.key === requestedStep) ?? TASK_WORKFLOW_STEPS[0];
+  const available = Boolean(task && isTaskStepAvailable(status, requestedStep));
+
+  return {
+    available,
+    currentStep,
+    currentStepLabel: currentStepConfig.label,
+    currentStepHref: taskId ? currentStepConfig.href(taskId) : "/history",
+    requestedStepLabel: requestedStepConfig.label,
+    title: `还不能进入${requestedStepConfig.label}`,
+    description: task
+      ? `当前任务处于「${getTaskStatusMeta(status).label}」，请先完成「${currentStepConfig.label}」后再继续。`
+      : "任务信息尚未读取完成，请稍后刷新或从历史任务重新进入。",
+    actionLabel: `回到${currentStepConfig.label}`,
+  };
 }
 
 export function getTaskDestination(task: Pick<TaskLite, "task_id" | "status">): string {

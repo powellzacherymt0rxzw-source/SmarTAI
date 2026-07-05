@@ -20,7 +20,9 @@ import { TaskStepper } from "@/components/tasks/TaskStepper";
 import { Button } from "@/components/ui/Button";
 import { Card, SectionHeader } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
+import { InlineNotice } from "@/components/ui/InlineNotice";
 import { Textarea } from "@/components/ui/Input";
+import { getModelReadiness } from "@/lib/taskActionGuards";
 import { formatTaskTime, getTaskNextStep, type TaskNextStep } from "@/lib/taskFlow";
 import {
   addPersonalKBDoc,
@@ -56,8 +58,14 @@ export function TaskSetupPage() {
   const docs = kbQuery.data?.docs ?? [];
   const experts = expertsQuery.data ?? [];
   const enabledExperts = experts.filter((expert) => expert.enabled);
+  const modelReadiness = getModelReadiness({
+    experts,
+    isLoading: expertsQuery.isLoading,
+    isError: expertsQuery.isError,
+  });
   const nextStep = getTaskNextStep(task, taskId);
   const uploadDisabledReason = getUploadDisabledReason(taskId, docs, enabledExperts.length, expertsQuery.isSuccess);
+  const nextStepDisabledReason = task?.status === "draft" ? modelReadiness.disabledReason : null;
 
   useEffect(() => {
     setPersonalDocs(listPersonalKBDocs());
@@ -159,7 +167,7 @@ export function TaskSetupPage() {
 
   return (
     <div className="grid gap-5">
-      <TaskStepper current="setup" />
+      <TaskStepper current="setup" task={task} />
       <SectionHeader
         title="资料配置"
         description="先把本次任务会用到的资料、BYOK 专家和补充规则放清楚；题目识别后再逐题补评分标准、标答与测试样例。"
@@ -171,8 +179,24 @@ export function TaskSetupPage() {
         isError={taskQuery.isError}
         error={taskQuery.error}
         nextStep={nextStep}
+        nextStepDisabledReason={nextStepDisabledReason}
         onRetry={() => void taskQuery.refetch()}
       />
+      {nextStepDisabledReason ? (
+        <InlineNotice
+          tone="warning"
+          title="需要先配置 BYOK 专家"
+          action={
+            <Link to="/experts">
+              <Button type="button" variant="secondary">
+                前往 BYOK
+              </Button>
+            </Link>
+          }
+        >
+          {nextStepDisabledReason} 配好后再添加题目文件，识别和批改才有可用模型来源。
+        </InlineNotice>
+      ) : null}
       <div className="grid gap-4">
         <Card className="grid gap-4">
           <div className="flex items-start gap-3">
@@ -309,12 +333,19 @@ export function TaskSetupPage() {
         </Card>
       </div>
       <div className="flex flex-wrap justify-end gap-2">
-        <Link to={nextStep.to}>
-          <Button type="button">
+        {nextStepDisabledReason ? (
+          <Button type="button" disabled>
             {nextStep.buttonLabel}
             <ArrowRight className="h-4 w-4" />
           </Button>
-        </Link>
+        ) : (
+          <Link to={nextStep.to}>
+            <Button type="button">
+              {nextStep.buttonLabel}
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
+        )}
       </div>
     </div>
   );
@@ -327,6 +358,7 @@ function TaskSummaryCard({
   isError,
   error,
   nextStep,
+  nextStepDisabledReason,
   onRetry,
 }: {
   task?: Task;
@@ -335,6 +367,7 @@ function TaskSummaryCard({
   isError: boolean;
   error: unknown;
   nextStep: TaskNextStep;
+  nextStepDisabledReason?: string | null;
   onRetry: () => void;
 }) {
   if (isLoading) {
@@ -371,12 +404,19 @@ function TaskSummaryCard({
           </div>
           <p className="mt-1 break-all text-xs text-muted-foreground">任务 ID：{taskId || "-"}</p>
         </div>
-        <Link to={nextStep.to} className="w-fit">
-          <Button type="button" variant="secondary">
+        {nextStepDisabledReason ? (
+          <Button type="button" variant="secondary" className="w-fit" disabled>
             {nextStep.buttonLabel}
             <ArrowRight className="h-4 w-4" />
           </Button>
-        </Link>
+        ) : (
+          <Link to={nextStep.to} className="w-fit">
+            <Button type="button" variant="secondary">
+              {nextStep.buttonLabel}
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </Link>
+        )}
       </div>
       <div className="grid gap-2 md:grid-cols-4">
         <TaskMetric label="题目" value={String(task?.problem_count ?? 0)} />

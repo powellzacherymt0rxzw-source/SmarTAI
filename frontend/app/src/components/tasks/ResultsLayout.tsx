@@ -126,7 +126,7 @@ export function ResultsLayout({
 
   return (
     <div className="grid gap-5">
-      <TaskStepper current="results" />
+      <TaskStepper current="results" task={undefined} />
       <SectionHeader title={title} description={description} />
       <nav aria-label="结果分析视图" className="rounded-lg border bg-card p-2">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">

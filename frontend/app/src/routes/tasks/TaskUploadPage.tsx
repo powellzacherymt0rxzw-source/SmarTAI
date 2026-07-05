@@ -16,6 +16,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
+import { useExperts } from "@/api/hooks";
 import {
   useExtractProblems,
   useParseSubmissions,
@@ -24,16 +25,26 @@ import {
   useUpdateProblem,
   useUpdateStudentAnswer,
 } from "@/api/hooks/tasks";
+import { TaskProgressFocus } from "@/components/tasks/TaskProgressFocus";
+import { TaskStageGate } from "@/components/tasks/TaskStageGate";
 import { TaskStepper } from "@/components/tasks/TaskStepper";
 import { Button } from "@/components/ui/Button";
 import { Card, SectionHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Field } from "@/components/ui/Field";
 import { Textarea } from "@/components/ui/Input";
+import { InlineNotice } from "@/components/ui/InlineNotice";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
+import { WorkflowSection } from "@/components/ui/WorkflowSection";
 import { useTaskProgress } from "@/hooks/useTaskProgress";
 import { cn } from "@/lib/cn";
-import { getTaskStatusMeta, isTaskProcessing } from "@/lib/taskFlow";
+import {
+  classifyRecoverableError,
+  getGradingGuard,
+  getModelReadiness,
+  getUploadGuard,
+} from "@/lib/taskActionGuards";
+import { isTaskProcessing } from "@/lib/taskFlow";
 import type { ProblemInfo, StudentAnswerInfo, StudentSubmission, TaskStatus } from "@/types";
 
 const ACTIVE_STATUS = new Set<TaskStatus>(["extracting_problems", "parsing_submissions", "grading"]);
@@ -54,6 +65,7 @@ export function TaskUploadPage() {
   const updateProblem = useUpdateProblem();
   const updateStudentAnswer = useUpdateStudentAnswer();
   const startGrading = useStartGrading();
+  const expertsQuery = useExperts();
 
   const [uploadPercent, setUploadPercent] = useState(0);
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
@@ -69,6 +81,11 @@ export function TaskUploadPage() {
   const currentStatus = (progressQuery.data?.status ?? task?.status ?? "draft") as TaskStatus;
   const isProcessing = progressQuery.isActive || isTaskProcessing(currentStatus);
   const isUploading = extractProblems.isPending || parseSubmissions.isPending;
+  const modelReadiness = getModelReadiness({
+    experts: expertsQuery.data,
+    isLoading: expertsQuery.isLoading,
+    isError: expertsQuery.isError,
+  });
 
   const problems = useMemo(
     () => Object.values(task?.problem_data ?? {}).sort(compareProblems),
@@ -87,6 +104,13 @@ export function TaskUploadPage() {
     () => students.find((student) => student.stu_id === selectedStudentId) ?? students[0] ?? null,
     [selectedStudentId, students],
   );
+  const uploadGuard = getUploadGuard({
+    kind: isProblems ? "problems" : "submissions",
+    task,
+    isUploading,
+    isProcessing,
+    modelReadiness,
+  });
 
   useEffect(() => {
     const firstStudentId = students[0]?.stu_id ?? null;
@@ -138,6 +162,18 @@ export function TaskUploadPage() {
       return;
     }
 
+    if (uploadGuard.disabled) {
+      toast.error(uploadGuard.reason ?? "当前无法上传。");
+      return;
+    }
+
+    if (uploadGuard.confirmMessage) {
+      const confirmed = window.confirm(uploadGuard.confirmMessage);
+      if (!confirmed) {
+        return;
+      }
+    }
+
     const label = isProblems ? "题目文件" : "学生作答";
     setUploadPercent(0);
     setUploadFileName(file.name);
@@ -160,7 +196,8 @@ export function TaskUploadPage() {
       void progressQuery.refetch();
       void taskQuery.refetch();
     } catch (error) {
-      toast.error(`${label}上传失败`, { description: getErrorMessage(error) });
+      const info = classifyRecoverableError(error);
+      toast.error(`${label}上传失败`, { description: info.description });
     }
   };
 
@@ -257,7 +294,8 @@ export function TaskUploadPage() {
       void progressQuery.refetch();
       void taskQuery.refetch();
     } catch (error) {
-      toast.error("启动批改失败", { description: getErrorMessage(error) });
+      const info = classifyRecoverableError(error);
+      toast.error(info.title, { description: info.description });
     }
   };
 
@@ -282,12 +320,17 @@ export function TaskUploadPage() {
     currentStatus === "submissions_ready" ||
     currentStatus === "grading" ||
     currentStatus === "graded";
-  const canStartGrading =
-    students.length > 0 && currentStatus !== "grading" && currentStatus !== "graded" && !startGrading.isPending;
+  const gradingGuard = getGradingGuard({
+    status: currentStatus,
+    problemCount: expectedProblemCount,
+    studentCount: expectedStudentCount,
+    isPending: startGrading.isPending,
+    modelReadiness,
+  });
 
   return (
     <div className="grid gap-5">
-      <TaskStepper current={isProblems ? "problems" : "submissions"} />
+      <TaskStepper current={isProblems ? "problems" : "submissions"} task={task} />
       <SectionHeader
         title={isProblems ? "上传题目" : "上传学生作答"}
         description={
@@ -314,87 +357,150 @@ export function TaskUploadPage() {
       {taskQuery.isError ? <InlineAlert message={getErrorMessage(taskQuery.error)} /> : null}
       {progressQuery.isError ? <InlineAlert message={getErrorMessage(progressQuery.error)} /> : null}
 
-      <div className="grid gap-4">
-        <UploadCard
-          accept={isProblems ? PROBLEMS_ACCEPT : SUBMISSIONS_ACCEPT}
-          currentFileName={isProblems ? task?.problem_file_name : task?.submission_file_name}
-          isDragging={isDragging}
-          isProblems={isProblems}
-          isUploading={isUploading}
-          uploadFileName={uploadFileName}
-          uploadPercent={uploadPercent}
-          onDragChange={setIsDragging}
-          onDrop={handleDrop}
-          onFileInput={handleFileInput}
-        />
-        <StatusCard
-          currentStatus={currentStatus}
-          isLoading={taskQuery.isLoading}
-          isProcessing={isProcessing}
-          latestMessage={progressQuery.latestMessage?.message ?? null}
-          percent={progressQuery.percent}
-          problemCount={expectedProblemCount}
-          progressError={progressQuery.progress?.error_detail ?? task?.error ?? null}
-          studentCount={expectedStudentCount}
-        />
-      </div>
-
-      {isProblems ? (
-        <ProblemsReview
-          editingProblemId={editingProblemId}
-          isSaving={updateProblem.isPending}
-          problemDraft={problemDraft}
-          problems={problems}
-          expectedCount={expectedProblemCount}
-          onCancel={() => setEditingProblemId(null)}
-          onDraftChange={setProblemDraft}
-          onEdit={startProblemEdit}
-          onSave={(problem) => void saveProblem(problem)}
-        />
-      ) : (
-        <SubmissionsReview
-          answerDraft={answerDraft}
-          editingAnswerKey={editingAnswerKey}
-          isSaving={updateStudentAnswer.isPending}
-          selectedStudent={selectedStudent}
-          selectedStudentId={selectedStudent?.stu_id ?? null}
-          students={students}
-          expectedCount={expectedStudentCount}
-          onAnswerDraftChange={setAnswerDraft}
-          onCancel={() => setEditingAnswerKey(null)}
-          onEdit={startAnswerEdit}
-          onSave={(student, answer) => void saveAnswer(student, answer)}
-          onSelectStudent={setSelectedStudentId}
-        />
-      )}
-
-      <div className="flex flex-wrap justify-end gap-2">
-        <Link to={isProblems ? `/tasks/${safeTaskId}/setup` : `/tasks/${safeTaskId}/upload/problems`}>
-          <Button type="button" variant="secondary">
-            {isProblems ? "返回配置" : "返回题目"}
-          </Button>
-        </Link>
-        {isProblems ? (
-          <Button
-            type="button"
-            disabled={!canContinueToSubmissions}
-            onClick={() => navigate(`/tasks/${safeTaskId}/upload/submissions`)}
+      <TaskStageGate
+        task={task}
+        current={isProblems ? "problems" : "submissions"}
+        isLoading={taskQuery.isLoading}
+        isError={taskQuery.isError}
+        errorMessage={taskQuery.error ? getErrorMessage(taskQuery.error) : null}
+        onRetry={() => void taskQuery.refetch()}
+      >
+        <Card className="grid gap-5">
+          <WorkflowSection
+            title={isProblems ? "添加题目文件" : "添加学生作答"}
+            description={
+              isProblems
+                ? "上传后会自动进入识别状态，完成后在下方校对题干和评分标准。"
+                : "上传后会按学生解析作答，完成后在下方逐个学生校对。"
+            }
           >
-            继续上传作答
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        ) : currentStatus === "grading" || currentStatus === "graded" ? (
-          <Button type="button" onClick={() => navigate(`/tasks/${safeTaskId}/results`)}>
-            {currentStatus === "graded" ? "复核结果" : "查看批改进度"}
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+            {uploadGuard.reason ? (
+              <InlineNotice
+                tone={modelReadiness.disabledReason ? "warning" : "neutral"}
+                title={modelReadiness.disabledReason ? "需要先配置 BYOK 专家" : "当前暂不能上传"}
+                action={
+                  modelReadiness.disabledReason ? (
+                    <Link to="/experts">
+                      <Button type="button" variant="secondary">
+                        前往 BYOK
+                      </Button>
+                    </Link>
+                  ) : null
+                }
+              >
+                {uploadGuard.reason}
+              </InlineNotice>
+            ) : uploadGuard.confirmMessage ? (
+              <InlineNotice
+                tone={uploadGuard.suggestNewTask ? "warning" : "info"}
+                title={uploadGuard.confirmTitle ?? "上传前确认"}
+                action={
+                  uploadGuard.suggestNewTask ? (
+                    <Link to="/tasks/new">
+                      <Button type="button" variant="secondary">
+                        新建任务
+                      </Button>
+                    </Link>
+                  ) : null
+                }
+              >
+                {uploadGuard.confirmMessage}
+              </InlineNotice>
+            ) : null}
+            <UploadCard
+              accept={isProblems ? PROBLEMS_ACCEPT : SUBMISSIONS_ACCEPT}
+              currentFileName={isProblems ? task?.problem_file_name : task?.submission_file_name}
+              disabled={uploadGuard.disabled}
+              disabledReason={uploadGuard.reason}
+              isDragging={isDragging}
+              isProblems={isProblems}
+              isUploading={isUploading}
+              uploadFileName={uploadFileName}
+              uploadPercent={uploadPercent}
+              onDragChange={setIsDragging}
+              onDrop={handleDrop}
+              onFileInput={handleFileInput}
+            />
+          </WorkflowSection>
+          <WorkflowSection title="识别状态" description="上传、识别、同步详情都会在这里显示；离开页面后回来也会继续跟进当前任务。">
+            <TaskProgressFocus
+              status={currentStatus}
+              progress={progressQuery.progress}
+              isLoading={taskQuery.isLoading}
+              isProcessing={isProcessing}
+              percent={progressQuery.percent}
+              problemCount={expectedProblemCount}
+              error={progressQuery.progress?.error_detail ?? task?.error ?? null}
+              studentCount={expectedStudentCount}
+              onRefresh={() => {
+                lastDetailRefetchKeyRef.current = null;
+                void taskQuery.refetch();
+                void progressQuery.refetch();
+              }}
+            />
+          </WorkflowSection>
+        </Card>
+
+        {isProblems ? (
+          <ProblemsReview
+            editingProblemId={editingProblemId}
+            isSaving={updateProblem.isPending}
+            problemDraft={problemDraft}
+            problems={problems}
+            expectedCount={expectedProblemCount}
+            onCancel={() => setEditingProblemId(null)}
+            onDraftChange={setProblemDraft}
+            onEdit={startProblemEdit}
+            onSave={(problem) => void saveProblem(problem)}
+          />
         ) : (
-          <Button type="button" disabled={!canStartGrading} onClick={() => void handleStartGrading()}>
-            {startGrading.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
-            开始批改
-          </Button>
+          <SubmissionsReview
+            answerDraft={answerDraft}
+            editingAnswerKey={editingAnswerKey}
+            isSaving={updateStudentAnswer.isPending}
+            selectedStudent={selectedStudent}
+            selectedStudentId={selectedStudent?.stu_id ?? null}
+            students={students}
+            expectedCount={expectedStudentCount}
+            onAnswerDraftChange={setAnswerDraft}
+            onCancel={() => setEditingAnswerKey(null)}
+            onEdit={startAnswerEdit}
+            onSave={(student, answer) => void saveAnswer(student, answer)}
+            onSelectStudent={setSelectedStudentId}
+          />
         )}
-      </div>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          <Link to={isProblems ? `/tasks/${safeTaskId}/setup` : `/tasks/${safeTaskId}/upload/problems`}>
+            <Button type="button" variant="secondary">
+              {isProblems ? "返回资料配置" : "返回题目准备"}
+            </Button>
+          </Link>
+          {isProblems ? (
+            <Button
+              type="button"
+              disabled={!canContinueToSubmissions}
+              onClick={() => navigate(`/tasks/${safeTaskId}/upload/submissions`)}
+            >
+              继续上传作答
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          ) : currentStatus === "grading" || currentStatus === "graded" ? (
+            <Button type="button" onClick={() => navigate(`/tasks/${safeTaskId}/results`)}>
+              {currentStatus === "graded" ? "复核结果" : "查看批改进度"}
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          ) : (
+            <div className="grid justify-items-end gap-2">
+              {gradingGuard.reason ? <p className="max-w-xl text-right text-xs leading-5 text-muted-foreground">{gradingGuard.reason}</p> : null}
+              <Button type="button" disabled={gradingGuard.disabled} onClick={() => void handleStartGrading()}>
+              {startGrading.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
+              开始批改
+              </Button>
+            </div>
+          )}
+        </div>
+      </TaskStageGate>
     </div>
   );
 }
@@ -402,6 +508,8 @@ export function TaskUploadPage() {
 function UploadCard({
   accept,
   currentFileName,
+  disabled,
+  disabledReason,
   isDragging,
   isProblems,
   isUploading,
@@ -413,6 +521,8 @@ function UploadCard({
 }: {
   accept: string;
   currentFileName?: string | null;
+  disabled?: boolean;
+  disabledReason?: string | null;
   isDragging: boolean;
   isProblems: boolean;
   isUploading: boolean;
@@ -425,7 +535,7 @@ function UploadCard({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <Card className="grid gap-4">
+    <div className="grid gap-4">
       <div
         className={cn(
           "rounded-lg border border-dashed bg-muted/40 p-8 text-center transition",
@@ -440,7 +550,14 @@ function UploadCard({
           onDragChange(false);
         }}
         onDragOver={(event) => event.preventDefault()}
-        onDrop={onDrop}
+        onDrop={(event) => {
+          if (disabled) {
+            event.preventDefault();
+            onDragChange(false);
+            return;
+          }
+          onDrop(event);
+        }}
       >
         <UploadCloud className="mx-auto h-10 w-10 text-muted-foreground" />
         <h2 className="mt-3 text-base font-semibold">{isProblems ? "拖入题目文件" : "拖入作答文件或压缩包"}</h2>
@@ -450,10 +567,11 @@ function UploadCard({
             : "支持上传按学生整理的文件、压缩包或表格索引；图片与手写 OCR 仍是后续接入项。"}
         </p>
         <input ref={fileInputRef} type="file" accept={accept} className="hidden" onChange={onFileInput} />
-        <Button type="button" className="mt-5" disabled={isUploading} onClick={() => fileInputRef.current?.click()}>
+        <Button type="button" className="mt-5" disabled={isUploading || disabled} onClick={() => fileInputRef.current?.click()}>
           {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
           选择文件
         </Button>
+        {disabledReason ? <p className="mt-3 text-xs leading-5 text-muted-foreground">{disabledReason}</p> : null}
         {uploadFileName ? (
           <div className="mx-auto mt-4 max-w-md text-left">
             <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
@@ -500,54 +618,7 @@ function UploadCard({
           </div>
         </div>
       ) : null}
-    </Card>
-  );
-}
-
-function StatusCard({
-  currentStatus,
-  isLoading,
-  isProcessing,
-  latestMessage,
-  percent,
-  problemCount,
-  progressError,
-  studentCount,
-}: {
-  currentStatus: TaskStatus;
-  isLoading: boolean;
-  isProcessing: boolean;
-  latestMessage: string | null;
-  percent: number;
-  problemCount: number;
-  progressError: string | null;
-  studentCount: number;
-}) {
-  return (
-    <Card className="grid content-start gap-4">
-      <div>
-        <h2 className="text-base font-semibold">任务状态</h2>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">页面会按任务状态恢复预览与进度，离开后再回来也能继续。</p>
-      </div>
-      <div className="grid gap-2 text-sm">
-        <StatusRow label="当前状态" value={isLoading ? "加载中" : formatStatus(currentStatus)} />
-        <StatusRow label="题目数量" value={String(problemCount)} />
-        <StatusRow label="学生数量" value={String(studentCount)} />
-      </div>
-      {isProcessing ? (
-        <div className="rounded-lg border p-3">
-          <div className="flex items-center justify-between gap-3 text-sm">
-            <span className="font-medium">后台处理中</span>
-            <span className="text-muted-foreground">{percent}%</span>
-          </div>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${percent}%` }} />
-          </div>
-          {latestMessage ? <p className="mt-3 text-xs leading-5 text-muted-foreground">{latestMessage}</p> : null}
-        </div>
-      ) : null}
-      {progressError ? <InlineAlert message={progressError} /> : null}
-    </Card>
+    </div>
   );
 }
 
@@ -825,15 +896,6 @@ function PreviewBlock({ label, value, emptyText }: { label: string; value?: stri
   );
 }
 
-function StatusRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-      <span>{label}</span>
-      <span className="text-right text-muted-foreground">{value}</span>
-    </div>
-  );
-}
-
 function InlineAlert({ message }: { message: string }) {
   return (
     <div className="flex items-start gap-2 rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
@@ -841,10 +903,6 @@ function InlineAlert({ message }: { message: string }) {
       <span className="leading-5">{message}</span>
     </div>
   );
-}
-
-function formatStatus(status: string) {
-  return getTaskStatusMeta(status).label;
 }
 
 function problemLabel(problem: ProblemInfo) {
