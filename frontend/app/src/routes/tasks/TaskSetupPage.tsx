@@ -251,9 +251,9 @@ export function TaskSetupPage() {
                 onChange={(event) => setAddUploadToPersonalKB(event.target.checked)}
               />
               <span>
-                <span className="font-medium">同时加入个人知识库前端清单</span>
+                <span className="font-medium">同时加入个人知识库清单</span>
                 <span className="mt-1 block leading-6 text-muted-foreground">
-                  当前只保存文件元数据和本任务选择关系；后端 user-scoped KB 接入前，不会自动跨任务参与批改。
+                  当前只保存文件元数据和本任务选择关系；后端课程资料库接入前，不会自动跨任务参与批改。
                 </span>
               </span>
             </label>
@@ -557,7 +557,7 @@ function PersonalKBPicker({
         <div>
           <h2 className="text-base font-semibold">个人知识库选择</h2>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">
-            可先为本任务选择个人知识库资料。当前选择只保存在浏览器本地，待后端 user-scoped KB 接入后才会真正参与跨任务检索。
+            可先为本任务选择个人知识库资料。当前选择只保存在浏览器本地，待后端课程资料库接入后才会真正参与跨任务检索。
           </p>
         </div>
       </div>

@@ -2,11 +2,13 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronRight,
+  Circle,
   FileArchive,
   FileText,
   Images,
   ListChecks,
   Loader2,
+  Search,
   PlayCircle,
   RefreshCw,
   Save,
@@ -25,6 +27,8 @@ import {
   useUpdateProblem,
   useUpdateStudentAnswer,
 } from "@/api/hooks/tasks";
+import { PreGradingConfirmPanel } from "@/components/tasks/PreGradingConfirmPanel";
+import { SubmissionReviewMatrix, getSubmissionMatrixStats } from "@/components/tasks/SubmissionReviewMatrix";
 import { TaskProgressFocus } from "@/components/tasks/TaskProgressFocus";
 import { TaskStageGate } from "@/components/tasks/TaskStageGate";
 import { TaskStepper } from "@/components/tasks/TaskStepper";
@@ -32,7 +36,8 @@ import { Button } from "@/components/ui/Button";
 import { Card, SectionHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Field } from "@/components/ui/Field";
-import { Textarea } from "@/components/ui/Input";
+import { HelpTooltip } from "@/components/ui/HelpTooltip";
+import { Input, Textarea } from "@/components/ui/Input";
 import { InlineNotice } from "@/components/ui/InlineNotice";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { WorkflowSection } from "@/components/ui/WorkflowSection";
@@ -306,7 +311,7 @@ export function TaskUploadPage() {
         description="请从任务总览或历史任务进入上传流程。"
         action={
           <Link to="/">
-            <Button variant="secondary">返回工作台</Button>
+            <Button variant="secondary">返回任务总览</Button>
           </Link>
         }
       />
@@ -332,10 +337,10 @@ export function TaskUploadPage() {
     <div className="grid gap-5">
       <TaskStepper current={isProblems ? "problems" : "submissions"} task={task} />
       <SectionHeader
-        title={isProblems ? "上传题目" : "上传学生作答"}
+        title={isProblems && expectedProblemCount > 0 ? "题目准备" : isProblems ? "上传题目" : "上传学生作答"}
         description={
           isProblems
-            ? "上传题目文件，识别完成后校对题干与评分标准，再进入学生作答上传。"
+            ? "上传题目文件；识别完成后在同一页校对题干，并补齐评分标准、标答与测试样例的资料配置。"
             : "上传学生作答文件，按学生检查识别结果；确认后即可启动批改。"
         }
         action={
@@ -460,6 +465,7 @@ export function TaskUploadPage() {
             isSaving={updateStudentAnswer.isPending}
             selectedStudent={selectedStudent}
             selectedStudentId={selectedStudent?.stu_id ?? null}
+            problems={problems}
             students={students}
             expectedCount={expectedStudentCount}
             onAnswerDraftChange={setAnswerDraft}
@@ -470,7 +476,19 @@ export function TaskUploadPage() {
           />
         )}
 
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="grid gap-4">
+          {!isProblems && currentStatus !== "grading" && currentStatus !== "graded" ? (
+            <WorkflowSection title="批改前确认" description="开始批改前集中检查模型来源、题目资料配置、学生作答覆盖率和风险提示。">
+              <PreGradingConfirmPanel
+                problems={problems}
+                students={students}
+                taskDocCount={task?.kb_doc_count ?? 0}
+                modelReadiness={modelReadiness}
+                gradingGuard={gradingGuard}
+              />
+            </WorkflowSection>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
           <Link to={isProblems ? `/tasks/${safeTaskId}/setup` : `/tasks/${safeTaskId}/upload/problems`}>
             <Button type="button" variant="secondary">
               {isProblems ? "返回资料配置" : "返回题目准备"}
@@ -494,11 +512,12 @@ export function TaskUploadPage() {
             <div className="grid justify-items-end gap-2">
               {gradingGuard.reason ? <p className="max-w-xl text-right text-xs leading-5 text-muted-foreground">{gradingGuard.reason}</p> : null}
               <Button type="button" disabled={gradingGuard.disabled} onClick={() => void handleStartGrading()}>
-              {startGrading.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
-              开始批改
+                {startGrading.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
+                开始批改
               </Button>
             </div>
           )}
+          </div>
         </div>
       </TaskStageGate>
     </div>
@@ -643,18 +662,14 @@ function ProblemsReview({
   onEdit: (problem: ProblemInfo) => void;
   onSave: (problem: ProblemInfo) => void;
 }) {
-  return (
-    <Card className="grid gap-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-base font-semibold">题目预览与校对</h2>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">
-            检查识别出的题干和评分标准；保存后后续批改会使用更新后的内容。
-          </p>
-        </div>
-        <span className="text-sm text-muted-foreground">{expectedCount} 道题</span>
-      </div>
+  const [filterText, setFilterText] = useState("");
+  const rows = useMemo(() => problems.map(buildProblemPreparationRow), [problems]);
+  const filteredRows = useMemo(() => filterProblemRows(rows, filterText), [filterText, rows]);
+  const summary = useMemo(() => buildProblemPreparationSummary(rows), [rows]);
+  const missingSlots = summary.missingCriteria + summary.missingAnswers + summary.missingTests;
 
+  return (
+    <Card className="grid gap-5">
       {problems.length === 0 ? (
         expectedCount > 0 ? (
           <DetailSyncState
@@ -665,64 +680,396 @@ function ProblemsReview({
           <EmptyState title="暂无题目预览" description="上传题目文件后，识别结果会显示在这里。" />
         )
       ) : (
-        <div className="grid gap-3">
-          {problems.map((problem) => {
-            const isEditing = editingProblemId === problem.q_id;
-            return (
-              <article key={problem.q_id} className="rounded-lg border p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold">{problemLabel(problem)}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{problem.type || "未识别题型"}</p>
-                  </div>
-                  {isEditing ? null : (
-                    <Button type="button" variant="secondary" onClick={() => onEdit(problem)}>
-                      编辑
-                    </Button>
-                  )}
-                </div>
+        <>
+          <WorkflowSection
+            title="题目准备总览"
+            description="先从表格确认每道题的题干、评分标准、标答和测试样例是否准备好，再进入单题详情修改。"
+            action={<span className="text-sm text-muted-foreground">{expectedCount} 道题</span>}
+          >
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <PreparationMetric
+                label="题目复核"
+                value={`${summary.reviewReady}/${summary.total}`}
+                detail={summary.needsReview ? `${summary.needsReview} 题需人工处理` : "均可进入校对"}
+              />
+              <PreparationMetric
+                label="评分标准"
+                value={`${summary.criteriaReady}/${summary.total}`}
+                detail={summary.missingCriteria ? `${summary.missingCriteria} 题缺失` : "已全部填写"}
+              />
+              <PreparationMetric
+                label="标答"
+                value={`${summary.answersReady}/${summary.total}`}
+                detail={summary.missingAnswers ? `${summary.missingAnswers} 题缺失` : "已全部填写"}
+              />
+              <PreparationMetric
+                label="测试样例"
+                value={summary.programmingTotal ? `${summary.testsReady}/${summary.programmingTotal}` : "无编程题"}
+                detail={summary.programmingTotal ? `${summary.missingTests} 道编程题待补` : "不适用"}
+              />
+              <PreparationMetric
+                label="待处理"
+                value={String(summary.needsReview + missingSlots)}
+                detail="按现有字段前端推断"
+                tone={summary.needsReview + missingSlots > 0 ? "warning" : "success"}
+              />
+            </div>
 
-                {isEditing ? (
-                  <div className="mt-4 grid gap-3">
-                    <Field label="题干">
-                      <Textarea
-                        value={problemDraft.stem}
-                        onChange={(event) => onDraftChange({ ...problemDraft, stem: event.target.value })}
-                      />
-                    </Field>
-                    <Field label="评分标准">
-                      <Textarea
-                        value={problemDraft.criterion}
-                        onChange={(event) => onDraftChange({ ...problemDraft, criterion: event.target.value })}
-                      />
-                    </Field>
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <Button type="button" variant="ghost" disabled={isSaving} onClick={onCancel}>
-                        <X className="h-4 w-4" />
-                        取消
-                      </Button>
-                      <Button type="button" disabled={isSaving} onClick={() => onSave(problem)}>
-                        {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                        保存
-                      </Button>
+            <InlineNotice tone="neutral" title="资料配置状态说明">
+              当前表格只根据已返回的题干、评分标准、参考答案和测试样例字段推断覆盖情况；资料来源、AI 生成待确认、从原文提取置信度和教师确认状态需要后端新增字段后接入。
+            </InlineNotice>
+
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <label className="relative block min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="w-full pl-9"
+                  value={filterText}
+                  placeholder="筛选题目，例如：缺少标答、没有评分标准、编程题、证明题"
+                  onChange={(event) => setFilterText(event.target.value)}
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="secondary" disabled title="需后端接入资料导入与题号匹配 API">
+                  批量导入资料
+                </Button>
+                <Button type="button" variant="secondary" disabled title="需后端接入逐题 AI 补全任务">
+                  AI 补全缺失资料
+                </Button>
+                <Button type="button" variant="secondary" disabled title="需后端返回题目置信度与复核字段">
+                  一键 AI 复核
+                </Button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="min-w-[880px] w-full border-collapse text-left text-sm">
+                <thead className="bg-muted/50 text-xs font-medium text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2">题号</th>
+                    <th className="px-3 py-2">题型</th>
+                    <th className="px-3 py-2">复核状态</th>
+                    <th className="px-3 py-2">评分标准</th>
+                    <th className="px-3 py-2">标答</th>
+                    <th className="px-3 py-2">测试样例</th>
+                    <th className="px-3 py-2 text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {filteredRows.map((row) => (
+                    <tr key={row.problem.q_id} className="align-top hover:bg-muted/30">
+                      <td className="px-3 py-3 font-medium">{row.label}</td>
+                      <td className="px-3 py-3 text-muted-foreground">{row.type || "未识别"}</td>
+                      <td className="px-3 py-3">
+                        <PreparationStatus status={row.reviewStatus} onClick={() => onEdit(row.problem)} />
+                      </td>
+                      <td className="px-3 py-3">
+                        <PreparationStatus status={row.criterionStatus} onClick={() => onEdit(row.problem)} />
+                      </td>
+                      <td className="px-3 py-3">
+                        <PreparationStatus status={row.answerStatus} />
+                      </td>
+                      <td className="px-3 py-3">
+                        <PreparationStatus status={row.testStatus} />
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <Button type="button" variant="secondary" className="h-8" onClick={() => onEdit(row.problem)}>
+                          查看/修改
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {filteredRows.length === 0 ? (
+                <div className="border-t p-6 text-center text-sm text-muted-foreground">
+                  当前筛选没有匹配题目。可以换成“缺少标答”“编程题”“没有评分标准”等关键词。
+                </div>
+              ) : null}
+            </div>
+          </WorkflowSection>
+
+          <WorkflowSection
+            title="题目详情校对"
+            description="当前可保存题干与评分标准；标答、测试样例、测试脚本的编辑和来源状态需要后端字段继续补齐。"
+          >
+            <div className="grid gap-3">
+              {filteredRows.map(({ problem }) => {
+                const isEditing = editingProblemId === problem.q_id;
+                return (
+                  <article key={problem.q_id} className="rounded-lg border p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold">{problemLabel(problem)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{problem.type || "未识别题型"}</p>
+                      </div>
+                      {isEditing ? null : (
+                        <Button type="button" variant="secondary" onClick={() => onEdit(problem)}>
+                          编辑题干/评分标准
+                        </Button>
+                      )}
                     </div>
-                  </div>
-                ) : (
-                  <div className="mt-4 grid gap-3 text-sm">
-                    <PreviewBlock label="题干" value={problem.stem} emptyText="题干为空，请编辑补充。" />
-                    <PreviewBlock label="评分标准" value={problem.criterion} emptyText="评分标准为空，请编辑补充。" />
-                    {problem.reference_answer ? (
-                      <PreviewBlock label="参考答案" value={problem.reference_answer} emptyText="暂无参考答案。" />
-                    ) : null}
-                  </div>
-                )}
-              </article>
-            );
-          })}
-        </div>
+
+                    {isEditing ? (
+                      <div className="mt-4 grid gap-3">
+                        <Field label="题干">
+                          <Textarea
+                            value={problemDraft.stem}
+                            onChange={(event) => onDraftChange({ ...problemDraft, stem: event.target.value })}
+                          />
+                        </Field>
+                        <Field label="评分标准">
+                          <Textarea
+                            value={problemDraft.criterion}
+                            onChange={(event) => onDraftChange({ ...problemDraft, criterion: event.target.value })}
+                          />
+                        </Field>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button type="button" variant="ghost" disabled={isSaving} onClick={onCancel}>
+                            <X className="h-4 w-4" />
+                            取消
+                          </Button>
+                          <Button type="button" disabled={isSaving} onClick={() => onSave(problem)}>
+                            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            保存
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-4 grid gap-3 text-sm">
+                        <PreviewBlock label="题干" value={problem.stem} emptyText="题干为空，请编辑补充。" />
+                        <PreviewBlock label="评分标准" value={problem.criterion} emptyText="评分标准为空，请编辑补充。" />
+                        <PreviewBlock label="标答" value={problem.reference_answer} emptyText="暂无标答。后续可从资料导入或由 AI 补全。" />
+                        <TestCasePreview problem={problem} />
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          </WorkflowSection>
+        </>
       )}
     </Card>
   );
+}
+
+type PreparationTone = "success" | "warning" | "neutral";
+
+interface PreparationStatusMeta {
+  label: string;
+  tone: PreparationTone;
+  help?: string;
+}
+
+interface ProblemPreparationRow {
+  problem: ProblemInfo;
+  label: string;
+  type: string;
+  isProgramming: boolean;
+  reviewStatus: PreparationStatusMeta;
+  criterionStatus: PreparationStatusMeta;
+  answerStatus: PreparationStatusMeta;
+  testStatus: PreparationStatusMeta;
+}
+
+function PreparationMetric({
+  label,
+  value,
+  detail,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: PreparationTone;
+}) {
+  return (
+    <div className="rounded-md border bg-background p-3">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          "mt-1 text-lg font-semibold",
+          tone === "success" ? "text-accent" : tone === "warning" ? "text-warning" : "text-foreground",
+        )}
+      >
+        {value}
+      </div>
+      <div className="mt-1 text-xs leading-5 text-muted-foreground">{detail}</div>
+    </div>
+  );
+}
+
+function PreparationStatus({
+  status,
+  onClick,
+}: {
+  status: PreparationStatusMeta;
+  onClick?: () => void;
+}) {
+  const content = (
+    <>
+      <Circle
+        className={cn(
+          "h-2.5 w-2.5 fill-current",
+          status.tone === "success" ? "text-accent" : status.tone === "warning" ? "text-warning" : "text-muted-foreground",
+        )}
+      />
+      <span>{status.label}</span>
+      {status.help && !onClick ? <HelpTooltip label={status.help} /> : null}
+      {status.help && onClick ? (
+        <span
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full text-xs text-muted-foreground"
+          aria-label={status.help}
+          title={status.help}
+        >
+          ?
+        </span>
+      ) : null}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className="inline-flex min-h-8 items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+        title={status.help}
+        onClick={onClick}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <span className="inline-flex min-h-8 items-center gap-2 text-xs text-muted-foreground">{content}</span>;
+}
+
+function TestCasePreview({ problem }: { problem: ProblemInfo }) {
+  const cases = problem.test_cases ?? [];
+  const isProgramming = isProgrammingProblem(problem);
+
+  if (!isProgramming) {
+    return <PreviewBlock label="测试样例" value="非编程题，不需要测试样例。" emptyText="非编程题，不需要测试样例。" />;
+  }
+
+  if (cases.length === 0) {
+    return <PreviewBlock label="测试样例" value={null} emptyText="暂无测试样例。后续可从资料导入或由 AI 生成。" />;
+  }
+
+  const content = cases
+    .slice(0, 3)
+    .map((testCase, index) => {
+      const description = testCase.description?.trim() ? `${testCase.description}\n` : "";
+      return `样例 ${index + 1}\n${description}输入：${testCase.input || "-"}\n期望输出：${testCase.expected_output || "-"}`;
+    })
+    .join("\n\n");
+  const suffix = cases.length > 3 ? `\n\n还有 ${cases.length - 3} 个样例，后续可展开或跳转查看。` : "";
+
+  return <PreviewBlock label="测试样例" value={`${content}${suffix}`} emptyText="暂无测试样例。" />;
+}
+
+function buildProblemPreparationRow(problem: ProblemInfo): ProblemPreparationRow {
+  const hasStem = hasText(problem.stem);
+  const hasCriterion = hasText(problem.criterion);
+  const hasAnswer = hasText(problem.reference_answer);
+  const isProgramming = isProgrammingProblem(problem);
+  const testCount = problem.test_cases?.length ?? 0;
+
+  return {
+    problem,
+    label: problemLabel(problem),
+    type: problem.type || "未识别题型",
+    isProgramming,
+    reviewStatus: hasStem
+      ? {
+          label: "待确认",
+          tone: "neutral",
+          help: "当前后端尚未提供教师确认字段，这里表示题干已可进入人工校对。",
+        }
+      : {
+          label: "待人工复核",
+          tone: "warning",
+          help: "题干为空或识别异常，建议先人工修正。",
+        },
+    criterionStatus: hasCriterion
+      ? { label: "已填写", tone: "success" }
+      : { label: "缺失", tone: "warning", help: "可以先手动填写；批量导入和 AI 补全需后端接入。" },
+    answerStatus: hasAnswer
+      ? { label: "已填写", tone: "success" }
+      : { label: "缺失", tone: "warning", help: "标答导入、从原文提取和来源置信度需后端接入。" },
+    testStatus: !isProgramming
+      ? { label: "不适用", tone: "neutral" }
+      : testCount > 0
+        ? { label: `${testCount} 个样例`, tone: "success" }
+        : { label: "缺失", tone: "warning", help: "测试样例、沙盒超时和测试脚本需后端接入。" },
+  };
+}
+
+function buildProblemPreparationSummary(rows: ProblemPreparationRow[]) {
+  const programmingRows = rows.filter((row) => row.isProgramming);
+  return {
+    total: rows.length,
+    reviewReady: rows.filter((row) => row.reviewStatus.tone !== "warning").length,
+    needsReview: rows.filter((row) => row.reviewStatus.tone === "warning").length,
+    criteriaReady: rows.filter((row) => row.criterionStatus.tone === "success").length,
+    missingCriteria: rows.filter((row) => row.criterionStatus.tone === "warning").length,
+    answersReady: rows.filter((row) => row.answerStatus.tone === "success").length,
+    missingAnswers: rows.filter((row) => row.answerStatus.tone === "warning").length,
+    programmingTotal: programmingRows.length,
+    testsReady: programmingRows.filter((row) => row.testStatus.tone === "success").length,
+    missingTests: programmingRows.filter((row) => row.testStatus.tone === "warning").length,
+  };
+}
+
+function filterProblemRows(rows: ProblemPreparationRow[], filterText: string) {
+  const query = filterText.trim().toLowerCase();
+  if (!query) {
+    return rows;
+  }
+
+  if (containsAny(query, ["缺少标答", "没有标答", "无标答", "标答缺失"])) {
+    return rows.filter((row) => row.answerStatus.tone === "warning");
+  }
+  if (containsAny(query, ["没有评分标准", "缺少评分标准", "无评分标准", "评分标准缺失"])) {
+    return rows.filter((row) => row.criterionStatus.tone === "warning");
+  }
+  if (containsAny(query, ["没有测试", "缺少测试", "测试样例缺失", "无测试"])) {
+    return rows.filter((row) => row.testStatus.tone === "warning");
+  }
+  if (containsAny(query, ["编程", "程序", "代码", "coding", "program"])) {
+    return rows.filter((row) => row.isProgramming);
+  }
+  if (containsAny(query, ["低置信", "复核", "人工"])) {
+    return rows.filter((row) => row.reviewStatus.tone === "warning");
+  }
+
+  return rows.filter((row) => {
+    const haystack = [
+      row.label,
+      row.type,
+      row.problem.stem,
+      row.problem.criterion,
+      row.problem.reference_answer,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(query);
+  });
+}
+
+function containsAny(value: string, tokens: string[]) {
+  return tokens.some((token) => value.includes(token));
+}
+
+function isProgrammingProblem(problem: ProblemInfo) {
+  const text = `${problem.type ?? ""} ${problem.stem ?? ""}`.toLowerCase();
+  return containsAny(text, ["编程", "程序", "代码", "python", "java", "c++", "javascript", "program", "coding", "algorithm"]);
+}
+
+function hasText(value?: string | null) {
+  return Boolean(value?.trim());
 }
 
 function SubmissionsReview({
@@ -732,6 +1079,7 @@ function SubmissionsReview({
   isSaving,
   selectedStudent,
   selectedStudentId,
+  problems,
   students,
   onAnswerDraftChange,
   onCancel,
@@ -745,6 +1093,7 @@ function SubmissionsReview({
   isSaving: boolean;
   selectedStudent: StudentSubmission | null;
   selectedStudentId: string | null;
+  problems: ProblemInfo[];
   students: StudentSubmission[];
   onAnswerDraftChange: (value: string) => void;
   onCancel: () => void;
@@ -752,7 +1101,9 @@ function SubmissionsReview({
   onSave: (student: StudentSubmission, answer: StudentAnswerInfo) => void;
   onSelectStudent: (studentId: string) => void;
 }) {
+  const [filterText, setFilterText] = useState("");
   const answers = [...(selectedStudent?.stu_ans ?? [])].sort(compareAnswers);
+  const matrixStats = useMemo(() => getSubmissionMatrixStats(problems, students), [problems, students]);
 
   return (
     <Card className="grid gap-4">
@@ -776,29 +1127,49 @@ function SubmissionsReview({
           <EmptyState title="暂无学生作答" description="上传学生作答文件后，学生列表与逐题答案会显示在这里。" />
         )
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-          <div className="grid max-h-[520px] content-start gap-2 overflow-y-auto pr-1">
-            {students.map((student) => {
-              const active = student.stu_id === selectedStudentId;
-              return (
-                <button
-                  key={student.stu_id}
-                  type="button"
-                  className={cn(
-                    "rounded-lg border p-3 text-left text-sm transition hover:bg-muted",
-                    active ? "border-primary bg-primary/10" : "bg-card",
-                  )}
-                  onClick={() => onSelectStudent(student.stu_id)}
-                >
-                  <span className="font-medium">{studentName(student)}</span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    {student.stu_id} · {student.stu_ans?.length ?? 0} 题
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+        <div className="grid gap-5">
+          <WorkflowSection
+            title="作答校对总览"
+            description="先按学生和题目查看识别覆盖情况，再选择某个学生进入详细作答。"
+          >
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <PreparationMetric
+                label="学生"
+                value={`${students.length}`}
+                detail={`预计 ${expectedCount} 名`}
+              />
+              <PreparationMetric
+                label="识别覆盖"
+                value={`${matrixStats.recognizedCells}/${matrixStats.expectedCells}`}
+                detail={matrixStats.missingCells ? `${matrixStats.missingCells} 格缺失` : "已覆盖全部格"}
+                tone={matrixStats.missingCells ? "warning" : "success"}
+              />
+              <PreparationMetric
+                label="需复核"
+                value={`${matrixStats.flaggedCells + matrixStats.emptyCells}`}
+                detail="按 flag 与空答案前端推断"
+                tone={matrixStats.flaggedCells + matrixStats.emptyCells > 0 ? "warning" : "success"}
+              />
+              <PreparationMetric
+                label="当前学生"
+                value={selectedStudent ? studentName(selectedStudent) : "未选择"}
+                detail={selectedStudent?.stu_id ?? "从下方表格选择"}
+              />
+            </div>
+            <SubmissionReviewMatrix
+              problems={problems}
+              students={students}
+              selectedStudentId={selectedStudentId}
+              filterText={filterText}
+              onFilterTextChange={setFilterText}
+              onSelectStudent={onSelectStudent}
+            />
+          </WorkflowSection>
 
+          <WorkflowSection
+            title="单个学生作答详情"
+            description="修改会直接更新当前任务中的识别作答，后续批改使用保存后的内容。"
+          >
           <div className="grid content-start gap-3">
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="text-sm font-semibold">{selectedStudent ? studentName(selectedStudent) : "未选择学生"}</p>
@@ -865,6 +1236,7 @@ function SubmissionsReview({
               })
             )}
           </div>
+          </WorkflowSection>
         </div>
       )}
     </Card>

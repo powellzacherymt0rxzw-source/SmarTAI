@@ -67,8 +67,8 @@ export function KnowledgeBasePage() {
           <div>
             <h2 className="text-base font-semibold">后端能力待接入</h2>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              这里先保存浏览器本地的资料清单和任务选择关系，不上传文件内容到 user-scoped KB，也不会让这些资料直接参与当前批改。
-              现阶段真正参与 RAG 的仍是任务 Setup 里上传的本任务资料。
+              这里先保存浏览器本地的资料清单和任务选择关系，不上传文件内容到后端课程资料库，也不会让这些资料直接参与当前批改。
+              现阶段真正参与 RAG 的仍是资料配置页里上传的本任务资料。
             </p>
           </div>
         </div>
