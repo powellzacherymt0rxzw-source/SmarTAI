@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, FileText, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTask, useTaskResult } from "@/api/hooks/tasks";
+import { CorrectionReviewPanel } from "@/components/tasks/CorrectionReviewPanel";
 import {
   buildResultsModel,
   clampPercent,
@@ -10,13 +11,11 @@ import {
   formatScore,
   hasReviewSignal,
   ResultsLayout,
-  reviewReasonLabel,
   type StudentSummary,
 } from "@/components/tasks/ResultsLayout";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import type { Correction } from "@/types";
 
 export function TaskStudentDetailPage() {
@@ -56,6 +55,7 @@ export function TaskStudentDetailPage() {
           taskId={taskId}
           studentId={studentId}
           student={student}
+          students={model.students}
           previousStudent={previousStudent}
           nextStudent={nextStudent}
           resultStatus={resultQuery.data?.status}
@@ -69,6 +69,7 @@ function StudentContent({
   taskId,
   studentId,
   student,
+  students,
   previousStudent,
   nextStudent,
   resultStatus,
@@ -76,10 +77,13 @@ function StudentContent({
   taskId: string;
   studentId?: string;
   student: StudentSummary | null;
+  students: StudentSummary[];
   previousStudent: StudentSummary | null;
   nextStudent: StudentSummary | null;
   resultStatus?: string;
 }) {
+  const navigate = useNavigate();
+
   if (resultStatus !== "completed") {
     return (
       <EmptyState
@@ -121,11 +125,25 @@ function StudentContent({
             <p className="mt-1 text-sm text-muted-foreground">{student.id}</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <label className="grid min-w-52 gap-1 text-xs text-muted-foreground">
+              切换学生
+              <select
+                value={student.id}
+                onChange={(event) => navigate(`/tasks/${taskId}/results/${encodeURIComponent(event.target.value)}`)}
+                className="h-9 rounded-md border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              >
+                {students.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {studentNavLabel(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
             {previousStudent ? (
               <Link to={`/tasks/${taskId}/results/${previousStudent.id}`}>
-                <Button type="button" variant="secondary">
+                <Button type="button" variant="secondary" className="h-auto min-h-9 max-w-full justify-start whitespace-normal py-2 text-left">
                   <ArrowLeft className="h-4 w-4" />
-                  上一位
+                  上一位：{studentNavLabel(previousStudent)}
                 </Button>
               </Link>
             ) : (
@@ -136,8 +154,8 @@ function StudentContent({
             )}
             {nextStudent ? (
               <Link to={`/tasks/${taskId}/results/${nextStudent.id}`}>
-                <Button type="button" variant="secondary">
-                  下一位
+                <Button type="button" variant="secondary" className="h-auto min-h-9 max-w-full justify-start whitespace-normal py-2 text-left">
+                  下一位：{studentNavLabel(nextStudent)}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
@@ -162,6 +180,39 @@ function StudentContent({
         </div>
       </Card>
 
+      <Card className="grid gap-3">
+        <div>
+          <h2 className="text-base font-semibold">题目复核导航</h2>
+          <p className="mt-1 text-sm text-muted-foreground">选择题号会定位到该学生的对应作答；也可以从每题进入全班题目详情。</p>
+        </div>
+        <label className="grid max-w-md gap-1 text-sm">
+          <span className="font-medium">跳转题目</span>
+          <select
+            defaultValue=""
+            onChange={(event) => {
+              const target = event.target.value;
+              if (!target) {
+                return;
+              }
+              document.getElementById(`question-${target}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            className="h-9 rounded-md border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+          >
+            <option value="" disabled>
+              选择该学生的一道题
+            </option>
+            {student.corrections.map((correction) => {
+              const answer = student.answerByQuestion.get(correction.q_id);
+              return (
+                <option key={correction.q_id} value={correction.q_id}>
+                  {answer?.number ? `Q${answer.number}` : correction.q_id}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+      </Card>
+
       <div className="grid gap-3">
         {student.corrections.map((correction) => (
           <StudentCorrectionCard key={correction.q_id} taskId={taskId} student={student} correction={correction} />
@@ -184,7 +235,7 @@ function StudentCorrectionCard({
   const percent = correction.max_score > 0 ? (correction.score / correction.max_score) * 100 : null;
 
   return (
-    <Card className="grid gap-4">
+    <Card id={`question-${correction.q_id}`} className="scroll-mt-24 grid gap-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -203,7 +254,7 @@ function StudentCorrectionCard({
             <Metric label="置信度" value={formatConfidence(correction.confidence)} />
           </div>
         </div>
-        <Link to={`/tasks/${taskId}/questions/${correction.q_id}`}>
+        <Link to={`/tasks/${taskId}/questions/${correction.q_id}?studentId=${encodeURIComponent(student.id)}`}>
           <Button type="button" variant="secondary">
             <FileText className="h-4 w-4" />
             该题全班分析
@@ -221,50 +272,15 @@ function StudentCorrectionCard({
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        <TextBlock title="学生作答" body={answer?.content} empty="没有作答文本。" />
-        <TextBlock title="AI 评语" body={correction.comment} empty="没有 AI 评语。" />
-      </div>
-
-      <ReviewReasons correction={correction} />
+      <CorrectionReviewPanel
+        taskId={taskId}
+        studentId={student.id}
+        qId={correction.q_id}
+        questionLabel={answer?.number ? `Q${answer.number}` : correction.q_id}
+        answer={answer}
+        correction={correction}
+      />
     </Card>
-  );
-}
-
-function ReviewReasons({ correction }: { correction: Correction }) {
-  const reasons = correction.review_reasons ?? [];
-  if (!hasReviewSignal(correction) && !reasons.length) {
-    return <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">无低置信或复核原因。</div>;
-  }
-
-  return (
-    <div className="rounded-lg border border-warning/30 bg-warning/5 p-3">
-      <div className="flex items-center gap-2 text-sm font-medium text-warning">
-        <AlertTriangle className="h-4 w-4" />
-        低置信 / 复核原因
-      </div>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {correction.confidence < 0.65 ? (
-          <span className="rounded-full bg-warning/10 px-2 py-1 text-xs font-medium text-warning">置信度偏低</span>
-        ) : null}
-        {reasons.map((reason) => (
-          <span key={reason} className="rounded-full bg-card px-2 py-1 text-xs text-muted-foreground">
-            {reviewReasonLabel(reason)}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TextBlock({ title, body, empty }: { title: string; body?: string | null; empty: string }) {
-  const content = body?.trim() || empty;
-
-  return (
-    <div className="rounded-lg border bg-muted/30 p-3">
-      <p className="text-xs font-medium text-muted-foreground">{title}</p>
-      <MarkdownMath className="mt-2">{content}</MarkdownMath>
-    </div>
   );
 }
 
@@ -275,6 +291,10 @@ function Metric({ label, value, tone = "default" }: { label: string; value: stri
       <p className="mt-1 text-lg font-semibold">{value}</p>
     </div>
   );
+}
+
+function studentNavLabel(student: StudentSummary) {
+  return `${student.name}（${student.id}）`;
 }
 
 function LoadingCard() {

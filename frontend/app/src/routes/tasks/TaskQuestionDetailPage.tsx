@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Loader2, RefreshCw, UserRound } from "lucide-react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { usePerQuestionBreakdown } from "@/api/hooks/analytics";
 import { useTask, useTaskResult } from "@/api/hooks/tasks";
+import { CorrectionReviewPanel } from "@/components/tasks/CorrectionReviewPanel";
 import {
   buildResultsModel,
   clampPercent,
@@ -11,7 +12,6 @@ import {
   formatScore,
   hasReviewSignal,
   ResultsLayout,
-  reviewReasonLabel,
   type QuestionEntry,
   type QuestionSummary,
 } from "@/components/tasks/ResultsLayout";
@@ -19,10 +19,10 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
-import type { Correction } from "@/types";
 
 export function TaskQuestionDetailPage() {
   const { taskId, questionId } = useParams();
+  const [searchParams] = useSearchParams();
   const taskQuery = useTask(taskId);
   const resultQuery = useTaskResult(taskId);
   const analyticsTaskId = resultQuery.data?.status === "completed" ? taskId : undefined;
@@ -33,6 +33,7 @@ export function TaskQuestionDetailPage() {
   const previousQuestion = questionIndex > 0 ? model.questions[questionIndex - 1] : null;
   const nextQuestion = questionIndex >= 0 && questionIndex < model.questions.length - 1 ? model.questions[questionIndex + 1] : null;
   const firstStudentId = question?.entries[0]?.student.id ?? model.students[0]?.id ?? null;
+  const focusedStudentId = searchParams.get("studentId");
   const commonMistakes = breakdownQuery.data?.common_mistakes_md?.trim() ?? "";
 
   if (!taskId) {
@@ -61,8 +62,10 @@ export function TaskQuestionDetailPage() {
           taskId={taskId}
           questionId={questionId}
           question={question}
+          questions={model.questions}
           previousQuestion={previousQuestion}
           nextQuestion={nextQuestion}
+          focusedStudentId={focusedStudentId}
           resultStatus={resultQuery.data?.status}
           commonMistakes={commonMistakes}
           isRefreshingAnalytics={breakdownQuery.isFetching && !commonMistakes}
@@ -76,8 +79,10 @@ function QuestionContent({
   taskId,
   questionId,
   question,
+  questions,
   previousQuestion,
   nextQuestion,
+  focusedStudentId,
   resultStatus,
   commonMistakes,
   isRefreshingAnalytics,
@@ -85,12 +90,23 @@ function QuestionContent({
   taskId: string;
   questionId?: string;
   question: QuestionSummary | null;
+  questions: QuestionSummary[];
   previousQuestion: QuestionSummary | null;
   nextQuestion: QuestionSummary | null;
+  focusedStudentId?: string | null;
   resultStatus?: string;
   commonMistakes: string;
   isRefreshingAnalytics: boolean;
 }) {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (resultStatus !== "completed" || !question || !focusedStudentId) {
+      return;
+    }
+    document.getElementById(`student-${focusedStudentId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [focusedStudentId, question, resultStatus]);
+
   if (resultStatus !== "completed") {
     return (
       <EmptyState
@@ -146,11 +162,25 @@ function QuestionContent({
             ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
+            <label className="grid min-w-44 gap-1 text-xs text-muted-foreground">
+              切换题目
+              <select
+                value={question.id}
+                onChange={(event) => navigate(`/tasks/${taskId}/questions/${encodeURIComponent(event.target.value)}`)}
+                className="h-9 rounded-md border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              >
+                {questions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             {previousQuestion ? (
               <Link to={`/tasks/${taskId}/questions/${previousQuestion.id}`}>
-                <Button type="button" variant="secondary">
+                <Button type="button" variant="secondary" className="h-auto min-h-9 max-w-full justify-start whitespace-normal py-2 text-left">
                   <ArrowLeft className="h-4 w-4" />
-                  上一题
+                  上一题：{previousQuestion.label}
                 </Button>
               </Link>
             ) : (
@@ -161,8 +191,8 @@ function QuestionContent({
             )}
             {nextQuestion ? (
               <Link to={`/tasks/${taskId}/questions/${nextQuestion.id}`}>
-                <Button type="button" variant="secondary">
-                  下一题
+                <Button type="button" variant="secondary" className="h-auto min-h-9 max-w-full justify-start whitespace-normal py-2 text-left">
+                  下一题：{nextQuestion.label}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
@@ -210,9 +240,38 @@ function QuestionContent({
           <h2 className="text-base font-semibold">学生作答与评语</h2>
           <p className="mt-1 text-sm text-muted-foreground">按当前题目列出每位学生的得分、答案、AI 评语与复核原因。</p>
         </div>
+        <label className="grid max-w-md gap-1 text-sm">
+          <span className="font-medium">按学生查看该题</span>
+          <select
+            defaultValue=""
+            onChange={(event) => {
+              const target = event.target.value;
+              if (!target) {
+                return;
+              }
+              navigate(`/tasks/${taskId}/results/${encodeURIComponent(target)}#question-${question.id}`);
+            }}
+            className="h-9 rounded-md border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+          >
+            <option value="" disabled>
+              选择学生
+            </option>
+            {question.entries.map((entry) => (
+              <option key={entry.student.id} value={entry.student.id}>
+                {entry.student.name}（{entry.student.id}）
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="grid gap-3">
           {question.entries.map((entry) => (
-            <StudentAnswerRow key={entry.student.id} taskId={taskId} entry={entry} />
+            <StudentAnswerRow
+              key={entry.student.id}
+              taskId={taskId}
+              question={question}
+              entry={entry}
+              focused={entry.student.id === focusedStudentId}
+            />
           ))}
         </div>
       </Card>
@@ -220,12 +279,29 @@ function QuestionContent({
   );
 }
 
-function StudentAnswerRow({ taskId, entry }: { taskId: string; entry: QuestionEntry }) {
+function StudentAnswerRow({
+  taskId,
+  question,
+  entry,
+  focused,
+}: {
+  taskId: string;
+  question: QuestionSummary;
+  entry: QuestionEntry;
+  focused: boolean;
+}) {
   const percent =
     entry.correction.max_score > 0 ? (entry.correction.score / entry.correction.max_score) * 100 : null;
 
   return (
-    <div className="rounded-lg border p-3">
+    <div
+      id={`student-${entry.student.id}`}
+      className={
+        focused
+          ? "scroll-mt-24 rounded-lg border border-primary/30 bg-primary/5 p-3"
+          : "scroll-mt-24 rounded-lg border p-3"
+      }
+    >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -243,7 +319,7 @@ function StudentAnswerRow({ taskId, entry }: { taskId: string; entry: QuestionEn
             <span>置信度 {formatConfidence(entry.correction.confidence)}</span>
           </div>
         </div>
-        <Link to={`/tasks/${taskId}/results/${entry.student.id}`}>
+        <Link to={`/tasks/${taskId}/results/${entry.student.id}#question-${entry.correction.q_id}`}>
           <Button type="button" variant="secondary">
             <UserRound className="h-4 w-4" />
             学生详情
@@ -259,11 +335,16 @@ function StudentAnswerRow({ taskId, entry }: { taskId: string; entry: QuestionEn
           <div className="h-full bg-primary" style={{ width: `${clampPercent(percent)}%` }} />
         </div>
       </div>
-      <div className="mt-3 grid gap-3 xl:grid-cols-2">
-        <TextBlock title="学生作答" body={entry.answer?.content} empty="没有作答文本。" />
-        <TextBlock title="AI 评语" body={entry.correction.comment} empty="没有 AI 评语。" />
+      <div className="mt-3">
+        <CorrectionReviewPanel
+          taskId={taskId}
+          studentId={entry.student.id}
+          qId={entry.correction.q_id}
+          questionLabel={question.label}
+          answer={entry.answer}
+          correction={entry.correction}
+        />
       </div>
-      <ReviewReasons correction={entry.correction} />
     </div>
   );
 }
@@ -282,37 +363,6 @@ function QuestionScoreBar({ question }: { question: QuestionSummary }) {
       <div className="h-3 overflow-hidden rounded-full bg-muted">
         <div className="h-full bg-accent" style={{ width: `${clampPercent(question.avgPercent)}%` }} />
       </div>
-    </div>
-  );
-}
-
-function ReviewReasons({ correction }: { correction: Correction }) {
-  const reasons = correction.review_reasons ?? [];
-  if (!hasReviewSignal(correction) && !reasons.length) {
-    return null;
-  }
-
-  return (
-    <div className="mt-3 flex flex-wrap gap-2">
-      {correction.confidence < 0.65 ? (
-        <span className="rounded-full bg-warning/10 px-2 py-1 text-xs font-medium text-warning">置信度偏低</span>
-      ) : null}
-      {reasons.map((reason) => (
-        <span key={reason} className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
-          {reviewReasonLabel(reason)}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function TextBlock({ title, body, empty }: { title: string; body?: string | null; empty: string }) {
-  const content = body?.trim() || empty;
-
-  return (
-    <div className="rounded-lg border bg-muted/30 p-3">
-      <p className="text-xs font-medium text-muted-foreground">{title}</p>
-      <MarkdownMath className="mt-2">{content}</MarkdownMath>
     </div>
   );
 }
