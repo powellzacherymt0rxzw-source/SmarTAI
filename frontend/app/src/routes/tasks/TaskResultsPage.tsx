@@ -3,16 +3,13 @@ import {
   AlertTriangle,
   ArrowRight,
   BarChart3,
-  CheckCircle2,
   FileText,
   Filter,
   Loader2,
   Search,
   Sparkles,
   RefreshCw,
-  ShieldAlert,
   UserRound,
-  UsersRound,
   XCircle,
 } from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -27,22 +24,20 @@ import {
   formatConfidence,
   formatPercent,
   formatScore,
-  hasReviewSignal,
   ResultsLayout,
-  reviewReasonLabel,
   type QuestionSummary,
   type ResultsModel,
   type StudentSummary,
 } from "@/components/tasks/ResultsLayout";
+import { ResultsReviewPanel } from "@/components/tasks/ResultsReviewPanel";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { Textarea } from "@/components/ui/Input";
-import { StatTile } from "@/components/ui/StatTile";
 import { cn } from "@/lib/cn";
 import { getTaskStatusMeta } from "@/lib/taskFlow";
-import type { ChartAnalyticsResult, ChartTrace, ChartTraceType, Correction, TaskStatus } from "@/types";
+import type { ChartAnalyticsResult, ChartTrace, ChartTraceType, TaskStatus } from "@/types";
 
 type PlotDatum = {
   type: ChartTraceType;
@@ -67,7 +62,7 @@ export function TaskResultsPage() {
       ? "按题查看全班得分、复核信号与单题详情。"
       : context === "visualization"
         ? "用当前批改结果展示分数分布与按题平均表现。"
-        : "总览班级表现、低置信题次与学生详情入口。";
+        : "总览班级表现、复核热力图、重点复核队列与学生详情入口。";
 
   const taskQuery = useTask(taskId);
   const resultQuery = useTaskResult(taskId);
@@ -236,107 +231,48 @@ function OverviewView({ taskId, model }: { taskId: string; model: ResultsModel }
     () => (activeStudentIds ? model.students.filter((student) => activeStudentIds.has(student.id)) : model.students),
     [activeStudentIds, model.students],
   );
-  const reviewItems = collectReviewItems(model)
-    .filter((item) => !activeStudentIds || activeStudentIds.has(item.student.id))
-    .slice(0, 8);
 
   return (
     <div className="grid gap-4">
+      <ResultsReviewPanel taskId={taskId} model={model} visibleStudents={visibleStudents} />
+
+      <Card className="grid gap-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">学生列表</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {activeFilter ? `已筛选 ${visibleStudents.length} / ${model.students.length} 人` : `班级平均得分率 ${formatPercent(model.classAveragePercent)}`}
+              {model.timestamp ? `，结果生成于 ${formatTimestamp(model.timestamp)}` : ""}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {activeFilter ? (
+              <Button type="button" variant="ghost" onClick={() => setActiveFilter(null)}>
+                <XCircle className="h-4 w-4" />
+                清除筛选
+              </Button>
+            ) : null}
+            <Link to={`/tasks/${taskId}/results?view=questions`}>
+              <Button type="button" variant="secondary">
+                <FileText className="h-4 w-4" />
+                按题分析
+              </Button>
+            </Link>
+          </div>
+        </div>
+        {visibleStudents.length ? (
+          <StudentTable taskId={taskId} students={visibleStudents} />
+        ) : (
+          <EmptyState title="没有匹配学生" description="当前筛选没有命中学生。清除筛选后可查看全班结果。" />
+        )}
+      </Card>
+
       <OverviewAnalyticsPanel
         taskId={taskId}
         students={model.students}
         activeFilter={activeFilter}
         onFilterChange={setActiveFilter}
       />
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile icon={UsersRound} label="已批改学生" value={model.students.length} tone="primary" />
-        <StatTile
-          icon={BarChart3}
-          label="平均分"
-          value={`${formatScore(model.classAverageScore)} / ${formatScore(model.classAverageMax)}`}
-          tone="accent"
-        />
-        <StatTile icon={ShieldAlert} label="低置信题次" value={model.lowConfidenceCount} tone="warning" />
-        <StatTile icon={CheckCircle2} label="需复核题次" value={model.reviewCount} tone="danger" />
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
-        <Card className="grid gap-4">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 className="text-base font-semibold">学生列表</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {activeFilter ? `已筛选 ${visibleStudents.length} / ${model.students.length} 人` : `班级平均得分率 ${formatPercent(model.classAveragePercent)}`}
-                {model.timestamp ? `，结果生成于 ${formatTimestamp(model.timestamp)}` : ""}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {activeFilter ? (
-                <Button type="button" variant="ghost" onClick={() => setActiveFilter(null)}>
-                  <XCircle className="h-4 w-4" />
-                  清除筛选
-                </Button>
-              ) : null}
-              <Link to={`/tasks/${taskId}/results?view=questions`}>
-                <Button type="button" variant="secondary">
-                  <FileText className="h-4 w-4" />
-                  按题分析
-                </Button>
-              </Link>
-            </div>
-          </div>
-          {visibleStudents.length ? (
-            <StudentTable taskId={taskId} students={visibleStudents} />
-          ) : (
-            <EmptyState title="没有匹配学生" description="当前筛选没有命中学生。清除筛选后可查看全班结果。" />
-          )}
-        </Card>
-
-        <Card className="grid content-start gap-4">
-          <div>
-            <h2 className="text-base font-semibold">复核队列</h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              汇总低置信或后端标记需复核的题次，便于快速进入学生或题目详情。
-            </p>
-          </div>
-          {reviewItems.length ? (
-            <div className="grid gap-2">
-              {reviewItems.map((item) => (
-                <div key={`${item.student.id}-${item.correction.q_id}`} className="rounded-md border p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-medium">{item.student.name}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {item.question.label} · {formatScore(item.correction.score)} / {formatScore(item.correction.max_score)} ·
-                        置信度 {formatConfidence(item.correction.confidence)}
-                      </p>
-                    </div>
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
-                  </div>
-                  <ReviewReasons correction={item.correction} />
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Link to={`/tasks/${taskId}/results/${item.student.id}`}>
-                      <Button type="button" variant="ghost" className="h-8 px-2">
-                        学生详情
-                      </Button>
-                    </Link>
-                    <Link to={`/tasks/${taskId}/questions/${item.question.id}`}>
-                      <Button type="button" variant="ghost" className="h-8 px-2">
-                        题目详情
-                      </Button>
-                    </Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-lg border border-dashed p-4 text-sm leading-6 text-muted-foreground">
-              当前结果没有低置信或需复核题次。
-            </div>
-          )}
-        </Card>
-      </div>
     </div>
   );
 }
@@ -913,26 +849,6 @@ function QuestionAverageChart({ questions }: { questions: QuestionSummary[] }) {
   );
 }
 
-function ReviewReasons({ correction }: { correction: Correction }) {
-  const reasons = correction.review_reasons ?? [];
-  if (!reasons.length && !hasReviewSignal(correction)) {
-    return null;
-  }
-
-  return (
-    <div className="mt-2 flex flex-wrap gap-1">
-      {correction.confidence < 0.65 ? (
-        <span className="rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">置信度偏低</span>
-      ) : null}
-      {reasons.map((reason) => (
-        <span key={reason} className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-          {reviewReasonLabel(reason)}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function LoadingCard() {
   return (
     <Card className="flex items-center gap-3 text-sm text-muted-foreground">
@@ -1150,21 +1066,6 @@ function formatAnalyticsError(error: unknown) {
     return "后端分析服务暂时不可用，请稍后重试。";
   }
   return message || "分析请求失败，请稍后重试。";
-}
-
-function collectReviewItems(model: ResultsModel) {
-  return model.students.flatMap((student) =>
-    student.corrections
-      .filter(hasReviewSignal)
-      .map((correction) => ({
-        student,
-        correction,
-        question: model.questions.find((question) => question.id === correction.q_id) ?? {
-          id: correction.q_id,
-          label: correction.q_id,
-        },
-      })),
-  );
 }
 
 function formatTimestamp(timestamp: number) {

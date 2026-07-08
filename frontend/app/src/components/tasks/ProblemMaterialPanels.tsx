@@ -30,7 +30,7 @@ export function ProblemMaterialTools({ problems }: { problems: ProblemInfo[] }) 
           />
         </div>
         <InlineNotice tone="neutral" title="后端待接入">
-          这里先保留完整入口和信息结构；题号匹配、长文档检索、OCR、匹配置信度和逐题回填需要新增后端 job。
+          这里先保留完整入口和信息结构；题号匹配、长文档检索、OCR、匹配置信度和逐题回填需要新增后端任务。
         </InlineNotice>
         <div className="flex flex-wrap justify-end gap-2">
           <Button type="button" variant="secondary" disabled>
@@ -68,7 +68,7 @@ export function ProblemMaterialTools({ problems }: { problems: ProblemInfo[] }) 
             </label>
           </div>
           <p className="text-xs leading-5 text-muted-foreground">
-            默认值先显示出来，后端保存评分策略和测试生成 job 后再开放编辑。
+            默认值先显示出来，后端保存评分策略和测试生成任务后再开放编辑。
           </p>
         </div>
         <InlineNotice tone="warning" title="不会自动覆盖教师内容">
