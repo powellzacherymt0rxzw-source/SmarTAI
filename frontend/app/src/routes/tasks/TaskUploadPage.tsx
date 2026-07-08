@@ -12,6 +12,8 @@ import {
   PlayCircle,
   RefreshCw,
   Save,
+  ArrowLeft,
+  ArrowRight,
   UploadCloud,
   X,
 } from "lucide-react";
@@ -28,6 +30,7 @@ import {
   useUpdateStudentAnswer,
 } from "@/api/hooks/tasks";
 import { PreGradingConfirmPanel } from "@/components/tasks/PreGradingConfirmPanel";
+import { ProblemMaterialSlots, ProblemMaterialTools } from "@/components/tasks/ProblemMaterialPanels";
 import { SubmissionReviewMatrix, getSubmissionMatrixStats } from "@/components/tasks/SubmissionReviewMatrix";
 import { TaskProgressFocus } from "@/components/tasks/TaskProgressFocus";
 import { TaskStageGate } from "@/components/tasks/TaskStageGate";
@@ -663,10 +666,41 @@ function ProblemsReview({
   onSave: (problem: ProblemInfo) => void;
 }) {
   const [filterText, setFilterText] = useState("");
+  const [selectedProblemId, setSelectedProblemId] = useState<string | null>(null);
   const rows = useMemo(() => problems.map(buildProblemPreparationRow), [problems]);
   const filteredRows = useMemo(() => filterProblemRows(rows, filterText), [filterText, rows]);
   const summary = useMemo(() => buildProblemPreparationSummary(rows), [rows]);
   const missingSlots = summary.missingCriteria + summary.missingAnswers + summary.missingTests;
+  const selectedIndex = filteredRows.findIndex((row) => row.problem.q_id === selectedProblemId);
+  const effectiveSelectedIndex = selectedIndex >= 0 ? selectedIndex : filteredRows.length > 0 ? 0 : -1;
+  const selectedRow = effectiveSelectedIndex >= 0 ? filteredRows[effectiveSelectedIndex] : null;
+  const previousRow = effectiveSelectedIndex > 0 ? filteredRows[effectiveSelectedIndex - 1] : null;
+  const nextRow =
+    effectiveSelectedIndex >= 0 && effectiveSelectedIndex < filteredRows.length - 1
+      ? filteredRows[effectiveSelectedIndex + 1]
+      : null;
+
+  useEffect(() => {
+    const firstProblemId = filteredRows[0]?.problem.q_id ?? null;
+    if (!firstProblemId) {
+      if (selectedProblemId) {
+        setSelectedProblemId(null);
+      }
+      return;
+    }
+    if (!selectedProblemId || !filteredRows.some((row) => row.problem.q_id === selectedProblemId)) {
+      setSelectedProblemId(firstProblemId);
+    }
+  }, [filteredRows, selectedProblemId]);
+
+  function selectProblem(problem: ProblemInfo) {
+    setSelectedProblemId(problem.q_id);
+  }
+
+  function editProblem(problem: ProblemInfo) {
+    selectProblem(problem);
+    onEdit(problem);
+  }
 
   return (
     <Card className="grid gap-5">
@@ -719,6 +753,8 @@ function ProblemsReview({
               当前表格只根据已返回的题干、评分标准、参考答案和测试样例字段推断覆盖情况；资料来源、AI 生成待确认、从原文提取置信度和教师确认状态需要后端新增字段后接入。
             </InlineNotice>
 
+            <ProblemMaterialTools problems={problems} />
+
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <label className="relative block min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -730,12 +766,6 @@ function ProblemsReview({
                 />
               </label>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="secondary" disabled title="需后端接入资料导入与题号匹配 API">
-                  批量导入资料
-                </Button>
-                <Button type="button" variant="secondary" disabled title="需后端接入逐题 AI 补全任务">
-                  AI 补全缺失资料
-                </Button>
                 <Button type="button" variant="secondary" disabled title="需后端返回题目置信度与复核字段">
                   一键 AI 复核
                 </Button>
@@ -761,10 +791,10 @@ function ProblemsReview({
                       <td className="px-3 py-3 font-medium">{row.label}</td>
                       <td className="px-3 py-3 text-muted-foreground">{row.type || "未识别"}</td>
                       <td className="px-3 py-3">
-                        <PreparationStatus status={row.reviewStatus} onClick={() => onEdit(row.problem)} />
+                        <PreparationStatus status={row.reviewStatus} onClick={() => selectProblem(row.problem)} />
                       </td>
                       <td className="px-3 py-3">
-                        <PreparationStatus status={row.criterionStatus} onClick={() => onEdit(row.problem)} />
+                        <PreparationStatus status={row.criterionStatus} onClick={() => editProblem(row.problem)} />
                       </td>
                       <td className="px-3 py-3">
                         <PreparationStatus status={row.answerStatus} />
@@ -773,8 +803,8 @@ function ProblemsReview({
                         <PreparationStatus status={row.testStatus} />
                       </td>
                       <td className="px-3 py-3 text-right">
-                        <Button type="button" variant="secondary" className="h-8" onClick={() => onEdit(row.problem)}>
-                          查看/修改
+                        <Button type="button" variant="secondary" className="h-8" onClick={() => selectProblem(row.problem)}>
+                          查看
                         </Button>
                       </td>
                     </tr>
@@ -793,60 +823,108 @@ function ProblemsReview({
             title="题目详情校对"
             description="当前可保存题干与评分标准；标答、测试样例、测试脚本的编辑和来源状态需要后端字段继续补齐。"
           >
-            <div className="grid gap-3">
-              {filteredRows.map(({ problem }) => {
-                const isEditing = editingProblemId === problem.q_id;
-                return (
-                  <article key={problem.q_id} className="rounded-lg border p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <p className="text-sm font-semibold">{problemLabel(problem)}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{problem.type || "未识别题型"}</p>
-                      </div>
-                      {isEditing ? null : (
-                        <Button type="button" variant="secondary" onClick={() => onEdit(problem)}>
-                          编辑题干/评分标准
-                        </Button>
-                      )}
-                    </div>
+            {selectedRow ? (
+              <div className="grid gap-3">
+                <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">当前题目：{selectedRow.label}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {filteredRows.length} 道筛选结果中的第 {effectiveSelectedIndex + 1} 道
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!previousRow}
+                      onClick={() => previousRow && selectProblem(previousRow.problem)}
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      {previousRow ? `上一题 ${previousRow.label}` : "上一题"}
+                    </Button>
+                    <select
+                      className="h-9 rounded-md border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      value={selectedRow.problem.q_id}
+                      onChange={(event) => {
+                        const next = filteredRows.find((row) => row.problem.q_id === event.target.value);
+                        if (next) {
+                          selectProblem(next.problem);
+                        }
+                      }}
+                    >
+                      {filteredRows.map((row) => (
+                        <option key={row.problem.q_id} value={row.problem.q_id}>
+                          {row.label}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!nextRow}
+                      onClick={() => nextRow && selectProblem(nextRow.problem)}
+                    >
+                      {nextRow ? `下一题 ${nextRow.label}` : "下一题"}
+                      <ArrowRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
 
-                    {isEditing ? (
-                      <div className="mt-4 grid gap-3">
-                        <Field label="题干">
-                          <Textarea
-                            value={problemDraft.stem}
-                            onChange={(event) => onDraftChange({ ...problemDraft, stem: event.target.value })}
-                          />
-                        </Field>
-                        <Field label="评分标准">
-                          <Textarea
-                            value={problemDraft.criterion}
-                            onChange={(event) => onDraftChange({ ...problemDraft, criterion: event.target.value })}
-                          />
-                        </Field>
-                        <div className="flex flex-wrap justify-end gap-2">
-                          <Button type="button" variant="ghost" disabled={isSaving} onClick={onCancel}>
-                            <X className="h-4 w-4" />
-                            取消
-                          </Button>
-                          <Button type="button" disabled={isSaving} onClick={() => onSave(problem)}>
-                            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                            保存
-                          </Button>
+                {(() => {
+                  const problem = selectedRow.problem;
+                  const isEditing = editingProblemId === problem.q_id;
+                  return (
+                    <article key={problem.q_id} className="rounded-lg border p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold">{problemLabel(problem)}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{problem.type || "未识别题型"}</p>
                         </div>
+                        {isEditing ? null : (
+                          <Button type="button" variant="secondary" onClick={() => onEdit(problem)}>
+                            编辑题干/评分标准
+                          </Button>
+                        )}
                       </div>
-                    ) : (
-                      <div className="mt-4 grid gap-3 text-sm">
-                        <PreviewBlock label="题干" value={problem.stem} emptyText="题干为空，请编辑补充。" />
-                        <PreviewBlock label="评分标准" value={problem.criterion} emptyText="评分标准为空，请编辑补充。" />
-                        <PreviewBlock label="标答" value={problem.reference_answer} emptyText="暂无标答。后续可从资料导入或由 AI 补全。" />
-                        <TestCasePreview problem={problem} />
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
+
+                      {isEditing ? (
+                        <div className="mt-4 grid gap-3">
+                          <Field label="题干">
+                            <Textarea
+                              value={problemDraft.stem}
+                              onChange={(event) => onDraftChange({ ...problemDraft, stem: event.target.value })}
+                            />
+                          </Field>
+                          <Field label="评分标准">
+                            <Textarea
+                              value={problemDraft.criterion}
+                              onChange={(event) => onDraftChange({ ...problemDraft, criterion: event.target.value })}
+                            />
+                          </Field>
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <Button type="button" variant="ghost" disabled={isSaving} onClick={onCancel}>
+                              <X className="h-4 w-4" />
+                              取消
+                            </Button>
+                            <Button type="button" disabled={isSaving} onClick={() => onSave(problem)}>
+                              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                              保存
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-4 grid gap-3 text-sm">
+                          <PreviewBlock label="题干" value={problem.stem} emptyText="题干为空，请编辑补充。" />
+                          <ProblemMaterialSlots problem={problem} />
+                        </div>
+                      )}
+                    </article>
+                  );
+                })()}
+              </div>
+            ) : (
+              <EmptyState title="没有可校对题目" description="当前筛选没有匹配题目，可以清空筛选后继续。" />
+            )}
           </WorkflowSection>
         </>
       )}
@@ -943,30 +1021,6 @@ function PreparationStatus({
   }
 
   return <span className="inline-flex min-h-8 items-center gap-2 text-xs text-muted-foreground">{content}</span>;
-}
-
-function TestCasePreview({ problem }: { problem: ProblemInfo }) {
-  const cases = problem.test_cases ?? [];
-  const isProgramming = isProgrammingProblem(problem);
-
-  if (!isProgramming) {
-    return <PreviewBlock label="测试样例" value="非编程题，不需要测试样例。" emptyText="非编程题，不需要测试样例。" />;
-  }
-
-  if (cases.length === 0) {
-    return <PreviewBlock label="测试样例" value={null} emptyText="暂无测试样例。后续可从资料导入或由 AI 生成。" />;
-  }
-
-  const content = cases
-    .slice(0, 3)
-    .map((testCase, index) => {
-      const description = testCase.description?.trim() ? `${testCase.description}\n` : "";
-      return `样例 ${index + 1}\n${description}输入：${testCase.input || "-"}\n期望输出：${testCase.expected_output || "-"}`;
-    })
-    .join("\n\n");
-  const suffix = cases.length > 3 ? `\n\n还有 ${cases.length - 3} 个样例，后续可展开或跳转查看。` : "";
-
-  return <PreviewBlock label="测试样例" value={`${content}${suffix}`} emptyText="暂无测试样例。" />;
 }
 
 function buildProblemPreparationRow(problem: ProblemInfo): ProblemPreparationRow {
