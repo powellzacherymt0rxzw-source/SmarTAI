@@ -15,6 +15,8 @@ import {
   ArrowLeft,
   ArrowRight,
   UploadCloud,
+  UserCheck,
+  Users,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -660,6 +662,22 @@ function UploadPreparationBrief({
           ? "当前支持可复制文本的 PDF、TXT、Markdown；DOCX、图片题面、手写 OCR 和识别增强是后端待接能力。"
           : "当前支持 TXT 或可读取文本的压缩包；PDF、DOCX、表格、图片作答、学生名单匹配和 OCR 是后端待接能力。"}
       </BriefRow>
+
+      {!isProblems ? (
+        <>
+          <BriefRow
+            icon={Users}
+            label="学生名单"
+            status="先自动识别"
+            tone="neutral"
+          >
+            当前会从作答正文和文件名提取学号、姓名；CSV/XLSX 名单导入、按名单自动匹配和批量改身份需要后端字段支持。
+          </BriefRow>
+          <BriefRow icon={UserCheck} label="识别设置继承" status="沿用当前任务" tone="info">
+            作答识别沿用已启用 BYOK 专家池与当前文本解析能力；逐阶段选择专家、手写识别增强和 OCR 开关仍是后端待接配置。
+          </BriefRow>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -1443,6 +1461,7 @@ function SubmissionsReview({
   const [filterText, setFilterText] = useState("");
   const answers = [...(selectedStudent?.stu_ans ?? [])].sort(compareAnswers);
   const matrixStats = useMemo(() => getSubmissionMatrixStats(problems, students), [problems, students]);
+  const identitySummary = useMemo(() => buildStudentIdentitySummary(students), [students]);
 
   return (
     <Card id="submissions-review" className="scroll-mt-24 grid gap-4">
@@ -1471,6 +1490,7 @@ function SubmissionsReview({
             title="作答校对总览"
             description="先按学生和题目查看识别覆盖情况，再选择某个学生进入详细作答。"
           >
+            <StudentIdentityReviewPanel summary={identitySummary} students={students} />
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <PreparationMetric
                 label="学生"
@@ -1580,6 +1600,165 @@ function SubmissionsReview({
       )}
     </Card>
   );
+}
+
+interface StudentIdentitySummary {
+  total: number;
+  ready: number;
+  missingName: number;
+  unknownIdentity: number;
+  duplicateNameCount: number;
+  suspiciousStudents: StudentSubmission[];
+}
+
+function StudentIdentityReviewPanel({
+  summary,
+  students,
+}: {
+  summary: StudentIdentitySummary;
+  students: StudentSubmission[];
+}) {
+  const hasIssues = summary.missingName > 0 || summary.unknownIdentity > 0 || summary.duplicateNameCount > 0;
+
+  return (
+    <div className="grid gap-3 rounded-lg bg-muted/30 p-4">
+      <div>
+        <p className="text-sm font-semibold">学生身份匹配检查</p>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          先用系统识别出的学号和姓名做前端检查；名单导入、自动匹配、批量改身份属于后端待接能力。
+        </p>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          名单导入与批量修正待后端接入；当前可先按缺失、需复核或学生姓名筛选，并逐个学生检查作答。
+        </p>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        <IdentityStat
+          label="身份可用"
+          value={`${summary.ready}/${summary.total}`}
+          detail="有学号且姓名不是未知"
+          tone={summary.ready === summary.total ? "success" : "warning"}
+        />
+        <IdentityStat
+          label="姓名缺失"
+          value={`${summary.missingName}`}
+          detail="需要人工确认或名单匹配"
+          tone={summary.missingName ? "warning" : "success"}
+        />
+        <IdentityStat
+          label="可能重复"
+          value={`${summary.duplicateNameCount}`}
+          detail="同名或未知姓名需留意"
+          tone={summary.duplicateNameCount ? "warning" : "success"}
+        />
+      </div>
+
+      {students.length === 0 ? (
+        <p className="text-sm leading-6 text-muted-foreground">
+          学生作答识别完成后，这里会显示身份匹配质量、缺失姓名和可能重复项。
+        </p>
+      ) : hasIssues ? (
+        <div className="flex items-start gap-2 text-sm leading-6 text-warning">
+          <Circle className="mt-2 h-2.5 w-2.5 shrink-0 fill-current" />
+          <p>
+            {summary.suspiciousStudents.slice(0, 4).map(studentName).join("、")}
+            {summary.suspiciousStudents.length > 4 ? ` 等 ${summary.suspiciousStudents.length} 名` : ""} 需要确认。当前可先在下方筛选学生逐个检查作答。
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-start gap-2 text-sm leading-6 text-muted-foreground">
+          <Circle className="mt-2 h-2.5 w-2.5 shrink-0 fill-current text-accent" />
+          <p>已识别的学生都有学号和姓名；仍建议在正式批改前抽查名单是否与课程学生名单一致。</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IdentityStat({
+  detail,
+  label,
+  tone,
+  value,
+}: {
+  detail: string;
+  label: string;
+  tone: PreparationTone;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start gap-2 text-sm">
+      <Circle
+        className={cn(
+          "mt-1.5 h-2.5 w-2.5 shrink-0 fill-current",
+          tone === "success" ? "text-accent" : tone === "warning" ? "text-warning" : "text-muted-foreground",
+        )}
+      />
+      <div className="min-w-0">
+        <p className="font-medium">
+          {label} <span className="text-muted-foreground">{value}</span>
+        </p>
+        <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+function buildStudentIdentitySummary(students: StudentSubmission[]): StudentIdentitySummary {
+  const nameCounts = new Map<string, number>();
+  for (const student of students) {
+    const normalizedName = normalizeIdentityText(student.stu_name);
+    if (normalizedName && !isUnknownIdentity(normalizedName)) {
+      nameCounts.set(normalizedName, (nameCounts.get(normalizedName) ?? 0) + 1);
+    }
+  }
+
+  let ready = 0;
+  let missingName = 0;
+  let unknownIdentity = 0;
+  let duplicateNameCount = 0;
+  const suspiciousStudents: StudentSubmission[] = [];
+
+  for (const student of students) {
+    const id = normalizeIdentityText(student.stu_id);
+    const name = normalizeIdentityText(student.stu_name);
+    const nameMissing = !name || isUnknownIdentity(name);
+    const idMissing = !id || isUnknownIdentity(id);
+    const duplicateName = Boolean(name && (nameCounts.get(name) ?? 0) > 1);
+
+    if (!idMissing && !nameMissing) {
+      ready += 1;
+    }
+    if (nameMissing) {
+      missingName += 1;
+    }
+    if (idMissing || nameMissing) {
+      unknownIdentity += 1;
+    }
+    if (duplicateName) {
+      duplicateNameCount += 1;
+    }
+    if (nameMissing || idMissing || duplicateName) {
+      suspiciousStudents.push(student);
+    }
+  }
+
+  return {
+    total: students.length,
+    ready,
+    missingName,
+    unknownIdentity,
+    duplicateNameCount,
+    suspiciousStudents,
+  };
+}
+
+function normalizeIdentityText(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function isUnknownIdentity(value: string) {
+  return ["unknown", "[unknown student]", "未知", "未识别", "none", "null", "--"].includes(value);
 }
 
 function DetailSyncState({ title, description }: { title: string; description: string }) {
