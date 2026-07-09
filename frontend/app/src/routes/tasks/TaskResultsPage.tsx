@@ -33,6 +33,7 @@ import { ResultsReviewPanel } from "@/components/tasks/ResultsReviewPanel";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { HorizontalScrollHint } from "@/components/ui/HorizontalScrollHint";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { Textarea } from "@/components/ui/Input";
 import { cn } from "@/lib/cn";
@@ -701,8 +702,10 @@ function ChartBarRow({
 
 function StudentTable({ taskId, students }: { taskId: string; students: StudentSummary[] }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[720px] text-left text-sm">
+    <div className="grid gap-2">
+      <HorizontalScrollHint />
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-left text-sm">
         <thead className="border-b text-xs uppercase text-muted-foreground">
           <tr>
             <th className="px-3 py-2 font-medium">学生</th>
@@ -752,7 +755,8 @@ function StudentTable({ taskId, students }: { taskId: string; students: StudentS
             </tr>
           ))}
         </tbody>
-      </table>
+        </table>
+      </div>
     </div>
   );
 }

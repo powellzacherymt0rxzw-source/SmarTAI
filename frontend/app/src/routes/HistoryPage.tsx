@@ -8,6 +8,7 @@ import { TaskStatusIndicator } from "@/components/tasks/TaskStatusIndicator";
 import { Button } from "@/components/ui/Button";
 import { Card, SectionHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { HorizontalScrollHint } from "@/components/ui/HorizontalScrollHint";
 import { formatTaskTime, getTaskActionLabel, getTaskDestination, getTaskNextStep } from "@/lib/taskFlow";
 import type { TaskLite } from "@/types";
 
@@ -94,8 +95,10 @@ export function HistoryPage() {
           />
         ) : null}
         {!tasksQuery.isLoading && !errorMessage && tasks.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] border-separate border-spacing-0 text-left text-sm">
+          <div className="grid gap-2">
+            <HorizontalScrollHint />
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] border-separate border-spacing-0 text-left text-sm">
               <thead>
                 <tr className="text-xs text-muted-foreground">
                   <th className="border-b px-3 py-2 font-medium">任务</th>
@@ -155,7 +158,8 @@ export function HistoryPage() {
                   );
                 })}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
         ) : null}
       </Card>

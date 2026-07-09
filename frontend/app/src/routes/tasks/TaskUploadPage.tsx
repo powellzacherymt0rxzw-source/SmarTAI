@@ -43,6 +43,7 @@ import { Card, SectionHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Field } from "@/components/ui/Field";
 import { HelpTooltip } from "@/components/ui/HelpTooltip";
+import { HorizontalScrollHint } from "@/components/ui/HorizontalScrollHint";
 import { Input, Textarea } from "@/components/ui/Input";
 import { InlineNotice } from "@/components/ui/InlineNotice";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
@@ -563,35 +564,38 @@ export function TaskUploadPage() {
               />
             </WorkflowSection>
           ) : null}
-          <div className="flex flex-wrap justify-end gap-2">
-          <Link to={isProblems ? `/tasks/${safeTaskId}/setup` : `/tasks/${safeTaskId}/upload/problems`}>
-            <Button type="button" variant="secondary">
-              {isProblems ? "返回资料配置" : "返回题目准备"}
-            </Button>
-          </Link>
-          {isProblems ? (
-            <Button
-              type="button"
-              disabled={!canContinueToSubmissions}
-              onClick={() => navigate(`/tasks/${safeTaskId}/upload/submissions`)}
-            >
-              继续上传作答
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          ) : currentStatus === "grading" || currentStatus === "graded" ? (
-            <Button type="button" onClick={() => navigate(`/tasks/${safeTaskId}/results`)}>
-              {currentStatus === "graded" ? "复核结果" : "查看批改进度"}
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          ) : (
-            <div className="grid justify-items-end gap-2">
-              {gradingGuard.reason ? <p className="max-w-xl text-right text-xs leading-5 text-muted-foreground">{gradingGuard.reason}</p> : null}
-              <Button type="button" disabled={gradingGuard.disabled} onClick={() => void handleStartGrading()}>
-                {startGrading.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
-                开始批改
+          <div className="grid gap-2 sm:flex sm:flex-wrap sm:justify-end">
+            <Link to={isProblems ? `/tasks/${safeTaskId}/setup` : `/tasks/${safeTaskId}/upload/problems`} className="min-w-0">
+              <Button type="button" variant="secondary" className="w-full sm:w-auto">
+                {isProblems ? "返回资料配置" : "返回题目准备"}
               </Button>
-            </div>
-          )}
+            </Link>
+            {isProblems ? (
+              <Button
+                type="button"
+                className="w-full sm:w-auto"
+                disabled={!canContinueToSubmissions}
+                onClick={() => navigate(`/tasks/${safeTaskId}/upload/submissions`)}
+              >
+                继续上传作答
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            ) : currentStatus === "grading" || currentStatus === "graded" ? (
+              <Button type="button" className="w-full sm:w-auto" onClick={() => navigate(`/tasks/${safeTaskId}/results`)}>
+                {currentStatus === "graded" ? "复核结果" : "查看批改进度"}
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            ) : (
+              <div className="grid justify-items-stretch gap-2 sm:justify-items-end">
+                {gradingGuard.reason ? (
+                  <p className="max-w-xl text-left text-xs leading-5 text-muted-foreground sm:text-right">{gradingGuard.reason}</p>
+                ) : null}
+                <Button type="button" className="w-full sm:w-auto" disabled={gradingGuard.disabled} onClick={() => void handleStartGrading()}>
+                  {startGrading.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
+                  开始批改
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </TaskStageGate>
@@ -1075,8 +1079,10 @@ function ProblemsReview({
               </div>
             </div>
 
-            <div className="overflow-x-auto rounded-lg border">
-              <table className="min-w-[880px] w-full border-collapse text-left text-sm">
+            <div className="grid gap-2">
+              <HorizontalScrollHint />
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="min-w-[880px] w-full border-collapse text-left text-sm">
                 <thead className="bg-muted/50 text-xs font-medium text-muted-foreground">
                   <tr>
                     <th className="px-3 py-2">题号</th>
@@ -1113,12 +1119,13 @@ function ProblemsReview({
                     </tr>
                   ))}
                 </tbody>
-              </table>
-              {filteredRows.length === 0 ? (
-                <div className="border-t p-6 text-center text-sm text-muted-foreground">
-                  当前筛选没有匹配题目。可以换成“缺少标答”“编程题”“没有评分标准”等关键词。
-                </div>
-              ) : null}
+                </table>
+                {filteredRows.length === 0 ? (
+                  <div className="border-t p-6 text-center text-sm text-muted-foreground">
+                    当前筛选没有匹配题目。可以换成“缺少标答”“编程题”“没有评分标准”等关键词。
+                  </div>
+                ) : null}
+              </div>
             </div>
           </WorkflowSection>
 
@@ -1135,18 +1142,19 @@ function ProblemsReview({
                       {filteredRows.length} 道筛选结果中的第 {effectiveSelectedIndex + 1} 道
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="grid min-w-0 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
                     <Button
                       type="button"
                       variant="secondary"
+                      className="w-full justify-start sm:w-auto"
                       disabled={!previousRow}
                       onClick={() => previousRow && selectProblem(previousRow.problem)}
                     >
                       <ArrowLeft className="h-4 w-4" />
-                      {previousRow ? `上一题 ${previousRow.label}` : "上一题"}
+                      <span className="min-w-0 truncate">{previousRow ? `上一题：${previousRow.label}` : "上一题"}</span>
                     </Button>
                     <select
-                      className="h-9 rounded-md border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 sm:w-auto"
                       value={selectedRow.problem.q_id}
                       onChange={(event) => {
                         const next = filteredRows.find((row) => row.problem.q_id === event.target.value);
@@ -1164,10 +1172,11 @@ function ProblemsReview({
                     <Button
                       type="button"
                       variant="secondary"
+                      className="w-full justify-start sm:w-auto"
                       disabled={!nextRow}
                       onClick={() => nextRow && selectProblem(nextRow.problem)}
                     >
-                      {nextRow ? `下一题 ${nextRow.label}` : "下一题"}
+                      <span className="min-w-0 truncate">{nextRow ? `下一题：${nextRow.label}` : "下一题"}</span>
                       <ArrowRight className="h-4 w-4" />
                     </Button>
                   </div>

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Card, SectionHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Field } from "@/components/ui/Field";
+import { HorizontalScrollHint } from "@/components/ui/HorizontalScrollHint";
 import { Input } from "@/components/ui/Input";
 import type { ExpertConfig, ProviderType } from "@/types";
 
@@ -184,8 +185,10 @@ export function ExpertsPage() {
         ) : null}
 
         {experts.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left text-sm">
+          <div className="grid gap-2">
+            <HorizontalScrollHint />
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] border-separate border-spacing-0 text-left text-sm">
               <thead className="text-xs uppercase text-muted-foreground">
                 <tr>
                   <th className="border-b px-3 py-2 font-medium">Provider</th>
@@ -206,7 +209,8 @@ export function ExpertsPage() {
                   />
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
         ) : null}
       </Card>

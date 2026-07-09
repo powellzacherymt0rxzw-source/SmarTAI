@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Loader2, Lock, Save, ShieldAlert } from "l
 import { toast } from "sonner";
 import { useSetTeacherComment } from "@/api/hooks/tasks";
 import { Button } from "@/components/ui/Button";
+import { HorizontalScrollHint } from "@/components/ui/HorizontalScrollHint";
 import { InlineNotice } from "@/components/ui/InlineNotice";
 import { Textarea } from "@/components/ui/Input";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
@@ -200,8 +201,10 @@ function ReadonlyField({ label, value, multiline = false }: { label: string; val
 
 function StepScores({ steps }: { steps: Correction["steps"] }) {
   return (
-    <div className="mt-3 overflow-x-auto rounded-lg border bg-card">
-      <table className="w-full min-w-[560px] border-collapse text-left text-sm">
+    <div className="mt-3 grid gap-2">
+      <HorizontalScrollHint />
+      <div className="overflow-x-auto rounded-lg border bg-card">
+        <table className="w-full min-w-[560px] border-collapse text-left text-sm">
         <thead className="bg-muted/40 text-xs text-muted-foreground">
           <tr>
             <th className="px-3 py-2 font-medium">步骤</th>
@@ -224,7 +227,8 @@ function StepScores({ steps }: { steps: Correction["steps"] }) {
             </tr>
           ))}
         </tbody>
-      </table>
+        </table>
+      </div>
     </div>
   );
 }

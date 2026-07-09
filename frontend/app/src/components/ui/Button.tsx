@@ -22,7 +22,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex h-9 min-w-0 max-w-full items-center justify-center gap-2 rounded-md px-3 text-center text-sm font-medium leading-5 transition disabled:cursor-not-allowed disabled:opacity-50 [&>svg]:shrink-0",
         variants[variant],
         className,
       )}
@@ -32,4 +32,3 @@ export function Button({
     </button>
   );
 }
-

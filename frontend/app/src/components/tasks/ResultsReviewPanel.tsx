@@ -11,6 +11,7 @@ import {
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { HorizontalScrollHint } from "@/components/ui/HorizontalScrollHint";
 import { InlineNotice } from "@/components/ui/InlineNotice";
 import { WorkflowSection } from "@/components/ui/WorkflowSection";
 import { cn } from "@/lib/cn";
@@ -147,8 +148,10 @@ function ConfidenceHeatmap({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+    <div className="grid gap-2">
+      <HorizontalScrollHint />
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full min-w-[900px] border-collapse text-left text-sm">
         <thead className="bg-muted/40 text-xs text-muted-foreground">
           <tr>
             <th className="sticky left-0 z-10 bg-muted/40 px-3 py-2 font-medium">学生</th>
@@ -181,7 +184,8 @@ function ConfidenceHeatmap({
             </tr>
           ))}
         </tbody>
-      </table>
+        </table>
+      </div>
     </div>
   );
 }

@@ -124,13 +124,13 @@ function StudentContent({
             <h2 className="text-base font-semibold">{student.name}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{student.id}</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <label className="grid min-w-52 gap-1 text-xs text-muted-foreground">
+          <div className="grid min-w-0 gap-2 sm:flex sm:flex-wrap xl:justify-end">
+            <label className="grid min-w-0 gap-1 text-xs text-muted-foreground sm:min-w-52">
               切换学生
               <select
                 value={student.id}
                 onChange={(event) => navigate(`/tasks/${taskId}/results/${encodeURIComponent(event.target.value)}`)}
-                className="h-9 rounded-md border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
               >
                 {students.map((item) => (
                   <option key={item.id} value={item.id}>
@@ -140,33 +140,33 @@ function StudentContent({
               </select>
             </label>
             {previousStudent ? (
-              <Link to={`/tasks/${taskId}/results/${previousStudent.id}`}>
-                <Button type="button" variant="secondary" className="h-auto min-h-9 max-w-full justify-start whitespace-normal py-2 text-left">
+              <Link to={`/tasks/${taskId}/results/${previousStudent.id}`} className="min-w-0">
+                <Button type="button" variant="secondary" className="w-full justify-start text-left sm:w-auto">
                   <ArrowLeft className="h-4 w-4" />
-                  上一位：{studentNavLabel(previousStudent)}
+                  <span className="min-w-0 truncate">上一位：{studentNavLabel(previousStudent)}</span>
                 </Button>
               </Link>
             ) : (
-              <Button type="button" variant="secondary" disabled>
+              <Button type="button" variant="secondary" className="w-full justify-start sm:w-auto" disabled>
                 <ArrowLeft className="h-4 w-4" />
                 上一位
               </Button>
             )}
             {nextStudent ? (
-              <Link to={`/tasks/${taskId}/results/${nextStudent.id}`}>
-                <Button type="button" variant="secondary" className="h-auto min-h-9 max-w-full justify-start whitespace-normal py-2 text-left">
-                  下一位：{studentNavLabel(nextStudent)}
+              <Link to={`/tasks/${taskId}/results/${nextStudent.id}`} className="min-w-0">
+                <Button type="button" variant="secondary" className="w-full justify-start text-left sm:w-auto">
+                  <span className="min-w-0 truncate">下一位：{studentNavLabel(nextStudent)}</span>
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
             ) : (
-              <Button type="button" variant="secondary" disabled>
+              <Button type="button" variant="secondary" className="w-full justify-start sm:w-auto" disabled>
                 下一位
                 <ArrowRight className="h-4 w-4" />
               </Button>
             )}
-            <Link to={`/tasks/${taskId}/results`}>
-              <Button type="button" variant="secondary">
+            <Link to={`/tasks/${taskId}/results`} className="min-w-0">
+              <Button type="button" variant="secondary" className="w-full sm:w-auto">
                 返回结果列表
               </Button>
             </Link>

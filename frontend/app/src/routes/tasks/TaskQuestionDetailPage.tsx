@@ -161,13 +161,13 @@ function QuestionContent({
               </div>
             ) : null}
           </div>
-          <div className="flex flex-wrap gap-2">
-            <label className="grid min-w-44 gap-1 text-xs text-muted-foreground">
+          <div className="grid min-w-0 gap-2 sm:flex sm:flex-wrap xl:justify-end">
+            <label className="grid min-w-0 gap-1 text-xs text-muted-foreground sm:min-w-44">
               切换题目
               <select
                 value={question.id}
                 onChange={(event) => navigate(`/tasks/${taskId}/questions/${encodeURIComponent(event.target.value)}`)}
-                className="h-9 rounded-md border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
               >
                 {questions.map((item) => (
                   <option key={item.id} value={item.id}>
@@ -177,33 +177,33 @@ function QuestionContent({
               </select>
             </label>
             {previousQuestion ? (
-              <Link to={`/tasks/${taskId}/questions/${previousQuestion.id}`}>
-                <Button type="button" variant="secondary" className="h-auto min-h-9 max-w-full justify-start whitespace-normal py-2 text-left">
+              <Link to={`/tasks/${taskId}/questions/${previousQuestion.id}`} className="min-w-0">
+                <Button type="button" variant="secondary" className="w-full justify-start text-left sm:w-auto">
                   <ArrowLeft className="h-4 w-4" />
-                  上一题：{previousQuestion.label}
+                  <span className="min-w-0 truncate">上一题：{previousQuestion.label}</span>
                 </Button>
               </Link>
             ) : (
-              <Button type="button" variant="secondary" disabled>
+              <Button type="button" variant="secondary" className="w-full justify-start sm:w-auto" disabled>
                 <ArrowLeft className="h-4 w-4" />
                 上一题
               </Button>
             )}
             {nextQuestion ? (
-              <Link to={`/tasks/${taskId}/questions/${nextQuestion.id}`}>
-                <Button type="button" variant="secondary" className="h-auto min-h-9 max-w-full justify-start whitespace-normal py-2 text-left">
-                  下一题：{nextQuestion.label}
+              <Link to={`/tasks/${taskId}/questions/${nextQuestion.id}`} className="min-w-0">
+                <Button type="button" variant="secondary" className="w-full justify-start text-left sm:w-auto">
+                  <span className="min-w-0 truncate">下一题：{nextQuestion.label}</span>
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
             ) : (
-              <Button type="button" variant="secondary" disabled>
+              <Button type="button" variant="secondary" className="w-full justify-start sm:w-auto" disabled>
                 下一题
                 <ArrowRight className="h-4 w-4" />
               </Button>
             )}
-            <Link to={`/tasks/${taskId}/results?view=questions`}>
-              <Button type="button" variant="secondary">
+            <Link to={`/tasks/${taskId}/results?view=questions`} className="min-w-0">
+              <Button type="button" variant="secondary" className="w-full sm:w-auto">
                 返回按题列表
               </Button>
             </Link>

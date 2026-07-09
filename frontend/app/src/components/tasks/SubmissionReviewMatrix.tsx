@@ -1,5 +1,6 @@
 import { Circle, Search } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { HorizontalScrollHint } from "@/components/ui/HorizontalScrollHint";
 import { Input } from "@/components/ui/Input";
 import { cn } from "@/lib/cn";
 import type { ProblemInfo, StudentAnswerInfo, StudentSubmission } from "@/types";
@@ -81,8 +82,10 @@ export function SubmissionReviewMatrix({
         </span>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="min-w-[760px] w-full border-collapse text-left text-sm">
+      <div className="grid gap-2">
+        <HorizontalScrollHint />
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="min-w-[760px] w-full border-collapse text-left text-sm">
           <thead className="bg-muted/50 text-xs font-medium text-muted-foreground">
             <tr>
               <th className="sticky left-0 z-10 min-w-44 bg-muted/50 px-3 py-2">学生</th>
@@ -120,12 +123,13 @@ export function SubmissionReviewMatrix({
               );
             })}
           </tbody>
-        </table>
-        {rows.length === 0 ? (
-          <div className="border-t p-6 text-center text-sm text-muted-foreground">
-            没有匹配的学生。可以换成学号、姓名、“缺失”或“需复核”。
-          </div>
-        ) : null}
+          </table>
+          {rows.length === 0 ? (
+            <div className="border-t p-6 text-center text-sm text-muted-foreground">
+              没有匹配的学生。可以换成学号、姓名、“缺失”或“需复核”。
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
