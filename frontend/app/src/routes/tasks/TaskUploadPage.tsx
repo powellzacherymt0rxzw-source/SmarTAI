@@ -16,8 +16,9 @@ import {
   ArrowRight,
   UploadCloud,
   X,
+  type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useExperts } from "@/api/hooks";
@@ -51,13 +52,14 @@ import {
   getGradingGuard,
   getModelReadiness,
   getUploadGuard,
+  type ModelReadiness,
 } from "@/lib/taskActionGuards";
 import { isTaskProcessing } from "@/lib/taskFlow";
-import type { ProblemInfo, StudentAnswerInfo, StudentSubmission, TaskStatus } from "@/types";
+import type { ExpertConfig, JobProgress, ProblemInfo, StudentAnswerInfo, StudentSubmission, TaskStatus } from "@/types";
 
 const ACTIVE_STATUS = new Set<TaskStatus>(["extracting_problems", "parsing_submissions", "grading"]);
-const PROBLEMS_ACCEPT = ".pdf,.doc,.docx,.txt,.md";
-const SUBMISSIONS_ACCEPT = ".zip,.pdf,.doc,.docx,.txt,.csv,.xlsx";
+const PROBLEMS_ACCEPT = ".pdf,.txt,.md";
+const SUBMISSIONS_ACCEPT = ".zip,.rar,.7z,.tar,.tar.gz,.tgz,.tar.bz2,.tbz2,.txt";
 
 export function TaskUploadPage() {
   const { taskId, kind } = useParams();
@@ -84,16 +86,24 @@ export function TaskUploadPage() {
   const [editingAnswerKey, setEditingAnswerKey] = useState<string | null>(null);
   const [answerDraft, setAnswerDraft] = useState("");
   const lastDetailRefetchKeyRef = useRef<string | null>(null);
+  const lastProgressFocusStatusRef = useRef<TaskStatus | null>(null);
 
   const task = taskQuery.data;
   const currentStatus = (progressQuery.data?.status ?? task?.status ?? "draft") as TaskStatus;
   const isProcessing = progressQuery.isActive || isTaskProcessing(currentStatus);
+  const isCurrentRecognitionActive =
+    (isProblems && currentStatus === "extracting_problems") ||
+    (isSubmissions && currentStatus === "parsing_submissions");
+  const isCurrentRecognitionComplete =
+    (isProblems && currentStatus === "problems_ready") ||
+    (isSubmissions && currentStatus === "submissions_ready");
   const isUploading = extractProblems.isPending || parseSubmissions.isPending;
   const modelReadiness = getModelReadiness({
     experts: expertsQuery.data,
     isLoading: expertsQuery.isLoading,
     isError: expertsQuery.isError,
   });
+  const enabledExperts = useMemo(() => (expertsQuery.data ?? []).filter((expert) => expert.enabled), [expertsQuery.data]);
 
   const problems = useMemo(
     () => Object.values(task?.problem_data ?? {}).sort(compareProblems),
@@ -130,6 +140,20 @@ export function TaskUploadPage() {
       setSelectedStudentId(firstStudentId);
     }
   }, [selectedStudentId, students]);
+
+  useEffect(() => {
+    if (!isCurrentRecognitionActive) {
+      lastProgressFocusStatusRef.current = null;
+      return;
+    }
+    if (lastProgressFocusStatusRef.current === currentStatus) {
+      return;
+    }
+    lastProgressFocusStatusRef.current = currentStatus;
+    window.requestAnimationFrame(() => {
+      document.getElementById("recognition-progress")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [currentStatus, isCurrentRecognitionActive]);
 
   useEffect(() => {
     if (ACTIVE_STATUS.has(currentStatus)) {
@@ -340,11 +364,23 @@ export function TaskUploadPage() {
     <div className="grid gap-5">
       <TaskStepper current={isProblems ? "problems" : "submissions"} task={task} />
       <SectionHeader
-        title={isProblems && expectedProblemCount > 0 ? "题目准备" : isProblems ? "上传题目" : "上传学生作答"}
+        title={
+          isCurrentRecognitionActive
+            ? isProblems
+              ? "题目识别进度"
+              : "作答识别进度"
+            : isProblems && expectedProblemCount > 0
+              ? "题目准备"
+              : isProblems
+                ? "上传题目"
+                : "上传学生作答"
+        }
         description={
-          isProblems
-            ? "上传题目文件；识别完成后在同一页校对题干，并补齐评分标准、标答与测试样例的资料配置。"
-            : "上传学生作答文件，按学生检查识别结果；确认后即可启动批改。"
+          isCurrentRecognitionActive
+            ? "系统正在后台处理文件；完成后页面会自动切回校对总览，无需手动刷新或重复点击。"
+            : isProblems
+              ? "上传题目文件；识别完成后在同一页校对题干，并补齐评分标准、标答与测试样例的资料配置。"
+              : "上传学生作答文件，按学生检查识别结果；确认后即可启动批改。"
         }
         action={
           <Button
@@ -373,83 +409,115 @@ export function TaskUploadPage() {
         errorMessage={taskQuery.error ? getErrorMessage(taskQuery.error) : null}
         onRetry={() => void taskQuery.refetch()}
       >
-        <Card className="grid gap-5">
-          <WorkflowSection
-            title={isProblems ? "添加题目文件" : "添加学生作答"}
-            description={
-              isProblems
-                ? "上传后会自动进入识别状态，完成后在下方校对题干和评分标准。"
-                : "上传后会按学生解析作答，完成后在下方逐个学生校对。"
-            }
-          >
-            {uploadGuard.reason ? (
-              <InlineNotice
-                tone={modelReadiness.disabledReason ? "warning" : "neutral"}
-                title={modelReadiness.disabledReason ? "需要先配置 BYOK 专家" : "当前暂不能上传"}
-                action={
-                  modelReadiness.disabledReason ? (
-                    <Link to="/experts">
-                      <Button type="button" variant="secondary">
-                        前往 BYOK
-                      </Button>
-                    </Link>
-                  ) : null
-                }
-              >
-                {uploadGuard.reason}
-              </InlineNotice>
-            ) : uploadGuard.confirmMessage ? (
-              <InlineNotice
-                tone={uploadGuard.suggestNewTask ? "warning" : "info"}
-                title={uploadGuard.confirmTitle ?? "上传前确认"}
-                action={
-                  uploadGuard.suggestNewTask ? (
-                    <Link to="/tasks/new">
-                      <Button type="button" variant="secondary">
-                        新建任务
-                      </Button>
-                    </Link>
-                  ) : null
-                }
-              >
-                {uploadGuard.confirmMessage}
-              </InlineNotice>
-            ) : null}
-            <UploadCard
-              accept={isProblems ? PROBLEMS_ACCEPT : SUBMISSIONS_ACCEPT}
-              currentFileName={isProblems ? task?.problem_file_name : task?.submission_file_name}
-              disabled={uploadGuard.disabled}
-              disabledReason={uploadGuard.reason}
-              isDragging={isDragging}
-              isProblems={isProblems}
-              isUploading={isUploading}
-              uploadFileName={uploadFileName}
-              uploadPercent={uploadPercent}
-              onDragChange={setIsDragging}
-              onDrop={handleDrop}
-              onFileInput={handleFileInput}
-            />
-          </WorkflowSection>
-          <WorkflowSection title="识别状态" description="上传、识别、同步详情都会在这里显示；离开页面后回来也会继续跟进当前任务。">
-            <TaskProgressFocus
-              status={currentStatus}
-              progress={progressQuery.progress}
-              isLoading={taskQuery.isLoading}
-              isProcessing={isProcessing}
-              percent={progressQuery.percent}
-              problemCount={expectedProblemCount}
-              error={progressQuery.progress?.error_detail ?? task?.error ?? null}
-              studentCount={expectedStudentCount}
-              onRefresh={() => {
-                lastDetailRefetchKeyRef.current = null;
-                void taskQuery.refetch();
-                void progressQuery.refetch();
-              }}
-            />
-          </WorkflowSection>
-        </Card>
+        {isCurrentRecognitionActive ? (
+          <RecognitionProgressPanel
+            kind={isProblems ? "problems" : "submissions"}
+            status={currentStatus}
+            progress={progressQuery.progress}
+            isLoading={taskQuery.isLoading}
+            isProcessing={isProcessing}
+            percent={progressQuery.percent}
+            problemCount={expectedProblemCount}
+            studentCount={expectedStudentCount}
+            error={progressQuery.progress?.error_detail ?? task?.error ?? null}
+            onRefresh={() => {
+              lastDetailRefetchKeyRef.current = null;
+              void taskQuery.refetch();
+              void progressQuery.refetch();
+            }}
+          />
+        ) : (
+          <Card className="grid gap-5">
+            <WorkflowSection
+              title={isProblems ? "添加题目文件" : "添加学生作答"}
+              description={
+                isProblems
+                  ? "上传后会自动进入识别状态，完成后在下方校对题干和评分标准。"
+                  : "上传后会按学生解析作答，完成后在下方逐个学生校对。"
+              }
+            >
+              {uploadGuard.reason ? (
+                <InlineNotice
+                  tone={modelReadiness.disabledReason ? "warning" : "neutral"}
+                  title={modelReadiness.disabledReason ? "需要先配置 BYOK 专家" : "当前暂不能上传"}
+                  action={
+                    modelReadiness.disabledReason ? (
+                      <Link to="/experts">
+                        <Button type="button" variant="secondary">
+                          前往 BYOK
+                        </Button>
+                      </Link>
+                    ) : null
+                  }
+                >
+                  {uploadGuard.reason}
+                </InlineNotice>
+              ) : uploadGuard.confirmMessage ? (
+                <InlineNotice
+                  tone={uploadGuard.suggestNewTask ? "warning" : "info"}
+                  title={uploadGuard.confirmTitle ?? "上传前确认"}
+                  action={
+                    uploadGuard.suggestNewTask ? (
+                      <Link to="/tasks/new">
+                        <Button type="button" variant="secondary">
+                          新建任务
+                        </Button>
+                      </Link>
+                    ) : null
+                  }
+                >
+                  {uploadGuard.confirmMessage}
+                </InlineNotice>
+              ) : null}
+              <UploadPreparationBrief
+                enabledExperts={enabledExperts}
+                isProblems={isProblems}
+                modelReadiness={modelReadiness}
+                taskDocCount={task?.kb_doc_count ?? 0}
+              />
+              <UploadCard
+                accept={isProblems ? PROBLEMS_ACCEPT : SUBMISSIONS_ACCEPT}
+                currentFileName={isProblems ? task?.problem_file_name : task?.submission_file_name}
+                disabled={uploadGuard.disabled}
+                disabledReason={uploadGuard.reason}
+                isDragging={isDragging}
+                isProblems={isProblems}
+                isUploading={isUploading}
+                uploadFileName={uploadFileName}
+                uploadPercent={uploadPercent}
+                onDragChange={setIsDragging}
+                onDrop={handleDrop}
+                onFileInput={handleFileInput}
+              />
+            </WorkflowSection>
+            <WorkflowSection title="识别状态" description="上传、识别、同步详情都会在这里显示；离开页面后回来也会继续跟进当前任务。">
+              <TaskProgressFocus
+                status={currentStatus}
+                progress={progressQuery.progress}
+                isLoading={taskQuery.isLoading}
+                isProcessing={isProcessing}
+                percent={progressQuery.percent}
+                problemCount={expectedProblemCount}
+                error={progressQuery.progress?.error_detail ?? task?.error ?? null}
+                studentCount={expectedStudentCount}
+                onRefresh={() => {
+                  lastDetailRefetchKeyRef.current = null;
+                  void taskQuery.refetch();
+                  void progressQuery.refetch();
+                }}
+              />
+            </WorkflowSection>
+          </Card>
+        )}
 
-        {isProblems ? (
+        {isCurrentRecognitionComplete ? (
+          <RecognitionCompleteNotice
+            kind={isProblems ? "problems" : "submissions"}
+            count={isProblems ? expectedProblemCount : expectedStudentCount}
+          />
+        ) : null}
+
+        {!isCurrentRecognitionActive && isProblems ? (
           <ProblemsReview
             editingProblemId={editingProblemId}
             isSaving={updateProblem.isPending}
@@ -461,7 +529,9 @@ export function TaskUploadPage() {
             onEdit={startProblemEdit}
             onSave={(problem) => void saveProblem(problem)}
           />
-        ) : (
+        ) : null}
+
+        {!isCurrentRecognitionActive && !isProblems ? (
           <SubmissionsReview
             answerDraft={answerDraft}
             editingAnswerKey={editingAnswerKey}
@@ -477,7 +547,7 @@ export function TaskUploadPage() {
             onSave={(student, answer) => void saveAnswer(student, answer)}
             onSelectStudent={setSelectedStudentId}
           />
-        )}
+        ) : null}
 
         <div className="grid gap-4">
           {!isProblems && currentStatus !== "grading" && currentStatus !== "graded" ? (
@@ -525,6 +595,122 @@ export function TaskUploadPage() {
       </TaskStageGate>
     </div>
   );
+}
+
+function UploadPreparationBrief({
+  enabledExperts,
+  isProblems,
+  modelReadiness,
+  taskDocCount,
+}: {
+  enabledExperts: ExpertConfig[];
+  isProblems: boolean;
+  modelReadiness: ModelReadiness;
+  taskDocCount: number;
+}) {
+  const expertSummary =
+    enabledExperts.length > 0
+      ? enabledExperts.slice(0, 2).map(formatExpertLabel).join("、") +
+        (enabledExperts.length > 2 ? ` 等 ${enabledExperts.length} 个` : "")
+      : "还没有启用专家";
+  const expertStatus = modelReadiness.isError
+    ? "状态未知"
+    : modelReadiness.disabledReason
+      ? "需要配置"
+      : modelReadiness.isLoading
+        ? "读取中"
+        : `${modelReadiness.enabledCount} 个可用`;
+  const expertTone = modelReadiness.isError || modelReadiness.disabledReason ? "warning" : "success";
+
+  return (
+    <div className="grid gap-3 rounded-lg bg-muted/30 p-4">
+      <div>
+        <p className="text-sm font-semibold">上传前检查</p>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          保留最少必要设置，避免老师上传前被大配置页打断；更细的评分标准、标答、测试样例会在识别后逐题补齐。
+        </p>
+      </div>
+
+      <BriefRow
+        icon={ListChecks}
+        label="BYOK 专家"
+        status={expertStatus}
+        tone={expertTone}
+        action={
+          modelReadiness.disabledReason ? (
+            <Link to="/experts">
+              <Button type="button" variant="secondary" className="h-8">
+                去配置
+              </Button>
+            </Link>
+          ) : null
+        }
+      >
+        {expertSummary}。当前阶段沿用已启用专家池；逐阶段选择单专家/多专家组合需要后端继续接入任务级配置。
+      </BriefRow>
+
+      <BriefRow icon={FileText} label="资料配置" status={taskDocCount > 0 ? `${taskDocCount} 份已有` : "识别后补齐"} tone="neutral">
+        {isProblems
+          ? "题目识别完成后，在题目准备总览里补评分标准、标答和测试样例；知识库文件、分组或全库选择仍需要后端数据模型支持。"
+          : "作答识别只处理学生答案本身；正式批改前会集中确认专家组合、资料范围与评分策略。"}
+      </BriefRow>
+
+      <BriefRow icon={Images} label="识别能力" status="当前能力" tone="info">
+        {isProblems
+          ? "当前支持可复制文本的 PDF、TXT、Markdown；DOCX、图片题面、手写 OCR 和识别增强是后端待接能力。"
+          : "当前支持 TXT 或可读取文本的压缩包；PDF、DOCX、表格、图片作答、学生名单匹配和 OCR 是后端待接能力。"}
+      </BriefRow>
+    </div>
+  );
+}
+
+function BriefRow({
+  action,
+  children,
+  icon: Icon,
+  label,
+  status,
+  tone,
+}: {
+  action?: ReactNode;
+  children: ReactNode;
+  icon: LucideIcon;
+  label: string;
+  status: string;
+  tone: "success" | "warning" | "info" | "neutral";
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-md bg-background/70 p-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex min-w-0 gap-3">
+        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium">{label}</p>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-xs font-medium",
+                tone === "success"
+                  ? "bg-accent/10 text-accent"
+                  : tone === "warning"
+                    ? "bg-warning/10 text-warning"
+                    : tone === "info"
+                      ? "bg-primary/10 text-primary"
+                      : "bg-muted text-muted-foreground",
+              )}
+            >
+              {status}
+            </span>
+          </div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{children}</p>
+        </div>
+      </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
+  );
+}
+
+function formatExpertLabel(expert: ExpertConfig) {
+  return expert.display_name || `${expert.provider_type} ${expert.model}`;
 }
 
 function UploadCard({
@@ -585,8 +771,8 @@ function UploadCard({
         <h2 className="mt-3 text-base font-semibold">{isProblems ? "拖入题目文件" : "拖入作答文件或压缩包"}</h2>
         <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
           {isProblems
-            ? "支持上传 PDF、文档或文本格式的题目文件；图片题面与 OCR 识别仍是后续接入项。"
-            : "支持上传按学生整理的文件、压缩包或表格索引；图片与手写 OCR 仍是后续接入项。"}
+            ? "支持上传可复制文本的 PDF、TXT 或 Markdown 题目文件；DOCX、图片题面与 OCR 识别仍是后续接入项。"
+            : "支持上传 TXT 作答文件，或包含可读取文本作答的 ZIP/RAR/7Z/TAR 压缩包；PDF、DOCX、表格、图片与手写 OCR 仍是后续接入项。"}
         </p>
         <input ref={fileInputRef} type="file" accept={accept} className="hidden" onChange={onFileInput} />
         <Button type="button" className="mt-5" disabled={isUploading || disabled} onClick={() => fileInputRef.current?.click()}>
@@ -607,11 +793,11 @@ function UploadCard({
         ) : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
         {(isProblems
           ? [
               { icon: FileText, title: "题干识别", text: "拆分题目与小问" },
-              { icon: ListChecks, title: "评分标准", text: "校对分值与要点" },
+              { icon: ListChecks, title: "题目准备", text: "总览待复核项" },
               { icon: Images, title: "图片题面", text: "OCR 后续接入" },
             ]
           : [
@@ -622,10 +808,12 @@ function UploadCard({
         ).map((item) => {
           const Icon = item.icon;
           return (
-            <div key={item.title} className="rounded-lg border p-3">
-              <Icon className="h-4 w-4 text-accent" />
-              <p className="mt-2 text-sm font-medium">{item.title}</p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.text}</p>
+            <div key={item.title} className="flex items-start gap-2">
+              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+              <div>
+                <p className="font-medium text-foreground">{item.title}</p>
+                <p className="mt-0.5 text-xs leading-5">{item.text}</p>
+              </div>
             </div>
           );
         })}
@@ -641,6 +829,103 @@ function UploadCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function RecognitionProgressPanel({
+  kind,
+  status,
+  progress,
+  isLoading,
+  isProcessing,
+  percent,
+  problemCount,
+  studentCount,
+  error,
+  onRefresh,
+}: {
+  kind: "problems" | "submissions";
+  status: TaskStatus;
+  progress: JobProgress | null;
+  isLoading?: boolean;
+  isProcessing?: boolean;
+  percent: number;
+  problemCount: number;
+  studentCount: number;
+  error?: string | null;
+  onRefresh: () => void;
+}) {
+  const isProblems = kind === "problems";
+
+  return (
+    <Card id="recognition-progress" className="scroll-mt-24 grid gap-5">
+      <WorkflowSection
+        title={isProblems ? "正在识别题目" : "正在识别学生作答"}
+        description={
+          isProblems
+            ? "系统正在拆分题号、题干和初始评分信息。完成后会自动显示题目准备总览。"
+            : "系统正在按学生与题号解析作答内容。完成后会自动显示学生 x 题目校对矩阵。"
+        }
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" onClick={onRefresh}>
+              <RefreshCw className="h-4 w-4" />
+              刷新状态
+            </Button>
+            <Link to="/">
+              <Button type="button" variant="secondary">
+                返回任务总览
+              </Button>
+            </Link>
+            <Link to="/history">
+              <Button type="button" variant="secondary">
+                去历史任务
+              </Button>
+            </Link>
+          </div>
+        }
+      >
+        <TaskProgressFocus
+          status={status}
+          progress={progress}
+          isLoading={isLoading}
+          isProcessing={isProcessing}
+          percent={percent}
+          problemCount={problemCount}
+          studentCount={studentCount}
+          error={error}
+          onRefresh={onRefresh}
+        />
+        <InlineNotice tone="neutral" title="自动跟进，不需要重复点击">
+          如果文件较大或模型响应较慢，进度会继续轮询；重复上传同一文件会由后端幂等逻辑拦截，避免重复消耗模型调用。
+        </InlineNotice>
+      </WorkflowSection>
+    </Card>
+  );
+}
+
+function RecognitionCompleteNotice({ kind, count }: { kind: "problems" | "submissions"; count: number }) {
+  const isProblems = kind === "problems";
+  const targetId = isProblems ? "problems-review" : "submissions-review";
+
+  return (
+    <InlineNotice
+      tone="success"
+      title={isProblems ? "题目识别完成" : "作答识别完成"}
+      action={
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+        >
+          {isProblems ? "开始校对题目" : "查看作答矩阵"}
+        </Button>
+      }
+    >
+      {isProblems
+        ? `已识别 ${count} 道题。请从总览表检查题干、评分标准、标答和测试样例。`
+        : `已解析 ${count} 名学生。请从矩阵检查缺失、异常和需要人工复核的作答。`}
+    </InlineNotice>
   );
 }
 
@@ -703,7 +988,7 @@ function ProblemsReview({
   }
 
   return (
-    <Card className="grid gap-5">
+    <Card id="problems-review" className="scroll-mt-24 grid gap-5">
       {problems.length === 0 ? (
         expectedCount > 0 ? (
           <DetailSyncState
@@ -1160,7 +1445,7 @@ function SubmissionsReview({
   const matrixStats = useMemo(() => getSubmissionMatrixStats(problems, students), [problems, students]);
 
   return (
-    <Card className="grid gap-4">
+    <Card id="submissions-review" className="scroll-mt-24 grid gap-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-base font-semibold">学生作答预览与校对</h2>
