@@ -17,7 +17,9 @@ import { toast } from "sonner";
 import { normalizeAPIError } from "@/api/client";
 import { useAnalyticsQuery } from "@/api/hooks/analytics";
 import { useTask, useTaskResult } from "@/api/hooks/tasks";
+import { TaskProgressFocus } from "@/components/tasks/TaskProgressFocus";
 import { useI18n } from "@/i18n/I18nProvider";
+import { useTaskProgress } from "@/hooks/useTaskProgress";
 import {
   buildResultsModel,
   clampPercent,
@@ -36,9 +38,10 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { HorizontalScrollHint } from "@/components/ui/HorizontalScrollHint";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { Textarea } from "@/components/ui/Input";
+import { WorkflowSection } from "@/components/ui/WorkflowSection";
 import { cn } from "@/lib/cn";
 import { getTaskStatusMeta } from "@/lib/taskFlow";
-import type { ChartAnalyticsResult, ChartTrace, ChartTraceType, TaskStatus } from "@/types";
+import type { ChartAnalyticsResult, ChartTrace, ChartTraceType, JobProgress, TaskStatus } from "@/types";
 
 type PlotDatum = {
   type: ChartTraceType;
@@ -67,9 +70,14 @@ export function TaskResultsPage() {
 
   const taskQuery = useTask(taskId);
   const resultQuery = useTaskResult(taskId);
+  const progressQuery = useTaskProgress(taskId, { enabled: taskQuery.data?.status === "grading" });
   const model = useMemo(() => buildResultsModel(taskQuery.data, resultQuery.data), [taskQuery.data, resultQuery.data]);
   const firstStudentId = model.students[0]?.id ?? null;
   const firstQuestionId = model.questions[0]?.id ?? null;
+  const effectiveStatus =
+    resultQuery.data?.status === "completed"
+      ? "completed"
+      : taskQuery.data?.status ?? resultQuery.data?.status;
 
   if (!taskId) {
     return <EmptyState title="缺少任务 ID" description="请从任务总览或历史任务进入结果页。" />;
@@ -80,6 +88,7 @@ export function TaskResultsPage() {
       context={context}
       title={title}
       description={description}
+      task={taskQuery.data}
       detailTargets={{ studentId: firstStudentId, questionId: firstQuestionId }}
     >
       {taskQuery.isLoading || resultQuery.isLoading ? <LoadingCard /> : null}
@@ -97,7 +106,15 @@ export function TaskResultsPage() {
           taskId={taskId}
           context={context}
           model={model}
-          status={resultQuery.data?.status ?? taskQuery.data?.status}
+          status={effectiveStatus}
+          progress={progressQuery.progress}
+          progressPercent={progressQuery.percent}
+          isProgressLoading={progressQuery.isLoading}
+          onRefreshProgress={() => {
+            void taskQuery.refetch();
+            void resultQuery.refetch();
+            void progressQuery.refetch();
+          }}
         />
       ) : null}
     </ResultsLayout>
@@ -108,12 +125,20 @@ function ResultsContent({
   taskId,
   context,
   model,
+  onRefreshProgress,
+  progress,
+  progressPercent,
   status,
+  isProgressLoading,
 }: {
   taskId: string;
   context: "overview" | "by-question" | "visualization";
   model: ResultsModel;
+  onRefreshProgress: () => void;
+  progress: JobProgress | null;
+  progressPercent: number;
   status?: TaskStatus | "completed" | "not_found";
+  isProgressLoading?: boolean;
 }) {
   const content =
     context === "by-question" ? (
@@ -123,6 +148,29 @@ function ResultsContent({
     ) : (
       <OverviewView taskId={taskId} model={model} />
     );
+
+  if (status === "grading") {
+    return (
+      <Card className="grid gap-5">
+        <WorkflowSection
+          title="批改进度"
+          description="批改会在后台继续运行；可以停留查看子步骤，也可以稍后从任务总览或历史任务回来。"
+        >
+          <TaskProgressFocus
+            status="grading"
+            progress={progress}
+            percent={progressPercent}
+            isLoading={isProgressLoading}
+            isProcessing
+            problemCount={model.task?.problem_count ?? model.problems.length}
+            studentCount={model.task?.student_count ?? model.students.length}
+            error={progress?.error_detail ?? model.task?.error ?? null}
+            onRefresh={onRefreshProgress}
+          />
+        </WorkflowSection>
+      </Card>
+    );
+  }
 
   if (status !== "completed") {
     return (

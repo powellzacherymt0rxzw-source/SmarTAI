@@ -3,7 +3,7 @@ import { BarChart3, ClipboardList, FileText, Layers3, UserRound } from "lucide-r
 import { Link, useParams } from "react-router-dom";
 import { SectionHeader } from "@/components/ui/Card";
 import { cn } from "@/lib/cn";
-import type { Correction, ProblemInfo, StudentAnswerInfo, StudentResult, StudentSubmission, Task, TaskResultResponse } from "@/types";
+import type { Correction, ProblemInfo, StudentAnswerInfo, StudentResult, StudentSubmission, Task, TaskLite, TaskResultResponse } from "@/types";
 import { TaskStepper } from "./TaskStepper";
 
 export type ResultContext = "overview" | "by-question" | "visualization" | "student-detail" | "question-detail";
@@ -90,12 +90,14 @@ export function ResultsLayout({
   context,
   title,
   description,
+  task,
   detailTargets,
   children,
 }: {
   context: ResultContext;
   title: string;
   description: string;
+  task?: TaskLite;
   detailTargets?: {
     studentId?: string | null;
     questionId?: string | null;
@@ -126,7 +128,7 @@ export function ResultsLayout({
 
   return (
     <div className="grid gap-5">
-      <TaskStepper current="results" task={undefined} />
+      <TaskStepper current="results" task={task} />
       <SectionHeader title={title} description={description} />
       <nav aria-label="结果分析视图" className="rounded-lg border bg-card p-2">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">

@@ -159,11 +159,7 @@ export function getTaskStatusMeta(status?: string | null): TaskStatusMeta {
   if (!status) {
     return DEFAULT_STATUS_META;
   }
-  return TASK_STATUS_META[status as TaskDisplayStatus] ?? {
-    ...DEFAULT_STATUS_META,
-    label: status,
-    shortLabel: status,
-  };
+  return TASK_STATUS_META[status as TaskDisplayStatus] ?? DEFAULT_STATUS_META;
 }
 
 export function isTaskProcessing(status?: string | null): boolean {

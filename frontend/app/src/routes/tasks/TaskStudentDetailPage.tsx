@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, FileText, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTask, useTaskResult } from "@/api/hooks/tasks";
@@ -38,6 +38,7 @@ export function TaskStudentDetailPage() {
       context="student-detail"
       title={student ? `${student.name} 的批改详情` : `学生详情 ${studentId ?? ""}`}
       description="查看单个学生的逐题得分、AI 评语、低置信与复核原因。"
+      task={taskQuery.data}
       detailTargets={{ studentId: student?.id ?? studentId ?? null, questionId: firstQuestionId }}
     >
       {taskQuery.isLoading || resultQuery.isLoading ? <LoadingCard /> : null}
@@ -83,6 +84,16 @@ function StudentContent({
   resultStatus?: string;
 }) {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (resultStatus !== "completed" || !student || !window.location.hash) {
+      return;
+    }
+    const targetId = decodeURIComponent(window.location.hash.slice(1));
+    window.setTimeout(() => {
+      document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  }, [resultStatus, student]);
 
   if (resultStatus !== "completed") {
     return (

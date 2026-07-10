@@ -3,8 +3,11 @@ import { useTaskState } from "@/api/hooks/tasks";
 
 const ACTIVE_STATUSES = new Set(["extracting_problems", "parsing_submissions", "grading"]);
 
-export function useTaskProgress(taskId?: string) {
-  const query = useTaskState(taskId, { refetchInterval: 1_500 });
+export function useTaskProgress(taskId?: string, options: { enabled?: boolean } = {}) {
+  const query = useTaskState(taskId, {
+    enabled: options.enabled,
+    refetchInterval: options.enabled === false ? false : 1_500,
+  });
 
   const isActive = Boolean(query.data?.status && ACTIVE_STATUSES.has(query.data.status));
   const progress = query.data?.progress ?? null;

@@ -1,4 +1,8 @@
-import { BookOpenCheck, Circle, FileCode2, FileText, FlaskConical, ListChecks, Sparkles, UploadCloud } from "lucide-react";
+import { useRef, type ChangeEvent } from "react";
+import { BookOpenCheck, Circle, FileCode2, FileText, FlaskConical, Loader2, ListChecks, Sparkles, UploadCloud } from "lucide-react";
+import { toast } from "sonner";
+import { normalizeAPIError } from "@/api/client";
+import { useUploadReference, useUploadTestCases } from "@/api/hooks/tasks";
 import { Button } from "@/components/ui/Button";
 import { InlineNotice } from "@/components/ui/InlineNotice";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
@@ -6,8 +10,44 @@ import { WorkflowSection } from "@/components/ui/WorkflowSection";
 import { cn } from "@/lib/cn";
 import type { ProblemInfo, TestCase } from "@/types";
 
-export function ProblemMaterialTools({ problems }: { problems: ProblemInfo[] }) {
+export function ProblemMaterialTools({
+  onUploaded,
+  problems,
+  taskId,
+}: {
+  onUploaded?: () => void;
+  problems: ProblemInfo[];
+  taskId: string;
+}) {
   const summary = getMaterialSummary(problems);
+  const referenceInputRef = useRef<HTMLInputElement>(null);
+  const testCasesInputRef = useRef<HTMLInputElement>(null);
+  const uploadReference = useUploadReference();
+  const uploadTestCases = useUploadTestCases();
+  const isUploading = uploadReference.isPending || uploadTestCases.isPending;
+
+  async function handleUpload(kind: "reference" | "test-cases", event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    try {
+      if (kind === "reference") {
+        await uploadReference.mutateAsync({ taskId, file });
+        toast.success("标答文件已上传", { description: "后端会把它作为任务级标答资料保存；逐题匹配能力继续待接。" });
+      } else {
+        await uploadTestCases.mutateAsync({ taskId, file });
+        toast.success("测试样例已上传", { description: "后端会把它作为编程题测试样例资料保存。" });
+      }
+      onUploaded?.();
+    } catch (error) {
+      toast.error(kind === "reference" ? "标答上传失败" : "测试样例上传失败", {
+        description: normalizeAPIError(error).message,
+      });
+    } finally {
+      event.target.value = "";
+    }
+  }
 
   return (
     <div className="grid gap-4">
@@ -29,9 +69,57 @@ export function ProblemMaterialTools({ problems }: { problems: ProblemInfo[] }) 
             items={["已按题整理", "从原文提取"]}
           />
         </div>
-        <InlineNotice tone="neutral" title="后端待接入">
-          这里先保留完整入口和信息结构；题号匹配、长文档检索、OCR、匹配置信度和逐题回填需要新增后端任务。
+        <InlineNotice tone="neutral" title="任务级上传已可用">
+          标答文件和编程题测试样例可以先作为本任务资料上传；题号匹配、长文档检索、OCR、匹配置信度和逐题回填仍需要新增后端任务。
         </InlineNotice>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-md border bg-background p-3">
+            <p className="text-sm font-semibold">上传标答文件</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              适合已按题整理的标答，或先上传整份标答原文；从原文提取到逐题标答仍待后端接入。
+            </p>
+            <input
+              ref={referenceInputRef}
+              type="file"
+              className="hidden"
+              accept=".pdf,.md,.txt,.json"
+              onChange={(event) => void handleUpload("reference", event)}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              className="mt-3"
+              disabled={isUploading}
+              onClick={() => referenceInputRef.current?.click()}
+            >
+              {uploadReference.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+              选择标答文件
+            </Button>
+          </div>
+          <div className="rounded-md border bg-background p-3">
+            <p className="text-sm font-semibold">上传测试样例</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              仅编程题消费此项；支持 JSON、Markdown、TXT 或自然语言描述的输入输出样例。
+            </p>
+            <input
+              ref={testCasesInputRef}
+              type="file"
+              className="hidden"
+              accept=".json,.md,.txt,.py,.js,.java,.cpp,.c"
+              onChange={(event) => void handleUpload("test-cases", event)}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              className="mt-3"
+              disabled={isUploading}
+              onClick={() => testCasesInputRef.current?.click()}
+            >
+              {uploadTestCases.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
+              选择测试样例
+            </Button>
+          </div>
+        </div>
         <div className="flex flex-wrap justify-end gap-2">
           <Button type="button" variant="secondary" disabled>
             <UploadCloud className="h-4 w-4" />

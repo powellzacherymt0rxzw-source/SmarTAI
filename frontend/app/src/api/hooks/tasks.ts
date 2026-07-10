@@ -18,11 +18,11 @@ export function useTask(taskId?: string) {
   });
 }
 
-export function useTaskState(taskId?: string, options: { refetchInterval?: number | false } = {}) {
+export function useTaskState(taskId?: string, options: { refetchInterval?: number | false; enabled?: boolean } = {}) {
   return useQuery({
     queryKey: taskKeys.state(taskId ?? ""),
     queryFn: () => tasksApi.getTaskState(taskId as string),
-    enabled: Boolean(taskId),
+    enabled: Boolean(taskId) && (options.enabled ?? true),
     refetchInterval: options.refetchInterval,
   });
 }

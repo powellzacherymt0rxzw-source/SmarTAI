@@ -45,6 +45,7 @@ export function TaskQuestionDetailPage() {
       context="question-detail"
       title={question ? `${question.label} 全班详情` : `题目详情 ${questionId ?? ""}`}
       description="查看单题题干、评分标准、全班得分统计与每位学生的答案/评语。"
+      task={taskQuery.data}
       detailTargets={{ studentId: firstStudentId, questionId: question?.id ?? questionId ?? null }}
     >
       {taskQuery.isLoading || resultQuery.isLoading ? <LoadingCard /> : null}

@@ -214,7 +214,7 @@ function ConfidenceCell({
 
   return (
     <Link
-      to={`/tasks/${taskId}/results/${student.id}`}
+      to={`/tasks/${taskId}/results/${encodeURIComponent(student.id)}#question-${encodeURIComponent(question.id)}`}
       title={title}
       className={cn(
         "grid min-h-14 content-center gap-0.5 rounded-md border px-2 py-1 text-xs transition hover:-translate-y-0.5 hover:shadow-sm",
@@ -276,12 +276,12 @@ function ReviewQueue({
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 md:justify-end">
-                <Link to={`/tasks/${taskId}/results/${item.student.id}`}>
+                <Link to={`/tasks/${taskId}/results/${encodeURIComponent(item.student.id)}#question-${encodeURIComponent(item.correction.q_id)}`}>
                   <Button type="button" variant="ghost" className="h-8 px-2">
                     学生
                   </Button>
                 </Link>
-                <Link to={`/tasks/${taskId}/questions/${item.question.id}`}>
+                <Link to={`/tasks/${taskId}/questions/${item.question.id}?studentId=${encodeURIComponent(item.student.id)}`}>
                   <Button type="button" variant="ghost" className="h-8 px-2">
                     题目
                   </Button>

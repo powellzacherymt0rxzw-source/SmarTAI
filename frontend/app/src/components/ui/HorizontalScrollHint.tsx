@@ -3,7 +3,7 @@ import { cn } from "@/lib/cn";
 
 export function HorizontalScrollHint({
   className,
-  label = "左右滑动查看完整表格 / Swipe sideways to see all columns.",
+  label = "左右滑动查看完整内容。",
 }: {
   className?: string;
   label?: string;

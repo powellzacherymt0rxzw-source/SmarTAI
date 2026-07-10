@@ -322,9 +322,11 @@ export function TaskUploadPage() {
         toast.success("该任务已完成批改，可进入结果复核。");
         navigate(`/tasks/${taskId}/results`);
       } else if (response.status === "already_running") {
-        toast.info("批改已在进行中", { description: "页面会继续轮询进度。" });
+        toast.info("批改已在进行中", { description: "已进入批改进度页继续跟进。" });
+        navigate(`/tasks/${taskId}/results`);
       } else {
-        toast.success("已启动批改", { description: "可以留在本页观察进度，也可以进入结果页查看。" });
+        toast.success("已启动批改", { description: "已进入批改进度页，完成后会显示结果复核。" });
+        navigate(`/tasks/${taskId}/results`);
       }
       void progressQuery.refetch();
       void taskQuery.refetch();
@@ -401,8 +403,12 @@ export function TaskUploadPage() {
         }
       />
 
-      {taskQuery.isError ? <InlineAlert message={getErrorMessage(taskQuery.error)} /> : null}
-      {progressQuery.isError ? <InlineAlert message={getErrorMessage(progressQuery.error)} /> : null}
+      {taskQuery.isError ? (
+        <InlineAlert message={getErrorMessage(taskQuery.error)} onRetry={() => void taskQuery.refetch()} />
+      ) : null}
+      {progressQuery.isError ? (
+        <InlineAlert message={getErrorMessage(progressQuery.error)} onRetry={() => void progressQuery.refetch()} />
+      ) : null}
 
       <TaskStageGate
         task={task}
@@ -526,11 +532,16 @@ export function TaskUploadPage() {
             isSaving={updateProblem.isPending}
             problemDraft={problemDraft}
             problems={problems}
+            taskId={safeTaskId}
             expectedCount={expectedProblemCount}
             onCancel={() => setEditingProblemId(null)}
             onDraftChange={setProblemDraft}
             onEdit={startProblemEdit}
             onSave={(problem) => void saveProblem(problem)}
+            onUploadedMaterial={() => {
+              void taskQuery.refetch();
+              void progressQuery.refetch();
+            }}
           />
         ) : null}
 
@@ -955,8 +966,10 @@ function ProblemsReview({
   editingProblemId,
   expectedCount,
   isSaving,
+  onUploadedMaterial,
   problemDraft,
   problems,
+  taskId,
   onCancel,
   onDraftChange,
   onEdit,
@@ -965,8 +978,10 @@ function ProblemsReview({
   editingProblemId: string | null;
   expectedCount: number;
   isSaving: boolean;
+  onUploadedMaterial: () => void;
   problemDraft: { stem: string; criterion: string };
   problems: ProblemInfo[];
+  taskId: string;
   onCancel: () => void;
   onDraftChange: (draft: { stem: string; criterion: string }) => void;
   onEdit: (problem: ProblemInfo) => void;
@@ -1060,7 +1075,7 @@ function ProblemsReview({
               当前表格只根据已返回的题干、评分标准、参考答案和测试样例字段推断覆盖情况；资料来源、AI 生成待确认、从原文提取置信度和教师确认状态需要后端新增字段后接入。
             </InlineNotice>
 
-            <ProblemMaterialTools problems={problems} />
+            <ProblemMaterialTools taskId={taskId} problems={problems} onUploaded={onUploadedMaterial} />
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <label className="relative block min-w-0 flex-1">
@@ -1795,11 +1810,19 @@ function PreviewBlock({ label, value, emptyText }: { label: string; value?: stri
   );
 }
 
-function InlineAlert({ message }: { message: string }) {
+function InlineAlert({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="flex items-start gap-2 rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
-      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-      <span className="leading-5">{message}</span>
+    <div className="flex flex-col gap-3 rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex min-w-0 items-start gap-2">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span className="leading-5">{message}</span>
+      </div>
+      {onRetry ? (
+        <Button type="button" variant="secondary" className="w-fit shrink-0" onClick={onRetry}>
+          <RefreshCw className="h-4 w-4" />
+          重试
+        </Button>
+      ) : null}
     </div>
   );
 }

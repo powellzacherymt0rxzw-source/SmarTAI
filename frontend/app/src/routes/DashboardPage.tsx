@@ -3,11 +3,11 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { normalizeAPIError } from "@/api/client";
 import { useTasks } from "@/api/hooks";
+import { TaskProgressMini } from "@/components/tasks/TaskProgressMini";
 import { TaskStatusIndicator } from "@/components/tasks/TaskStatusIndicator";
 import { Button } from "@/components/ui/Button";
 import { Card, SectionHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { HorizontalScrollHint } from "@/components/ui/HorizontalScrollHint";
 import { StatTile } from "@/components/ui/StatTile";
 import {
   formatTaskTime,
@@ -100,13 +100,18 @@ export function DashboardPage() {
 function TaskQueueTable({ tasks }: { tasks: TaskLite[] }) {
   return (
     <div className="grid gap-2">
-      <HorizontalScrollHint />
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] border-separate border-spacing-0 text-left text-sm">
+      <div className="grid gap-3 xl:hidden">
+        {tasks.map((task) => (
+          <TaskQueueCard key={task.task_id} task={task} />
+        ))}
+      </div>
+      <div className="hidden overflow-x-auto xl:block">
+        <table className="w-full min-w-[980px] border-separate border-spacing-0 text-left text-sm">
         <thead>
           <tr className="text-xs text-muted-foreground">
             <th className="border-b px-3 py-2 font-medium">任务</th>
             <th className="border-b px-3 py-2 font-medium">当前阶段</th>
+            <th className="border-b px-3 py-2 font-medium">进度</th>
             <th className="border-b px-3 py-2 font-medium">内容</th>
             <th className="border-b px-3 py-2 font-medium">下一步</th>
             <th className="border-b px-3 py-2 font-medium">更新时间</th>
@@ -130,6 +135,9 @@ function TaskQueueTable({ tasks }: { tasks: TaskLite[] }) {
                 </td>
                 <td className="border-b px-3 py-3">
                   <TaskStatusIndicator status={task.status} showDescription />
+                </td>
+                <td className="border-b px-3 py-3">
+                  <TaskProgressMini task={task} />
                 </td>
                 <td className="border-b px-3 py-3 text-muted-foreground">
                   <div>题目 {task.problem_count}</div>
@@ -158,6 +166,41 @@ function TaskQueueTable({ tasks }: { tasks: TaskLite[] }) {
         </table>
       </div>
     </div>
+  );
+}
+
+function TaskQueueCard({ task }: { task: TaskLite }) {
+  const nextStep = getTaskNextStep(task, task.task_id);
+  return (
+    <section className="grid gap-3 rounded-lg border p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold">{task.name}</h3>
+          <code className="mt-1 block truncate text-xs text-muted-foreground">{task.task_id}</code>
+        </div>
+        <Link to={getTaskDestination(task)} className="shrink-0">
+          <Button type="button" variant="secondary" className="h-8 px-2">
+            {getTaskActionLabel(task.status)}
+          </Button>
+        </Link>
+      </div>
+      <TaskStatusIndicator status={task.status} showDescription />
+      <TaskProgressMini task={task} />
+      <div className="grid gap-1 rounded-md bg-muted/30 p-3 text-xs text-muted-foreground">
+        <p>题目 {task.problem_count} · 学生 {task.student_count} · 资料 {task.kb_doc_count}</p>
+        <p>更新 {formatTaskTime(task.updated_at)}</p>
+      </div>
+      <div>
+        <p className="text-sm font-medium">{nextStep.title}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{nextStep.description}</p>
+      </div>
+      {task.status === "error" && task.error ? (
+        <p className="flex items-start gap-1.5 text-xs leading-5 text-danger">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 break-words">{task.error}</span>
+        </p>
+      ) : null}
+    </section>
   );
 }
 
