@@ -13,9 +13,29 @@ import type { TaskLite } from "@/types";
 export function TaskStepper({ current, task }: { current: TaskWorkflowStepKey; task?: TaskLite }) {
   const { taskId = "draft" } = useParams();
   const currentIndex = getTaskStepIndex(current);
+  const currentStep = TASK_WORKFLOW_STEPS.find((step) => step.key === current) ?? TASK_WORKFLOW_STEPS[0];
+  const currentStepNumber = Math.max(currentIndex + 1, 1);
+  const currentStepAvailable = task ? isTaskStepAvailable(task.status, currentStep.key) : true;
 
   return (
     <div className="grid gap-2">
+      <div className="rounded-lg border bg-card p-3 xl:hidden">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">当前阶段</p>
+            <p className="mt-1 truncate text-sm font-semibold">{currentStep.label}</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{currentStep.description}</p>
+          </div>
+          <span
+            className={cn(
+              "shrink-0 rounded-full border px-2 py-1 text-xs font-medium",
+              currentStepAvailable ? "border-primary/30 bg-primary/5 text-primary" : "border-warning/30 bg-warning/5 text-warning",
+            )}
+          >
+            {currentStepNumber}/{TASK_WORKFLOW_STEPS.length}
+          </span>
+        </div>
+      </div>
       <HorizontalScrollHint label="左右滑动查看全部流程步骤 / Swipe sideways to see all workflow steps." />
       <nav aria-label="批改任务流程" className="overflow-x-auto rounded-lg border bg-card p-2">
         <ol className="flex min-w-max items-stretch gap-1">
