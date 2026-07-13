@@ -1,12 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as tasksApi from "@/api/tasks";
 import type { UploadOptions } from "@/api/client";
+import type { TaskStatus } from "@/types";
 import { taskKeys } from "./keys";
+
+const ACTIVE_TASK_STATUSES = new Set<TaskStatus>([
+  "extracting_problems",
+  "parsing_submissions",
+  "grading",
+]);
 
 export function useTasks() {
   return useQuery({
     queryKey: taskKeys.list(),
     queryFn: tasksApi.listTasks,
+    refetchInterval: (query) => {
+      const tasks = query.state.data;
+      if (!tasks) {
+        return false;
+      }
+      return Object.values(tasks).some((task) => ACTIVE_TASK_STATUSES.has(task.status))
+        ? 3_000
+        : false;
+    },
   });
 }
 

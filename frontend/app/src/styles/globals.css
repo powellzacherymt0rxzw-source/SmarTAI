@@ -3,18 +3,18 @@
 :root {
   color-scheme: light;
   --background: 248 250 252;
-  --foreground: 15 23 42;
+  --foreground: 17 24 39;
   --card: 255 255 255;
-  --card-foreground: 15 23 42;
+  --card-foreground: 17 24 39;
   --muted: 241 245 249;
   --muted-foreground: 100 116 139;
-  --border: 203 213 225;
-  --primary: 79 70 229;
+  --border: 217 224 233;
+  --primary: 37 99 235;
   --primary-foreground: 255 255 255;
   --accent: 13 148 136;
   --warning: 217 119 6;
   --danger: 220 38 38;
-  --ring: 79 70 229;
+  --ring: 37 99 235;
 }
 
 .dark {
@@ -48,7 +48,7 @@
   --color-warning: rgb(var(--warning));
   --color-danger: rgb(var(--danger));
   --color-ring: rgb(var(--ring));
-  --font-sans: Inter, "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
 }
 
 * {
@@ -62,6 +62,12 @@ body {
   background: rgb(var(--background));
   color: rgb(var(--foreground));
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100vh;
 }
 
 button,
@@ -70,4 +76,3 @@ textarea,
 select {
   font: inherit;
 }
-

@@ -137,6 +137,14 @@ function isAllowedVisibleText(relativePath, line, rule) {
   }
 
   if (
+    rule.id === "visible-course-management" &&
+    relativePath === "src/i18n/messages.ts" &&
+    /^\s*(?:(?:knowledgeBase|courseLibrary):\s*"Course Library"|dashboardColumnCourseTags:\s*"Course \/ Tags"),?\s*$/.test(line)
+  ) {
+    return true;
+  }
+
+  if (
     rule.id === "visible-global-kb" &&
     (relativePath === "src/routes/KnowledgeBasePage.tsx" || relativePath === "src/routes/tasks/TaskSetupPage.tsx")
   ) {
@@ -277,5 +285,5 @@ if (findings.length > 0) {
   console.log("PASS visible scope audit");
   console.log(`Scanned ${files.length} user-visible source files.`);
   console.log("Checked Router paths for hidden LMS/course/assignment integrations.");
-  console.log("No visible LMS, course, assignment publishing, grading-language, or unsupported KB claims found.");
+  console.log("No visible LMS, unsupported course management, assignment publishing, grading-language, or unsupported KB claims found.");
 }

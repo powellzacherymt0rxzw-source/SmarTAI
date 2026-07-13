@@ -1,222 +1,703 @@
-import { AlertTriangle, ArrowRight, CheckCircle2, CircleDashed, ListChecks, Plus, RefreshCw } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { normalizeAPIError } from "@/api/client";
-import { useTasks } from "@/api/hooks";
-import { TaskProgressMini } from "@/components/tasks/TaskProgressMini";
-import { TaskStatusIndicator } from "@/components/tasks/TaskStatusIndicator";
-import { Button } from "@/components/ui/Button";
-import { Card, SectionHeader } from "@/components/ui/Card";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { StatTile } from "@/components/ui/StatTile";
-import {
-  formatTaskTime,
-  getTaskActionLabel,
-  getTaskDestination,
-  getTaskNextStep,
-  isTaskProcessing,
-} from "@/lib/taskFlow";
-import type { TaskLite, TaskStatus } from "@/types";
+import { useExperts, useTasks } from "@/api/hooks";
+import { useTaskProgress } from "@/hooks/useTaskProgress";
+import { useI18n } from "@/i18n/I18nProvider";
+import type { Locale, MessageKey } from "@/i18n/messages";
+import { cn } from "@/lib/cn";
+import { formatTaskTime, getTaskDestination, isTaskProcessing } from "@/lib/taskFlow";
+import type { ExpertConfig, JobProgress, TaskLite, TaskStatus } from "@/types";
 
-const needsActionStatuses = new Set<TaskStatus>(["draft", "problems_ready", "submissions_ready", "error"]);
+const PROCESSING_STATUSES = new Set<TaskStatus>([
+  "extracting_problems",
+  "parsing_submissions",
+  "grading",
+]);
+
+const ACTION_STATUSES = new Set<TaskStatus>([
+  "draft",
+  "problems_ready",
+  "submissions_ready",
+  "error",
+]);
+
+const STATUS_PRIORITY: Record<TaskStatus, number> = {
+  error: 0,
+  problems_ready: 1,
+  submissions_ready: 1,
+  draft: 1,
+  extracting_problems: 2,
+  parsing_submissions: 2,
+  grading: 2,
+  graded: 3,
+};
+
+const STAGE_KEYS: Record<TaskStatus, MessageKey> = {
+  draft: "dashboardStageDraft",
+  extracting_problems: "dashboardStageExtracting",
+  problems_ready: "dashboardStageProblemsReady",
+  parsing_submissions: "dashboardStageParsing",
+  submissions_ready: "dashboardStageSubmissionsReady",
+  grading: "dashboardStageGrading",
+  graded: "dashboardStageGraded",
+  error: "dashboardStageError",
+};
+
+const ATTENTION_KEYS: Record<TaskStatus, MessageKey> = {
+  draft: "dashboardAttentionAddProblems",
+  extracting_problems: "dashboardAttentionRecognizing",
+  problems_ready: "dashboardAttentionReviewProblems",
+  parsing_submissions: "dashboardAttentionRecognizing",
+  submissions_ready: "dashboardAttentionReviewSubmissions",
+  grading: "dashboardAttentionGrading",
+  graded: "dashboardAttentionReviewResults",
+  error: "dashboardAttentionResolveError",
+};
+
+const ACTION_KEYS: Record<TaskStatus, MessageKey> = {
+  draft: "dashboardActionContinue",
+  extracting_problems: "dashboardActionViewProgress",
+  problems_ready: "dashboardActionReviewProblems",
+  parsing_submissions: "dashboardActionViewProgress",
+  submissions_ready: "dashboardActionReviewSubmissions",
+  grading: "dashboardActionViewProgress",
+  graded: "dashboardActionViewResults",
+  error: "dashboardActionResolveError",
+};
+
+type MetricTone = "primary" | "warning" | "accent" | "neutral";
+
+interface DashboardCounts {
+  processing: number;
+  action: number;
+  results: number;
+  total: number;
+}
 
 export function DashboardPage() {
+  const { locale, t } = useI18n();
   const tasksQuery = useTasks();
-  const tasks = useMemo(() => toSortedTasks(tasksQuery.data), [tasksQuery.data]);
-  const recentTasks = tasks.slice(0, 8);
-  const processingCount = tasks.filter((task) => isTaskProcessing(task.status)).length;
-  const needsActionCount = tasks.filter((task) => needsActionStatuses.has(task.status)).length;
-  const reviewCount = tasks.filter((task) => task.status === "graded").length;
-  const errorMessage = tasksQuery.error ? normalizeAPIError(tasksQuery.error).message : null;
+  const expertsQuery = useExperts();
+
+  const tasks = useMemo(
+    () => Object.values(tasksQuery.data ?? {}),
+    [tasksQuery.data],
+  );
+  const visibleTasks = useMemo(() => selectVisibleTasks(tasks), [tasks]);
+  const counts = useMemo<DashboardCounts>(() => summarizeTasks(tasks), [tasks]);
+  const experts = useMemo(
+    () => [...(expertsQuery.data ?? [])].sort(compareExperts),
+    [expertsQuery.data],
+  );
+  const enabledExperts = experts.filter((expert) => expert.enabled);
+  const hasTaskSnapshot = tasksQuery.data !== undefined;
+  const modelValue = expertsQuery.isLoading
+    ? "— / —"
+    : expertsQuery.isError
+      ? "—"
+      : `${enabledExperts.length} / ${experts.length}`;
+
+  const metrics: Array<{
+    label: MessageKey;
+    value: string;
+    tone: MetricTone;
+    to?: string;
+  }> = [
+    {
+      label: "dashboardProcessingTasks",
+      value: hasTaskSnapshot ? String(counts.processing) : "—",
+      tone: "primary",
+    },
+    {
+      label: "dashboardNeedsAction",
+      value: hasTaskSnapshot ? String(counts.action) : "—",
+      tone: "warning",
+    },
+    {
+      label: "dashboardGeneratedResults",
+      value: hasTaskSnapshot ? String(counts.results) : "—",
+      tone: "accent",
+    },
+    {
+      label: "dashboardAvailableModels",
+      value: modelValue,
+      tone: "primary",
+      to: "/settings/byok",
+    },
+  ];
+
+  const tasksError = tasksQuery.error
+    ? normalizeAPIError(tasksQuery.error).message
+    : null;
+  const blockingTasksError = hasTaskSnapshot ? null : tasksError;
 
   return (
-    <div className="grid gap-5">
-      <SectionHeader
-        title="任务总览"
-        description="像任务队列一样查看每个批改任务当前走到哪一步、下一步该做什么，以及是否需要复核。"
-        action={
-          <Link to="/tasks/new">
-            <Button>
-              <Plus className="h-4 w-4" />
-              新建任务
-            </Button>
-          </Link>
-        }
-      />
-      <div className="grid gap-3 md:grid-cols-4">
-        <StatTile icon={CircleDashed} label="后台处理中" value={tasksQuery.isLoading ? "—" : processingCount} tone="primary" />
-        <StatTile icon={ListChecks} label="需要继续" value={tasksQuery.isLoading ? "—" : needsActionCount} tone="warning" />
-        <StatTile icon={CheckCircle2} label="待复核" value={tasksQuery.isLoading ? "—" : reviewCount} tone="accent" />
-        <StatTile icon={ListChecks} label="全部任务" value={tasksQuery.isLoading ? "—" : tasks.length} />
-      </div>
-      <Card className="grid gap-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-base font-semibold">近期任务队列</h2>
-            <p className="mt-1 text-sm text-muted-foreground">优先处理异常、待校对和批改完成待复核的任务。</p>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            className="w-fit"
-            disabled={tasksQuery.isFetching}
-            onClick={() => void tasksQuery.refetch()}
-          >
-            <RefreshCw className="h-4 w-4" />
-            刷新
-          </Button>
-        </div>
+    <div className="w-full max-w-[1290px]">
+      <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
+        {t("workspace")}
+      </h1>
 
-        {tasksQuery.isLoading ? <TaskQueueLoading /> : null}
-        {!tasksQuery.isLoading && errorMessage ? (
-          <EmptyState
-            title="无法加载任务"
-            description={errorMessage}
-            action={
-              <Button type="button" variant="secondary" onClick={() => void tasksQuery.refetch()}>
-                <RefreshCw className="h-4 w-4" />
-                重试
-              </Button>
-            }
+      <section
+        aria-label={t("dashboardMetrics")}
+        className="mt-[14px] grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-[repeat(4,250px)_40px_150px] xl:gap-5"
+      >
+        {metrics.map((metric) => (
+          <MetricCard
+            key={metric.label}
+            label={t(metric.label)}
+            value={metric.value}
+            tone={metric.tone}
+            to={metric.to}
+            separator={t("dashboardLabelSeparator")}
           />
-        ) : null}
-        {!tasksQuery.isLoading && !errorMessage && recentTasks.length === 0 ? (
-          <EmptyState
-            title="还没有批改任务"
-            description="创建一个任务后，这里会显示它的当前阶段、下一步和进度入口。"
-            action={
-              <Link to="/tasks/new">
-                <Button variant="secondary">创建第一个任务</Button>
-              </Link>
-            }
-          />
-        ) : null}
-        {!tasksQuery.isLoading && !errorMessage && recentTasks.length > 0 ? <TaskQueueTable tasks={recentTasks} /> : null}
-      </Card>
+        ))}
+        <Link
+          to="/tasks/new"
+          className="col-span-2 inline-flex h-10 items-center justify-center self-center rounded-lg bg-primary px-5 text-[14px] font-semibold text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 md:col-span-4 md:justify-self-end xl:col-span-1 xl:col-start-6 xl:row-start-1 xl:w-[150px]"
+        >
+          {t("dashboardCreateTask")}
+        </Link>
+      </section>
+
+      <section aria-label={t("dashboardAttentionTasks")} className="mt-10">
+        <DashboardTaskTable
+          tasks={visibleTasks}
+          isLoading={tasksQuery.isLoading}
+          errorMessage={blockingTasksError}
+          onRetry={() => void tasksQuery.refetch()}
+        />
+      </section>
+
+      <DashboardInsight
+        counts={counts}
+        tasks={visibleTasks}
+        enabledExperts={enabledExperts}
+        modelsLoading={expertsQuery.isLoading}
+        modelsError={expertsQuery.isError}
+        tasksLoading={tasksQuery.isLoading && !hasTaskSnapshot}
+        tasksError={Boolean(blockingTasksError)}
+        onTasksRetry={() => void tasksQuery.refetch()}
+        locale={locale}
+      />
     </div>
   );
 }
 
-function TaskQueueTable({ tasks }: { tasks: TaskLite[] }) {
+function MetricCard({
+  label,
+  value,
+  tone,
+  to,
+  separator,
+}: {
+  label: string;
+  value: string;
+  tone: MetricTone;
+  to?: string;
+  separator: string;
+}) {
+  const className = cn(
+    "flex h-[90px] min-w-0 flex-col justify-center rounded-[10px] border bg-card px-5 text-left outline-none",
+    to && "transition-colors hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring",
+  );
+  const content = (
+    <>
+      <strong
+        className={cn(
+          "text-[28px] font-bold leading-[34px] tabular-nums",
+          tone === "primary" && "text-primary",
+          tone === "warning" && "text-amber-600 dark:text-amber-400",
+          tone === "accent" && "text-teal-600 dark:text-teal-300",
+          tone === "neutral" && "text-foreground",
+        )}
+      >
+        {value}
+      </strong>
+      <span className="mt-1 text-[13px] font-medium leading-4 text-muted-foreground">
+        {label}
+      </span>
+    </>
+  );
+
+  return to ? (
+    <Link to={to} className={className} aria-label={`${label}${separator}${value}`}>
+      {content}
+    </Link>
+  ) : (
+    <div className={className}>{content}</div>
+  );
+}
+
+function DashboardTaskTable({
+  tasks,
+  isLoading,
+  errorMessage,
+  onRetry,
+}: {
+  tasks: TaskLite[];
+  isLoading: boolean;
+  errorMessage: string | null;
+  onRetry: () => void;
+}) {
+  const { t } = useI18n();
+  const isDesktop = useMediaQuery("(min-width: 1280px)");
+
+  if (isDesktop) {
+    return (
+      <div
+        role="table"
+        aria-label={t("dashboardAttentionTasks")}
+        aria-busy={isLoading}
+        className="w-[1090px] max-w-full text-left"
+      >
+        <div
+          role="row"
+          className="grid h-[42px] grid-cols-[230px_150px_140px_130px_130px_140px_170px] items-center border-b text-[12px] font-semibold leading-[15px] text-muted-foreground"
+        >
+          <div role="columnheader" className="px-3">{t("dashboardColumnTask")}</div>
+          <div role="columnheader" className="px-3">{t("dashboardColumnCourseTags")}</div>
+          <div role="columnheader" className="px-3">{t("dashboardColumnStage")}</div>
+          <div role="columnheader" className="px-3">{t("dashboardColumnProgress")}</div>
+          <div role="columnheader" className="px-3">{t("dashboardColumnEta")}</div>
+          <div role="columnheader" className="px-3">{t("dashboardColumnAttention")}</div>
+          <div role="columnheader" className="px-3">{t("dashboardColumnNext")}</div>
+        </div>
+        <div role="rowgroup" className="h-44 overflow-hidden rounded-b-[8px] border-x border-b bg-card">
+          {isLoading ? <DesktopLoadingRows label={t("loading")} /> : null}
+          {!isLoading && errorMessage ? (
+            <CompactTableMessage
+              title={t("dashboardLoadError")}
+              description={errorMessage}
+              actionLabel={t("retry")}
+              onAction={onRetry}
+            />
+          ) : null}
+          {!isLoading && !errorMessage && tasks.length === 0 ? (
+            <CompactTableMessage
+              title={t("dashboardEmptyTitle")}
+              description={t("dashboardEmptyDescription")}
+              actionLabel={t("dashboardCreateFirstTask")}
+              actionTo="/tasks/new"
+            />
+          ) : null}
+          {!isLoading && !errorMessage
+            ? tasks.map((task) => <DesktopTaskRow key={task.task_id} task={task} />)
+            : null}
+          {!isLoading && !errorMessage && tasks.length > 0
+            ? Array.from({ length: Math.max(0, 4 - tasks.length) }, (_, index) => (
+                <div key={`empty-row-${index}`} role="presentation" className="h-11 border-t bg-card" />
+              ))
+            : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-2">
-      <div className="grid gap-3 xl:hidden">
-        {tasks.map((task) => (
-          <TaskQueueCard key={task.task_id} task={task} />
-        ))}
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-[15px] font-semibold">{t("dashboardAttentionTasks")}</h2>
+        <Link className="text-[13px] font-medium text-primary" to="/history">
+          {t("history")}
+        </Link>
       </div>
-      <div className="hidden overflow-x-auto xl:block">
-        <table className="w-full min-w-[980px] border-separate border-spacing-0 text-left text-sm">
-        <thead>
-          <tr className="text-xs text-muted-foreground">
-            <th className="border-b px-3 py-2 font-medium">任务</th>
-            <th className="border-b px-3 py-2 font-medium">当前阶段</th>
-            <th className="border-b px-3 py-2 font-medium">进度</th>
-            <th className="border-b px-3 py-2 font-medium">内容</th>
-            <th className="border-b px-3 py-2 font-medium">下一步</th>
-            <th className="border-b px-3 py-2 font-medium">更新时间</th>
-            <th className="border-b px-3 py-2 text-right font-medium">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tasks.map((task) => {
-            const nextStep = getTaskNextStep(task, task.task_id);
-            return (
-              <tr key={task.task_id} className="align-top transition hover:bg-muted/30">
-                <td className="border-b px-3 py-3">
-                  <div className="max-w-[220px] truncate font-medium">{task.name}</div>
-                  <code className="mt-1 block text-xs text-muted-foreground">{task.task_id}</code>
-                  {task.status === "error" && task.error ? (
-                    <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-danger">
-                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      <span className="min-w-0 break-words">{task.error}</span>
-                    </p>
-                  ) : null}
-                </td>
-                <td className="border-b px-3 py-3">
-                  <TaskStatusIndicator status={task.status} showDescription />
-                </td>
-                <td className="border-b px-3 py-3">
-                  <TaskProgressMini task={task} />
-                </td>
-                <td className="border-b px-3 py-3 text-muted-foreground">
-                  <div>题目 {task.problem_count}</div>
-                  <div>学生 {task.student_count}</div>
-                  <div>资料 {task.kb_doc_count}</div>
-                </td>
-                <td className="border-b px-3 py-3">
-                  <div className="font-medium">{nextStep.title}</div>
-                  <p className="mt-1 max-w-[260px] text-xs leading-5 text-muted-foreground">{nextStep.description}</p>
-                </td>
-                <td className="border-b px-3 py-3 text-muted-foreground">{formatTaskTime(task.updated_at)}</td>
-                <td className="border-b px-3 py-3">
-                  <div className="flex justify-end">
-                    <Link to={getTaskDestination(task)}>
-                      <Button type="button" variant="secondary" className="h-8">
-                        {getTaskActionLabel(task.status)}
-                        <ArrowRight className="h-4 w-4" />
-                      </Button>
-                    </Link>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-        </table>
+      {isLoading ? <MobileLoadingCards /> : null}
+      {!isLoading && errorMessage ? (
+        <div className="rounded-[10px] border bg-card p-5">
+          <p className="font-semibold">{t("dashboardLoadError")}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{errorMessage}</p>
+          <button
+            type="button"
+            className="mt-3 text-sm font-semibold text-primary"
+            onClick={onRetry}
+          >
+            {t("retry")}
+          </button>
+        </div>
+      ) : null}
+      {!isLoading && !errorMessage && tasks.length === 0 ? (
+        <div className="rounded-[10px] border bg-card p-5">
+          <p className="font-semibold">{t("dashboardEmptyTitle")}</p>
+          <p className="mt-1 text-sm leading-5 text-muted-foreground">
+            {t("dashboardEmptyDescription")}
+          </p>
+          <Link className="mt-3 inline-block text-sm font-semibold text-primary" to="/tasks/new">
+            {t("dashboardCreateFirstTask")}
+          </Link>
+        </div>
+      ) : null}
+      {!isLoading && !errorMessage
+        ? tasks.slice(0, 3).map((task) => <MobileTaskCard key={task.task_id} task={task} />)
+        : null}
+    </div>
+  );
+}
+
+function DesktopTaskRow({ task }: { task: TaskLite }) {
+  const { t } = useI18n();
+  const isProcessing = isTaskProcessing(task.status);
+  const progressQuery = useTaskProgress(task.task_id, { enabled: isProcessing });
+  const progressValue = getProgressValue(task, progressQuery.progress, progressQuery.percent);
+  const eta = isProcessing && progressQuery.progress?.phase !== "done"
+    ? t("dashboardEtaEstimating")
+    : "—";
+
+  return (
+    <div
+      role="row"
+      className="grid h-11 grid-cols-[230px_150px_140px_130px_130px_140px_170px] items-center border-t text-[13px] leading-4 first:border-t-0"
+    >
+      <div role="cell" className="min-w-0 px-3">
+        <Link
+          to={getTaskDestination(task)}
+          className="block truncate font-semibold text-foreground outline-none hover:text-primary focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+          title={task.name}
+        >
+          {task.name}
+        </Link>
+      </div>
+      <div role="cell" className="truncate px-3 text-muted-foreground">
+        {t("dashboardCourseUnset")}
+      </div>
+      <div role="cell" className="px-3">
+        <StatusPill status={task.status}>{t(STAGE_KEYS[task.status])}</StatusPill>
+      </div>
+      <div role="cell" className="px-3 tabular-nums text-muted-foreground">
+        {progressValue}
+      </div>
+      <div role="cell" className="px-3 tabular-nums text-muted-foreground">
+        {eta}
+      </div>
+      <div role="cell" className="px-3">
+        <AttentionPill status={task.status}>{t(ATTENTION_KEYS[task.status])}</AttentionPill>
+      </div>
+      <div role="cell" className="min-w-0 px-3">
+        <Link
+          to={getTaskDestination(task)}
+          className="block truncate font-medium text-muted-foreground outline-none hover:text-primary focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {t(ACTION_KEYS[task.status])}
+        </Link>
       </div>
     </div>
   );
 }
 
-function TaskQueueCard({ task }: { task: TaskLite }) {
-  const nextStep = getTaskNextStep(task, task.task_id);
+function MobileTaskCard({ task }: { task: TaskLite }) {
+  const { locale, t } = useI18n();
+  const isProcessing = isTaskProcessing(task.status);
+  const progressQuery = useTaskProgress(task.task_id, { enabled: isProcessing });
+  const progressValue = getProgressValue(task, progressQuery.progress, progressQuery.percent);
+
   return (
-    <section className="grid gap-3 rounded-lg border p-3">
-      <div className="flex items-start justify-between gap-3">
+    <Link
+      to={getTaskDestination(task)}
+      className="grid gap-3 rounded-[10px] border bg-card p-4 outline-none transition-colors hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate text-sm font-semibold">{task.name}</h3>
-          <code className="mt-1 block truncate text-xs text-muted-foreground">{task.task_id}</code>
+          <p className="truncate text-sm font-semibold">{task.name}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {formatTaskTime(task.updated_at, true, locale)}
+          </p>
         </div>
-        <Link to={getTaskDestination(task)} className="shrink-0">
-          <Button type="button" variant="secondary" className="h-8 px-2">
-            {getTaskActionLabel(task.status)}
-          </Button>
-        </Link>
+        <StatusPill status={task.status}>{t(STAGE_KEYS[task.status])}</StatusPill>
       </div>
-      <TaskStatusIndicator status={task.status} showDescription />
-      <TaskProgressMini task={task} />
-      <div className="grid gap-1 rounded-md bg-muted/30 p-3 text-xs text-muted-foreground">
-        <p>题目 {task.problem_count} · 学生 {task.student_count} · 资料 {task.kb_doc_count}</p>
-        <p>更新 {formatTaskTime(task.updated_at)}</p>
+      <div className="flex items-center justify-between gap-4 text-xs text-muted-foreground">
+        <span>{t("dashboardColumnProgress")}{t("dashboardLabelSeparator")}{progressValue}</span>
+        <span className="font-medium text-primary">{t(ACTION_KEYS[task.status])}</span>
       </div>
-      <div>
-        <p className="text-sm font-medium">{nextStep.title}</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">{nextStep.description}</p>
+    </Link>
+  );
+}
+
+function StatusPill({
+  status,
+  children,
+}: {
+  status: TaskStatus;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-7 min-w-[112px] max-w-[116px] items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full px-3 text-[12px] font-semibold xl:text-[13px]",
+        PROCESSING_STATUSES.has(status) && "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-200",
+        (status === "draft" || status === "problems_ready" || status === "submissions_ready") &&
+          "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200",
+        status === "graded" && "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200",
+        status === "error" && "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-200",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function AttentionPill({
+  status,
+  children,
+}: {
+  status: TaskStatus;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-7 min-w-[112px] max-w-[116px] items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full px-3 text-[12px] font-semibold xl:text-[13px]",
+        status === "error" && "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-200",
+        status !== "error" && status !== "graded" && "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200",
+        status === "graded" && "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function DashboardInsight({
+  counts,
+  tasks,
+  enabledExperts,
+  modelsLoading,
+  modelsError,
+  tasksLoading,
+  tasksError,
+  onTasksRetry,
+  locale,
+}: {
+  counts: DashboardCounts;
+  tasks: TaskLite[];
+  enabledExperts: ExpertConfig[];
+  modelsLoading: boolean;
+  modelsError: boolean;
+  tasksLoading: boolean;
+  tasksError: boolean;
+  onTasksRetry: () => void;
+  locale: Locale;
+}) {
+  const { t } = useI18n();
+  const primaryTask = tasks[0];
+
+  return (
+    <section className="mt-8 min-h-[170px] rounded-[10px] border bg-card px-5 py-6 sm:px-6 xl:mt-[76px] xl:py-[25px]">
+      <h2 className="text-[18px] font-bold leading-[22px] tracking-[-0.01em]">
+        {t("dashboardInsightTitle")}
+      </h2>
+      <p className="mt-[14px] max-w-[1120px] text-[15px] leading-5 text-muted-foreground">
+        {buildInsightSummary(
+          counts,
+          { isLoading: tasksLoading, isError: tasksError },
+          { isLoading: modelsLoading, isError: modelsError },
+          locale,
+        )}
+      </p>
+      <div className="mt-[22px] flex flex-wrap gap-3">
+        {tasksLoading ? (
+          <span className="inline-flex h-7 items-center rounded-full bg-muted px-4 text-[12px] font-semibold text-muted-foreground">
+            {t("loading")}
+          </span>
+        ) : tasksError ? (
+          <button
+            type="button"
+            onClick={onTasksRetry}
+            className="inline-flex h-7 items-center rounded-full bg-blue-100 px-4 text-[12px] font-semibold text-blue-700 outline-none transition-colors hover:bg-blue-200 focus-visible:ring-2 focus-visible:ring-ring dark:bg-blue-950 dark:text-blue-200"
+          >
+            {t("retry")}
+          </button>
+        ) : (
+          <Link
+            to={primaryTask ? getTaskDestination(primaryTask) : "/tasks/new"}
+            className="inline-flex h-7 items-center rounded-full bg-blue-100 px-4 text-[12px] font-semibold text-blue-700 outline-none transition-colors hover:bg-blue-200 focus-visible:ring-2 focus-visible:ring-ring dark:bg-blue-950 dark:text-blue-200"
+          >
+            {primaryTask ? t(ACTION_KEYS[primaryTask.status]) : t("dashboardCreateFirstTask")}
+          </Link>
+        )}
+
+        {modelsLoading ? (
+          <span className="inline-flex h-7 items-center rounded-full bg-muted px-4 text-[12px] font-semibold text-muted-foreground">
+            {t("modelsLoading")}
+          </span>
+        ) : null}
+
+        {!modelsLoading && (modelsError || enabledExperts.length === 0) ? (
+          <Link
+            to="/settings/byok"
+            className="inline-flex h-7 items-center rounded-full bg-amber-100 px-4 text-[12px] font-semibold text-amber-700 outline-none hover:bg-amber-200 focus-visible:ring-2 focus-visible:ring-ring dark:bg-amber-950 dark:text-amber-200"
+          >
+            {modelsError ? t("modelsUnavailable") : t("manageModels")}
+          </Link>
+        ) : null}
+
+        {!modelsLoading
+          ? enabledExperts.slice(0, 2).map((expert) => (
+              <Link
+                key={expert.provider_id}
+                to="/settings/byok"
+                title={`${expert.display_name || expert.provider_type} · ${expert.model}`}
+                className="inline-flex h-7 max-w-[280px] items-center rounded-full bg-teal-100 px-4 text-[12px] font-semibold text-teal-700 outline-none transition-colors hover:bg-teal-200 focus-visible:ring-2 focus-visible:ring-ring dark:bg-teal-950 dark:text-teal-200"
+              >
+                <span className="truncate">
+                  {expert.display_name || expert.provider_type} · {expert.model}
+                </span>
+              </Link>
+            ))
+          : null}
       </div>
-      {task.status === "error" && task.error ? (
-        <p className="flex items-start gap-1.5 text-xs leading-5 text-danger">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 break-words">{task.error}</span>
-        </p>
-      ) : null}
     </section>
   );
 }
 
-function TaskQueueLoading() {
+function CompactTableMessage({
+  title,
+  description,
+  actionLabel,
+  actionTo,
+  onAction,
+}: {
+  title: string;
+  description: string;
+  actionLabel: string;
+  actionTo?: string;
+  onAction?: () => void;
+}) {
+  const actionClassName = "mt-3 inline-flex h-7 items-center rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring";
+
   return (
-    <div className="grid gap-2">
-      {Array.from({ length: 5 }).map((_, index) => (
-        <div key={index} className="grid gap-2 rounded-md border p-3">
-          <div className="h-4 w-1/3 rounded bg-muted" />
-          <div className="h-3 w-2/3 rounded bg-muted" />
+    <div role="row" className="h-full">
+      <div role="cell" aria-colspan={7} className="flex h-full flex-col items-center justify-center px-6 text-center">
+        <p className="text-sm font-semibold">{title}</p>
+        <p className="mt-1 max-w-xl text-xs leading-5 text-muted-foreground">{description}</p>
+        {actionTo ? (
+          <Link to={actionTo} className={actionClassName}>{actionLabel}</Link>
+        ) : (
+          <button type="button" className={actionClassName} onClick={onAction}>{actionLabel}</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DesktopLoadingRows({ label }: { label: string }) {
+  return (
+    <>
+      <span role="status" className="sr-only">{label}</span>
+      {Array.from({ length: 4 }, (_, index) => (
+        <div
+          key={index}
+          role="row"
+          className="grid h-11 animate-pulse grid-cols-[230px_150px_140px_130px_130px_140px_170px] items-center border-t first:border-t-0"
+        >
+          {Array.from({ length: 7 }, (__, cell) => (
+            <div key={cell} role="cell" className="px-3">
+              <div className="h-3 rounded bg-muted" style={{ width: `${48 + ((index + cell) % 4) * 10}%` }} />
+            </div>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function MobileLoadingCards() {
+  return (
+    <div className="grid animate-pulse gap-2">
+      {Array.from({ length: 3 }, (_, index) => (
+        <div key={index} className="h-[94px] rounded-[10px] border bg-card p-4">
+          <div className="h-4 w-2/5 rounded bg-muted" />
+          <div className="mt-3 h-3 w-3/5 rounded bg-muted" />
         </div>
       ))}
     </div>
   );
 }
 
-function toSortedTasks(data: Record<string, TaskLite> | undefined): TaskLite[] {
-  return Object.values(data ?? {}).sort((a, b) => b.updated_at - a.updated_at);
+function summarizeTasks(tasks: TaskLite[]): DashboardCounts {
+  return tasks.reduce<DashboardCounts>(
+    (counts, task) => {
+      if (PROCESSING_STATUSES.has(task.status)) counts.processing += 1;
+      if (ACTION_STATUSES.has(task.status)) counts.action += 1;
+      if (task.status === "graded") counts.results += 1;
+      counts.total += 1;
+      return counts;
+    },
+    { processing: 0, action: 0, results: 0, total: 0 },
+  );
+}
+
+function selectVisibleTasks(tasks: TaskLite[]): TaskLite[] {
+  return [...tasks]
+    .sort((a, b) => {
+      const priority = STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status];
+      if (priority !== 0) return priority;
+      const updated = b.updated_at - a.updated_at;
+      if (updated !== 0) return updated;
+      return a.task_id.localeCompare(b.task_id);
+    })
+    .slice(0, 4);
+}
+
+function compareExperts(a: ExpertConfig, b: ExpertConfig): number {
+  if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+  const aName = a.display_name || a.provider_id;
+  const bName = b.display_name || b.provider_id;
+  return aName.localeCompare(bName);
+}
+
+function getProgressValue(task: TaskLite, progress: JobProgress | null, percent: number): string {
+  if (task.status === "graded") return "100%";
+  if (!isTaskProcessing(task.status) || !progress) return "—";
+  return `${percent}%`;
+}
+
+function buildInsightSummary(
+  counts: DashboardCounts,
+  tasksState: { isLoading: boolean; isError: boolean },
+  modelsState: { isLoading: boolean; isError: boolean },
+  locale: Locale,
+): string {
+  if (locale === "en-US") {
+    const taskSummary = tasksState.isLoading
+      ? "Task status is loading."
+      : tasksState.isError
+        ? "Task status is temporarily unavailable."
+        : counts.total === 0
+          ? "No grading tasks yet. Create one to start the task workflow."
+          : `${counts.action === 1 ? "1 task needs" : `${counts.action} tasks need`} your input, ${counts.processing === 1 ? "1 is" : `${counts.processing} are`} running, and ${counts.results === 1 ? "1 has" : `${counts.results} have`} results ready for review.`;
+    const modelSummary = modelsState.isLoading
+      ? " Model configuration is loading."
+      : modelsState.isError
+        ? " Model status is temporarily unavailable."
+        : " Open a model chip below to review its BYOK configuration.";
+    return taskSummary + modelSummary;
+  }
+
+  const taskSummary = tasksState.isLoading
+    ? "正在读取任务状态。"
+    : tasksState.isError
+      ? "任务状态暂时不可用，请重试后再查看。"
+      : counts.total === 0
+        ? "还没有批改任务。创建任务后，这里会优先整理需要继续、后台处理中和已生成结果的任务。"
+        : `${counts.action} 个任务需要你继续，${counts.processing} 个正在后台处理，${counts.results} 个已生成结果可进入复核。`;
+  const modelSummary = modelsState.isLoading
+    ? " 模型配置正在读取。"
+    : modelsState.isError
+      ? " 模型状态暂时不可用。"
+      : " 点击下方模型可进入模型与 BYOK 配置。";
+  return taskSummary + modelSummary;
+}
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [query]);
+
+  return matches;
 }

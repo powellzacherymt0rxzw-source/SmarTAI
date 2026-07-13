@@ -26,6 +26,7 @@ frontend/uploaded_files/
 frontend/app/node_modules/
 frontend/app/dist/
 frontend/app/.vite/
+frontend/app/.playwright-cli/
 frontend/app/*.local
 
 # ─── Secrets & credentials ──────────────────────────────────────────────────

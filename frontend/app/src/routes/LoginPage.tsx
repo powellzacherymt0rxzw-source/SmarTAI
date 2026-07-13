@@ -36,12 +36,15 @@ export function LoginPage() {
 
       if (response.user.role !== "teacher" && response.user.role !== "admin") {
         clearAuthToken();
-        queryClient.removeQueries({ queryKey: authKeys.me });
+        queryClient.clear();
         setFormError("当前 React 前端仅开放教师端流程，请使用教师账号登录。");
         return;
       }
 
-      navigate("/", { replace: true });
+      queryClient.removeQueries({
+        predicate: (query) => query.queryKey[0] !== authKeys.me[0],
+      });
+      navigate(safeReturnPath(location.state), { replace: true });
     } catch (error) {
       setFormError(normalizeAPIError(error).message);
     }
@@ -95,6 +98,18 @@ export function LoginPage() {
       </Card>
     </AuthFrame>
   );
+}
+
+function safeReturnPath(state: unknown): string {
+  if (!state || typeof state !== "object" || !("from" in state)) {
+    return "/";
+  }
+
+  const from = String(state.from);
+  if (!from.startsWith("/") || from.startsWith("//") || from.startsWith("/login")) {
+    return "/";
+  }
+  return from;
 }
 
 function AuthFrame({ children }: { children: React.ReactNode }) {

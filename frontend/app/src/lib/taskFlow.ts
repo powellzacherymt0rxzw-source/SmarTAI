@@ -397,12 +397,16 @@ export function getTaskNextStep(task: TaskLite | undefined, taskId: string): Tas
   }
 }
 
-export function formatTaskTime(timestamp: number | undefined, includeYear = false): string {
+export function formatTaskTime(
+  timestamp: number | undefined,
+  includeYear = false,
+  locale = "zh-CN",
+): string {
   if (!Number.isFinite(timestamp) || !timestamp || timestamp <= 0) {
     return "—";
   }
 
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(locale, {
     ...(includeYear ? { year: "numeric" as const } : {}),
     month: "2-digit",
     day: "2-digit",

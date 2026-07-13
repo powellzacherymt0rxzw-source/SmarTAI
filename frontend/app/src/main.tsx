@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 import { RequireTeacherSession } from "@/components/auth/RequireTeacherSession";
 import { AppShell } from "@/components/layout/AppShell";
+import { useI18n } from "@/i18n/I18nProvider";
 import { Providers } from "@/providers/Providers";
 import { StudentUnavailablePage } from "@/routes/StudentUnavailablePage";
 import "@/styles/globals.css";
@@ -41,9 +42,11 @@ const TaskUploadPage = React.lazy(() =>
 );
 
 function RouteFallback() {
+  const { t } = useI18n();
+
   return (
     <div className="flex min-h-[50vh] items-center justify-center text-sm font-medium text-slate-500">
-      Loading...
+      {t("loading")}
     </div>
   );
 }
@@ -65,6 +68,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: routeElement(<DashboardPage />) },
+      { path: "dashboard", element: <Navigate to="/" replace /> },
       { path: "history", element: routeElement(<HistoryPage />) },
       { path: "knowledge-base", element: routeElement(<KnowledgeBasePage />) },
       { path: "tasks/new", element: routeElement(<NewTaskPage />) },
@@ -74,8 +78,10 @@ const router = createBrowserRouter([
       { path: "tasks/:taskId/results", element: routeElement(<TaskResultsPage />) },
       { path: "tasks/:taskId/results/:studentId", element: routeElement(<TaskStudentDetailPage />) },
       { path: "tasks/:taskId/questions/:questionId", element: routeElement(<TaskQuestionDetailPage />) },
-      { path: "experts", element: routeElement(<ExpertsPage />) },
-      { path: "settings", element: routeElement(<SettingsPage />) },
+      { path: "settings/account", element: routeElement(<SettingsPage />) },
+      { path: "settings/byok", element: routeElement(<ExpertsPage />) },
+      { path: "experts", element: <Navigate to="/settings/byok" replace /> },
+      { path: "settings", element: <Navigate to="/settings/account" replace /> },
       { path: "*", element: routeElement(<NotFoundPage />) },
     ],
   },
