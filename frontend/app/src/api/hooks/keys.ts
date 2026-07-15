@@ -5,10 +5,16 @@ export const authKeys = {
 export const taskKeys = {
   all: ["tasks"] as const,
   list: () => ["tasks", "list"] as const,
+  history: (queryKey: string) => ["tasks", "history", queryKey] as const,
   detail: (taskId: string) => ["tasks", "detail", taskId] as const,
   state: (taskId: string) => ["tasks", "state", taskId] as const,
   result: (taskId: string) => ["tasks", "result", taskId] as const,
   comments: (taskId: string) => ["tasks", "comments", taskId] as const,
+};
+
+export const tagKeys = {
+  all: ["tags"] as const,
+  list: () => ["tags", "list"] as const,
 };
 
 export const kbKeys = {

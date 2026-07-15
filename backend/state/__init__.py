@@ -13,7 +13,7 @@ from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 from threading import RLock
 
-from backend.models import GradingJob, Task
+from backend.models import GradingJob, Tag, Task
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +215,114 @@ _task_store = TaskStore()
 
 def get_task_store() -> TaskStore:
     return _task_store
+
+
+# ─── Tag store (owner-scoped task labels) ────────────────────────────────────
+
+class TagStore:
+    """Thread-safe, owner-scoped in-memory tag registry.
+
+    Normalised-name uniqueness is enforced per owner.  This is deliberately a
+    repository-shaped abstraction even though it is in-memory today, so a
+    future PostgreSQL implementation can preserve the API contract.
+    """
+
+    def __init__(self) -> None:
+        self._tags: OrderedDict[str, Tag] = OrderedDict()
+        self._lock = RLock()
+
+    def create_or_get(self, tag: Tag) -> tuple[Tag, bool]:
+        with self._lock:
+            existing = self.find_by_normalized_name(
+                tag.owner_id, tag.normalized_name,
+            )
+            if existing is not None:
+                return existing, False
+            self._tags[tag.id] = tag
+            return tag, True
+
+    def get(self, tag_id: str) -> Optional[Tag]:
+        with self._lock:
+            return self._tags.get(tag_id)
+
+    def find_by_normalized_name(
+        self, owner_id: str, normalized_name: str,
+    ) -> Optional[Tag]:
+        with self._lock:
+            return next(
+                (
+                    tag for tag in self._tags.values()
+                    if tag.owner_id == owner_id
+                    and tag.normalized_name == normalized_name
+                ),
+                None,
+            )
+
+    def list_for_owner(self, owner_id: str) -> List[Tag]:
+        with self._lock:
+            return [tag for tag in self._tags.values() if tag.owner_id == owner_id]
+
+    def update(self, tag_id: str, **fields: Any) -> Optional[Tag]:
+        with self._lock:
+            tag = self._tags.get(tag_id)
+            if tag is None:
+                return None
+            for key, value in fields.items():
+                setattr(tag, key, value)
+            tag.updated_at = time.time()
+            return tag
+
+    def rename_or_conflict(
+        self,
+        tag_id: str,
+        owner_id: str,
+        name: str,
+        normalized_name: str,
+    ) -> tuple[Optional[Tag], Optional[Tag]]:
+        """Atomically rename a tag while preserving owner-local uniqueness.
+
+        Returns ``(updated_tag, None)`` on success, ``(current_tag,
+        conflicting_tag)`` on a duplicate, and ``(None, None)`` when the
+        target does not exist for that owner.  The duplicate lookup and write
+        deliberately share one lock interval so concurrent renames cannot
+        create two tags with the same normalized name.
+        """
+
+        with self._lock:
+            tag = self._tags.get(tag_id)
+            if tag is None or tag.owner_id != owner_id:
+                return None, None
+            duplicate = next(
+                (
+                    item for item in self._tags.values()
+                    if item.owner_id == owner_id
+                    and item.normalized_name == normalized_name
+                    and item.id != tag_id
+                ),
+                None,
+            )
+            if duplicate is not None:
+                return tag, duplicate
+            tag.name = name
+            tag.normalized_name = normalized_name
+            tag.updated_at = time.time()
+            return tag, None
+
+    def delete(self, tag_id: str) -> bool:
+        with self._lock:
+            return self._tags.pop(tag_id, None) is not None
+
+    def clear(self) -> None:
+        """Test/support hook matching the other in-memory stores."""
+        with self._lock:
+            self._tags.clear()
+
+
+_tag_store = TagStore()
+
+
+def get_tag_store() -> TagStore:
+    return _tag_store
 
 
 # ─── User / Course / Assignment / Submission stores ───────────────────────────

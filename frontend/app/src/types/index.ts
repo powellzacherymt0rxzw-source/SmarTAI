@@ -2,6 +2,7 @@ export * from "./analytics";
 export * from "./auth";
 export * from "./experts";
 export * from "./health";
+export * from "./history";
 export * from "./kb";
 export * from "./lms";
 export * from "./progress";

@@ -97,6 +97,10 @@ export interface TaskLite {
   name: string;
   owner_id: string;
   status: TaskStatus;
+  semester_id?: string | null;
+  course_id?: string | null;
+  tag_ids?: string[];
+  needs_attention?: boolean;
   extract_job_id?: string | null;
   parse_job_id?: string | null;
   grading_job_id?: string | null;
@@ -126,6 +130,13 @@ export interface TaskStateSnapshot extends TaskLite {
 }
 
 export type TaskListResponse = Record<string, TaskLite>;
+
+export interface TaskMetadataPatch {
+  name?: string | null;
+  semester_id?: string | null;
+  course_id?: string | null;
+  tag_ids?: string[];
+}
 
 export interface TaskMutationResponse {
   status: "started" | "already_running" | "already_done" | "success" | "ok" | string;

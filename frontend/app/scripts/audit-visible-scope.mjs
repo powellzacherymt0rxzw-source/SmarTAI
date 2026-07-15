@@ -139,8 +139,17 @@ function isAllowedVisibleText(relativePath, line, rule) {
   if (
     rule.id === "visible-course-management" &&
     relativePath === "src/i18n/messages.ts" &&
-    /^\s*(?:(?:knowledgeBase|courseLibrary):\s*"Course Library"|dashboardColumnCourseTags:\s*"Course \/ Tags"),?\s*$/.test(line)
+    /^\s*(?:(?:knowledgeBase|courseLibrary):\s*"Course Library"|dashboardColumnCourseTags:\s*"Course \/ Tags"|history(?:SearchPlaceholder|Course|AllCourses|CourseUnset):),?/.test(line)
   ) {
+    return true;
+  }
+
+  if (
+    rule.id === "visible-course-management" &&
+    (relativePath.startsWith("src/components/history/") || relativePath === "src/routes/HistoryPage.tsx")
+  ) {
+    // History exposes course metadata and filtering backed by the task API. It
+    // does not expose course CRUD, publishing, enrollment, or a course route.
     return true;
   }
 

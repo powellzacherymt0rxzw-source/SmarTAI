@@ -29,11 +29,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 import time
 import uuid
+from collections import Counter
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from backend.auth import require_teacher
@@ -41,8 +44,8 @@ from backend.models import (
     GradingJob, Task, User,
 )
 from backend.state import (
-    JobStore, TaskStore,
-    get_job_store, get_task_store,
+    JobStore, TagStore, TaskStore,
+    get_course_store, get_job_store, get_tag_store, get_task_store,
 )
 from backend.llm.registry import ExpertRegistry, get_expert_registry
 from backend.agents.ingest_agent import (
@@ -60,7 +63,7 @@ from backend.rag.chunker import extract_text as kb_extract_text, chunk_text, MAX
 from backend.rag.embedder import pick_embedder
 from backend.rag.store import InMemoryTaskRetriever
 from backend.progress.tracker import (
-    get_or_create_reporter, get_reporter, remove_reporter,
+    ProgressReporter, get_or_create_reporter, get_reporter, remove_reporter,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,10 +75,20 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 class CreateTaskRequest(BaseModel):
     name: str = "Untitled task"
+    semester_id: Optional[str] = None
+    course_id: Optional[str] = None
+    tag_ids: List[str] = Field(default_factory=list, max_length=30)
 
 
 class UpdateTaskRequest(BaseModel):
     name: Optional[str] = None
+    semester_id: Optional[str] = None
+    course_id: Optional[str] = None
+    tag_ids: Optional[List[str]] = Field(default=None, max_length=30)
+
+
+class InterpretTaskQueryRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
 
 
 class GradeRequest(BaseModel):
@@ -144,6 +157,152 @@ def _get_or_404(task_store: TaskStore, task_id: str) -> Task:
     return t
 
 
+_TASK_STATUSES = {
+    "draft", "extracting_problems", "problems_ready", "parsing_submissions",
+    "submissions_ready", "grading", "graded", "error",
+}
+_TASK_SORTS = {
+    "updated_desc", "updated_asc", "created_desc", "created_asc",
+    "name_asc", "name_desc", "attention_first", "stage_asc", "stage_desc",
+}
+_SEMESTER_PATTERN = re.compile(
+    r"^(20\d{2})-(20\d{2})-(autumn|winter|spring|summer)$",
+)
+
+
+def _allowed_semester_ids(now: Optional[datetime] = None) -> List[str]:
+    """Fixed semester choices from 2025-2026 autumn through current + one.
+
+    This mirrors the product decision recorded for the Figma rebuild.  The
+    frontend localises labels; the API stores stable machine IDs only.
+    """
+
+    now = now or datetime.now()
+    seasons = ("autumn", "winter", "spring", "summer")
+    # Product calendar (not a registrar-grade calendar):
+    # autumn Aug-Nov, winter Dec-Feb, spring Mar-May, summer Jun-Jul.
+    if 8 <= now.month <= 11:
+        current_start = now.year
+        current_index = 0
+    elif now.month == 12:
+        current_start = now.year
+        current_index = 1
+    elif now.month <= 2:
+        current_start = now.year - 1
+        current_index = 1
+    elif now.month <= 5:
+        current_start = now.year - 1
+        current_index = 2
+    else:
+        current_start = now.year - 1
+        current_index = 3
+
+    target_start = current_start
+    target_index = current_index + 1
+    if target_index >= len(seasons):
+        target_start += 1
+        target_index = 0
+
+    out: List[str] = []
+    start_year = 2025
+    season_index = 0
+    while (start_year, season_index) <= (target_start, target_index):
+        out.append(f"{start_year}-{start_year + 1}-{seasons[season_index]}")
+        season_index += 1
+        if season_index == len(seasons):
+            start_year += 1
+            season_index = 0
+    return out
+
+
+def _validate_semester_id(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    semester_id = value.strip().lower()
+    match = _SEMESTER_PATTERN.fullmatch(semester_id)
+    if match is None or int(match.group(2)) != int(match.group(1)) + 1:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="semester_id must be YYYY-YYYY-autumn|winter|spring|summer",
+        )
+    if semester_id not in _allowed_semester_ids():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="semester_id is outside the currently selectable range",
+        )
+    return semester_id
+
+
+def _validate_course_id(course_id: Optional[str], owner_id: str) -> Optional[str]:
+    if course_id is None:
+        return None
+    course = get_course_store().get(course_id)
+    # 404 avoids disclosing another owner's course.
+    if course is None or course.teacher_id != owner_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Course not found")
+    return course_id
+
+
+def _validate_tag_ids(
+    tag_ids: List[str], owner_id: str, tag_store: TagStore,
+) -> List[str]:
+    unique = list(dict.fromkeys(tag_ids))
+    for tag_id in unique:
+        tag = tag_store.get(tag_id)
+        if tag is None or tag.owner_id != owner_id:
+            # Same non-disclosure rule as courses.
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Tag not found")
+    return unique
+
+
+def _task_needs_attention(task: Task, job_store: JobStore) -> bool:
+    if task.status == "error" or bool(task.error):
+        return True
+    # Paused states require the teacher's next action. `graded` means results
+    # were generated, not that a teacher formally finalized review (that state
+    # does not exist yet), so it remains attention-worthy.
+    if task.status in {"draft", "problems_ready", "submissions_ready", "graded"}:
+        return True
+    if not task.grading_job_id:
+        return False
+    job = job_store.get(task.grading_job_id)
+    if job is None:
+        return False
+    if job.status == "error" or bool(job.error):
+        return True
+    payload = job.results or {}
+    students = payload.get("results", []) if isinstance(payload, dict) else []
+    if isinstance(students, dict):
+        students = [students]
+    for student in students if isinstance(students, list) else []:
+        if not isinstance(student, dict):
+            continue
+        for correction in student.get("corrections", []) or []:
+            if not isinstance(correction, dict):
+                continue
+            if correction.get("requires_human_review") is True:
+                return True
+            if correction.get("synthesis_method") in {
+                "all_failed", "quota_exhausted",
+            }:
+                return True
+    return False
+
+
+def _lite_with_attention(task: Task, job_store: JobStore) -> Dict[str, Any]:
+    out = task.lite()
+    out["needs_attention"] = _task_needs_attention(task, job_store)
+    return out
+
+
+def _split_query_values(*groups: Optional[List[str]]) -> List[str]:
+    out: List[str] = []
+    for group in groups:
+        for value in group or []:
+            out.extend(item.strip() for item in value.split(",") if item.strip())
+    return list(dict.fromkeys(out))
+
+
 # ─── CRUD ────────────────────────────────────────────────────────────────────
 
 @router.post("/")
@@ -151,12 +310,19 @@ def create_task(
     req: CreateTaskRequest,
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
+    tag_store: TagStore = Depends(get_tag_store),
 ):
+    semester_id = _validate_semester_id(req.semester_id)
+    course_id = _validate_course_id(req.course_id, current.id)
+    tag_ids = _validate_tag_ids(req.tag_ids, current.id, tag_store)
     task = Task(
         task_id=f"T_{uuid.uuid4().hex[:10]}",
         name=req.name or "Untitled task",
         owner_id=current.id,
         status="draft",
+        semester_id=semester_id,
+        course_id=course_id,
+        tag_ids=tag_ids,
     )
     task_store.create(task)
     logger.info(f"Created task {task.task_id} for {current.id}")
@@ -165,12 +331,226 @@ def create_task(
 
 @router.get("/")
 def list_tasks(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    q: Optional[str] = Query(default=None, max_length=120),
+    semester_id: Optional[str] = Query(default=None),
+    semester: Optional[str] = Query(default=None),
+    course_id: Optional[str] = Query(default=None),
+    course: Optional[str] = Query(default=None),
+    tag_ids: Optional[List[str]] = Query(default=None),
+    tags: Optional[List[str]] = Query(default=None),
+    statuses: Optional[List[str]] = Query(default=None),
+    status_filter: Optional[List[str]] = Query(default=None, alias="status"),
+    unfinished: Optional[bool] = Query(default=None),
+    needs_attention: Optional[bool] = Query(default=None),
+    sort: str = Query(default="updated_desc"),
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
+    job_store: JobStore = Depends(get_job_store),
+    tag_store: TagStore = Depends(get_tag_store),
 ):
     tasks = task_store.list_for_owner(current.id)
     tasks.sort(key=lambda t: t.updated_at, reverse=True)
-    return {t.task_id: t.lite() for t in tasks}
+
+    # Backwards compatibility is intentionally keyed on the literal absence of
+    # a query string. Dashboard and legacy clients still receive the original
+    # task-id dictionary rather than a pagination envelope.
+    if not request.query_params:
+        return {t.task_id: _lite_with_attention(t, job_store) for t in tasks}
+
+    selected_semester = semester_id or semester
+    selected_course = course_id or course
+    selected_tags = _split_query_values(tag_ids, tags)
+    selected_statuses = _split_query_values(statuses, status_filter)
+    unknown_statuses = [item for item in selected_statuses if item not in _TASK_STATUSES]
+    if unknown_statuses:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "invalid_status", "values": unknown_statuses},
+        )
+    if sort not in _TASK_SORTS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "invalid_sort", "value": sort},
+        )
+
+    owner_courses = [
+        item for item in get_course_store().values()
+        if item.teacher_id == current.id
+    ]
+    owner_courses.sort(key=lambda item: (item.name.casefold(), item.code.casefold()))
+    course_by_id = {item.id: item for item in owner_courses}
+    owner_tags = tag_store.list_for_owner(current.id)
+    owner_tags.sort(key=lambda item: (item.normalized_name, item.created_at))
+    tag_by_id = {item.id: item for item in owner_tags}
+    tag_usage_counts = {
+        tag.id: sum(1 for task in tasks if tag.id in task.tag_ids)
+        for tag in owner_tags
+    }
+
+    rows = [(task, _lite_with_attention(task, job_store)) for task in tasks]
+    if selected_semester:
+        rows = [item for item in rows if item[0].semester_id == selected_semester]
+    if selected_course:
+        rows = [item for item in rows if item[0].course_id == selected_course]
+    if selected_tags:
+        required = set(selected_tags)
+        rows = [item for item in rows if required.issubset(set(item[0].tag_ids))]
+    if selected_statuses:
+        allowed = set(selected_statuses)
+        rows = [item for item in rows if item[0].status in allowed]
+    if unfinished is True:
+        # "unfinished" means the automated grading pipeline has not reached
+        # result generation. `graded` is *not* a formal teacher-finalized state;
+        # the lifecycle currently has no review/finalized status.
+        rows = [item for item in rows if item[0].status != "graded"]
+    if needs_attention is not None:
+        rows = [
+            item for item in rows
+            if bool(item[1]["needs_attention"]) is needs_attention
+        ]
+    if q and q.strip():
+        needle = q.strip().casefold()
+
+        def _search_text(task: Task) -> str:
+            course_item = course_by_id.get(task.course_id or "")
+            tag_names = [
+                tag_by_id[tag_id].name
+                for tag_id in task.tag_ids if tag_id in tag_by_id
+            ]
+            return " ".join([
+                task.name,
+                task.semester_id or "",
+                course_item.name if course_item else "",
+                course_item.code if course_item else "",
+                *tag_names,
+            ]).casefold()
+
+        rows = [item for item in rows if needle in _search_text(item[0])]
+
+    if sort == "updated_desc":
+        rows.sort(key=lambda item: item[0].updated_at, reverse=True)
+    elif sort == "updated_asc":
+        rows.sort(key=lambda item: item[0].updated_at)
+    elif sort == "created_desc":
+        rows.sort(key=lambda item: item[0].created_at, reverse=True)
+    elif sort == "created_asc":
+        rows.sort(key=lambda item: item[0].created_at)
+    elif sort == "name_asc":
+        rows.sort(key=lambda item: (item[0].name.casefold(), -item[0].updated_at))
+    elif sort == "name_desc":
+        rows.sort(key=lambda item: item[0].name.casefold(), reverse=True)
+    elif sort == "attention_first":
+        rows.sort(key=lambda item: (not item[1]["needs_attention"], -item[0].updated_at))
+    elif sort in {"stage_asc", "stage_desc"}:
+        stage_order = {
+            "draft": 0,
+            "extracting_problems": 1,
+            "problems_ready": 2,
+            "parsing_submissions": 3,
+            "submissions_ready": 4,
+            "grading": 5,
+            "graded": 6,
+            "error": 7,
+        }
+        direction = 1 if sort == "stage_asc" else -1
+        rows.sort(key=lambda item: (
+            direction * stage_order[item[0].status], -item[0].updated_at,
+        ))
+
+    total = len(rows)
+    start = (page - 1) * page_size
+    items = [item[1] for item in rows[start:start + page_size]]
+    status_counts = Counter(task.status for task in tasks)
+    facets = {
+        "semesters": _allowed_semester_ids(),
+        "courses": [
+            {"id": item.id, "name": item.name, "code": item.code}
+            for item in owner_courses
+        ],
+        "tags": [
+            {**item.public(), "usage_count": tag_usage_counts[item.id]}
+            for item in owner_tags
+        ],
+        "statuses": {
+            item: status_counts.get(item, 0)
+            for item in (
+                "draft", "extracting_problems", "problems_ready",
+                "parsing_submissions", "submissions_ready", "grading",
+                "graded", "error",
+            )
+        },
+    }
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "available_facets": facets,
+        # Temporary alias lets independently-developed History clients land
+        # safely; `available_facets` is the canonical field.
+        "facets": facets,
+    }
+
+
+@router.post("/query/interpret")
+async def interpret_task_query(
+    req: InterpretTaskQueryRequest,
+    current: User = Depends(require_teacher),
+    tag_store: TagStore = Depends(get_tag_store),
+    registry: ExpertRegistry = Depends(get_expert_registry),
+):
+    """Interpret natural language without making ordinary filters model-bound.
+
+    This static route must remain above ``/{task_id}`` so FastAPI never treats
+    the word ``query`` as a task ID.
+    """
+
+    from backend.agents.history_query_agent import interpret_history_query
+
+    query_id = f"history_query_{uuid.uuid4().hex[:12]}"
+    reporter = ProgressReporter(query_id)
+    owner_courses = [
+        item for item in get_course_store().values()
+        if item.teacher_id == current.id
+    ]
+    courses = [
+        {"id": item.id, "name": item.name, "code": item.code}
+        for item in owner_courses
+    ]
+    tags_payload = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "normalized_name": item.normalized_name,
+            "color": item.color,
+        }
+        for item in tag_store.list_for_owner(current.id)
+    ]
+    # Never spend another user's globally-registered BYOK key. The current
+    # registry predates owner isolation, so History LLM enhancement is limited
+    # to explicitly shared environment providers until that migration lands.
+    pick_shared = getattr(registry, "pick_shared_default", None)
+    # Fail closed: a registry/wrapper without an explicit shared-pool method
+    # must never fall back to a process-global BYOK provider.
+    provider = pick_shared() if callable(pick_shared) else None
+    result = await interpret_history_query(
+        req.query,
+        semesters=_allowed_semester_ids(),
+        courses=courses,
+        tags=tags_payload,
+        provider=provider,
+        reporter=reporter,
+        owner_id=current.id,
+    )
+    snapshot = await reporter.snapshot()
+    return {
+        **result,
+        "query_id": query_id,
+        "progress": snapshot.model_dump(),
+    }
 
 
 @router.get("/{task_id}")
@@ -193,12 +573,21 @@ def update_task(
     req: UpdateTaskRequest,
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
+    tag_store: TagStore = Depends(get_tag_store),
 ):
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
     fields: Dict[str, Any] = {}
     if req.name is not None:
         fields["name"] = req.name
+    if "semester_id" in req.model_fields_set:
+        fields["semester_id"] = _validate_semester_id(req.semester_id)
+    if "course_id" in req.model_fields_set:
+        fields["course_id"] = _validate_course_id(req.course_id, current.id)
+    if "tag_ids" in req.model_fields_set:
+        fields["tag_ids"] = _validate_tag_ids(
+            req.tag_ids or [], current.id, tag_store,
+        )
     if fields:
         task_store.update(task_id, **fields)
     return task_store.get(task_id).lite()  # type: ignore
@@ -1230,4 +1619,3 @@ def task_delete_kb(
     if not removed:
         raise HTTPException(404, detail=f"KB doc {doc_id} not found on task {task_id}")
     return {"status": "success", "doc_id": doc_id}
-

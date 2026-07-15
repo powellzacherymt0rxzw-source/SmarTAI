@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as tasksApi from "@/api/tasks";
 import type { UploadOptions } from "@/api/client";
-import type { TaskStatus } from "@/types";
-import { taskKeys } from "./keys";
+import type { TaskHistoryQuery, TaskMetadataPatch, TaskStatus } from "@/types";
+import { tagKeys, taskKeys } from "./keys";
 
 const ACTIVE_TASK_STATUSES = new Set<TaskStatus>([
   "extracting_problems",
@@ -22,6 +22,19 @@ export function useTasks() {
       return Object.values(tasks).some((task) => ACTIVE_TASK_STATUSES.has(task.status))
         ? 3_000
         : false;
+    },
+  });
+}
+
+export function useTaskHistory(query: TaskHistoryQuery) {
+  const queryKey = historyQueryKey(query);
+  return useQuery({
+    queryKey: taskKeys.history(queryKey),
+    queryFn: () => tasksApi.listTaskHistory(query),
+    placeholderData: (previous) => previous,
+    refetchInterval: (historyQuery) => {
+      const data = historyQuery.state.data;
+      return data?.items?.some((task) => ACTIVE_TASK_STATUSES.has(task.status)) ? 3_000 : false;
     },
   });
 }
@@ -63,7 +76,7 @@ export function useCreateTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: tasksApi.createTask,
+    mutationFn: (name: string) => tasksApi.createTask(name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
     },
@@ -74,12 +87,19 @@ export function useUpdateTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ taskId, name }: { taskId: string; name?: string | null }) =>
-      tasksApi.updateTask(taskId, { name }),
+    mutationFn: ({ taskId, patch, name }: { taskId: string; patch?: TaskMetadataPatch; name?: string | null }) =>
+      tasksApi.updateTask(taskId, patch ?? { name }),
     onSuccess: (task) => {
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
+      queryClient.invalidateQueries({ queryKey: tagKeys.all });
       queryClient.setQueryData(taskKeys.detail(task.task_id), task);
     },
+  });
+}
+
+export function useInterpretTaskHistoryQuery() {
+  return useMutation({
+    mutationFn: tasksApi.interpretTaskHistoryQuery,
   });
 }
 
@@ -207,4 +227,19 @@ function invalidateTask(queryClient: ReturnType<typeof useQueryClient>, taskId: 
   queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
   queryClient.invalidateQueries({ queryKey: taskKeys.state(taskId) });
   queryClient.invalidateQueries({ queryKey: taskKeys.result(taskId) });
+}
+
+function historyQueryKey(query: TaskHistoryQuery): string {
+  return JSON.stringify({
+    page: query.page,
+    page_size: query.page_size,
+    q: query.q ?? "",
+    semester_id: query.semester_id ?? "",
+    course_id: query.course_id ?? "",
+    tag_ids: [...(query.tag_ids ?? [])].sort(),
+    statuses: [...(query.statuses ?? [])].sort(),
+    unfinished: Boolean(query.unfinished),
+    needs_attention: Boolean(query.needs_attention),
+    sort: query.sort,
+  });
 }

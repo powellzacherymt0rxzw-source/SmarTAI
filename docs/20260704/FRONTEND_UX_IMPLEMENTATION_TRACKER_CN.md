@@ -6,6 +6,8 @@
 
 > **2026-07-13 归档索引：新 tracker 中 R1-A 共用壳与 G-01 工作台已完成代码、桌面/移动截图、真实交互、静态验证和用户验收；对应阶段提交主题为 `feat(frontend): rebuild dashboard from Figma`。当前进入 G-02 历史任务，旧清单的勾选状态仍不得作为本轮完成依据。**
 
+> **2026-07-13 History 归档索引：新 tracker 中 R1-C/G-02 已按 Figma 02 从头重写可见层，并完成真实分页/筛选/排序、owner-scoped 标签、URL 状态、确定性智能筛选、1440×900/390×844 截图、32 个目标后端测试、lint/typecheck/build 与独立终审；当前为“实现与工程验收完成，等待用户阶段验收”，不得据此写成用户已确认。存储仍为内存，LLM 路径默认关闭且缺硬额度/多进程持久限额/用户 BYOK 隔离，没有 `finalized` 正式完成状态，无可信 ETA 时显示 `—`。详情只看新 tracker 与 R1 决策卡。**
+
 > 目标：在 `codex/frontend-ux-docs` 分支上，严格依据用户对话、记忆、项目文档、Figma/Canva 设计稿和 2026-07-04 设计记录，推进新前端体验代码落地。
 > 规则：每完成一项就把 `[ ]` 改为 `[x]`，并填写大致完成时间。时间使用 `YYYY-MM-DD HH:mm`，默认时区 `Asia/Shanghai / CST`。
 
@@ -215,3 +217,4 @@
 - 2026-07-10 13:33：任务总览和历史任务新增窄屏单列任务卡，保留桌面表格；`npm run typecheck` 与 `git diff --check` 通过。
 - 2026-07-10 13:33：上传页顶部错误提示补齐重试按钮，减少“只显示错误但不知道下一步”的卡住感。
 - 2026-07-10 13:35：`npm run audit:scope`、`npm run typecheck`、`npm run build`、`git diff --check` 通过；Vite preview 复测任务总览、历史任务、上传题目、结果页路由均返回 200。
+- 2026-07-13 17:34：仅作新 tracker 归档索引：Figma-first History 已完成实现与工程验收，视觉证据为 `history-data-1440x900-review.png`、`history-data-390x844-review.png`；移动端无页面级横向溢出。后段少数交互因系统浏览器权限限制未重新逐项运行，前段真实 32 条任务数据态与部分真实交互已验证，查询/写入由契约测试覆盖。已知 P2 为移动筛选条局部横向滚动及 `page_size=100` 时活跃行轮询可能放大请求；用户阶段验收仍待确认。

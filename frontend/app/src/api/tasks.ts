@@ -1,10 +1,14 @@
 import { deleteJSON, getJSON, postJSON, postMultipart, putJSON, type UploadOptions } from "./client";
 import type {
+  HistoryInterpretation,
   ProblemInfo,
   StudentAnswerInfo,
   Task,
+  TaskHistoryQuery,
+  TaskHistoryResponse,
   TaskLite,
   TaskListResponse,
+  TaskMetadataPatch,
   TaskMutationResponse,
   TaskResultResponse,
   TaskStateSnapshot,
@@ -31,20 +35,41 @@ export function buildGradePayload(options: { multiSampleN?: number | null } = {}
   return payload;
 }
 
-export function createTask(name: string): Promise<TaskLite> {
-  return postJSON<TaskLite, { name: string }>("/tasks/", { name });
+export function createTask(name: string, metadata: Omit<TaskMetadataPatch, "name"> = {}): Promise<TaskLite> {
+  return postJSON<TaskLite, TaskMetadataPatch>("/tasks/", { name, ...metadata });
 }
 
 export function listTasks(): Promise<TaskListResponse> {
   return getJSON<TaskListResponse>("/tasks/");
 }
 
+export function listTaskHistory(query: TaskHistoryQuery): Promise<TaskHistoryResponse> {
+  return getJSON<TaskHistoryResponse>("/tasks/", {
+    params: {
+      page: query.page,
+      page_size: query.page_size,
+      q: query.q || undefined,
+      semester_id: query.semester_id || undefined,
+      course_id: query.course_id || undefined,
+      tag_ids: query.tag_ids?.length ? query.tag_ids.join(",") : undefined,
+      statuses: query.statuses?.length ? query.statuses.join(",") : undefined,
+      unfinished: query.unfinished || undefined,
+      needs_attention: query.needs_attention || undefined,
+      sort: query.sort,
+    },
+  });
+}
+
 export function getTask(taskId: string): Promise<Task> {
   return getJSON<Task>(`/tasks/${taskId}`);
 }
 
-export function updateTask(taskId: string, patch: { name?: string | null }): Promise<TaskLite> {
-  return putJSON<TaskLite, { name?: string | null }>(`/tasks/${taskId}`, patch);
+export function updateTask(taskId: string, patch: TaskMetadataPatch): Promise<TaskLite> {
+  return putJSON<TaskLite, TaskMetadataPatch>(`/tasks/${taskId}`, patch);
+}
+
+export function interpretTaskHistoryQuery(query: string): Promise<HistoryInterpretation> {
+  return postJSON<HistoryInterpretation, { query: string }>("/tasks/query/interpret", { query });
 }
 
 export function deleteTask(taskId: string): Promise<{ status: string }> {

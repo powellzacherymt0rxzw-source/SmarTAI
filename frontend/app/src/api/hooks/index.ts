@@ -4,4 +4,5 @@ export * from "./experts";
 export * from "./health";
 export * from "./kb";
 export * from "./keys";
+export * from "./tags";
 export * from "./tasks";

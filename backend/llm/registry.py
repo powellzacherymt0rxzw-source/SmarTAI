@@ -30,6 +30,9 @@ class ExpertRegistry:
     def __init__(self) -> None:
         self._providers: Dict[str, BaseProvider] = {}  # keyed by provider_id
         self._configs: Dict[str, ProviderConfig] = {}  # keyed by provider_id
+        # Provider IDs seeded from environment variables are the explicit
+        # shared pool. User-added BYOK entries are intentionally excluded.
+        self._shared_provider_ids: set[str] = set()
         self._lock = Lock()
         # Seed with env-var defaults if present
         self._seed_from_settings()
@@ -41,34 +44,40 @@ class ExpertRegistry:
                 provider_type="gemini",
                 api_key=settings.gemini_api_key,
                 model=settings.gemini_model,
-            ))
+            ), shared=True)
         if settings.openai_api_key and settings.openai_api_key != "YOUR_API_KEY_HERE":
             self.register(ProviderConfig(
                 provider_type="openai",
                 api_key=settings.openai_api_key,
                 model=settings.openai_model,
                 base_url=settings.openai_api_base,
-            ))
+            ), shared=True)
         if settings.zhipu_api_key:
             self.register(ProviderConfig(
                 provider_type="zhipu",
                 api_key=settings.zhipu_api_key,
                 model=settings.zhipu_model,
                 base_url=settings.zhipu_api_base,
-            ))
+            ), shared=True)
         if settings.anthropic_api_key:
             self.register(ProviderConfig(
                 provider_type="anthropic",
                 api_key=settings.anthropic_api_key,
                 model=settings.anthropic_model,
-            ))
+            ), shared=True)
 
-    def register(self, config: ProviderConfig) -> str:
+    def register(self, config: ProviderConfig, *, shared: bool = False) -> str:
         """Register or update a provider. Returns its provider_id."""
         provider = build_provider(config)
         with self._lock:
             self._providers[provider.provider_id] = provider
             self._configs[provider.provider_id] = config
+            if shared:
+                self._shared_provider_ids.add(provider.provider_id)
+            else:
+                # A later user registration with the same provider/model must
+                # not inherit shared-pool trust from the environment entry.
+                self._shared_provider_ids.discard(provider.provider_id)
         logger.info(f"Registered expert: {provider.provider_id}")
         return provider.provider_id
 
@@ -78,6 +87,7 @@ class ExpertRegistry:
             existed = provider_id in self._providers
             self._providers.pop(provider_id, None)
             self._configs.pop(provider_id, None)
+            self._shared_provider_ids.discard(provider_id)
         if existed:
             logger.info(f"Unregistered expert: {provider_id}")
         return existed
@@ -131,6 +141,31 @@ class ExpertRegistry:
         for p in available:
             if p.provider_type == settings.default_provider:
                 return p
+        return available[0]
+
+    def pick_shared_default(self) -> Optional[BaseProvider]:
+        """Return an enabled environment-seeded provider, never a BYOK entry.
+
+        ExpertRegistry is still process-global today, so callers that are not
+        yet wired to an owner-scoped registry must use this method to avoid
+        one user's BYOK key being spent by another user.
+        """
+
+        with self._lock:
+            available = sorted(
+                [
+                    provider
+                    for provider_id, provider in self._providers.items()
+                    if provider_id in self._shared_provider_ids
+                    and self._configs[provider_id].enabled
+                ],
+                key=lambda provider: provider.provider_id,
+            )
+        if not available:
+            return None
+        for provider in available:
+            if provider.provider_type == settings.default_provider:
+                return provider
         return available[0]
 
 

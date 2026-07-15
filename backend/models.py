@@ -316,6 +316,40 @@ class Course(BaseModel):
     created_at: float = Field(default_factory=time.time)
 
 
+TagColor = Literal["slate", "blue", "teal", "green", "amber", "rose", "violet"]
+
+
+class Tag(BaseModel):
+    """Owner-scoped task label.
+
+    Tags intentionally use a small semantic colour palette instead of accepting
+    arbitrary CSS values.  The React client maps these names to the restrained,
+    low-saturation pills used by the Figma design.
+
+    Storage is currently in-memory (see :class:`backend.state.TagStore`) and is
+    therefore lost when the backend process restarts.
+    """
+
+    id: str
+    name: str
+    normalized_name: str
+    color: TagColor = "slate"
+    owner_id: str
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+    def public(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "normalized_name": self.normalized_name,
+            "color": self.color,
+            "owner_id": self.owner_id,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
 class Assignment(BaseModel):
     """An assignment within a course.
 
@@ -378,6 +412,13 @@ class Task(BaseModel):
     owner_id: str = "anonymous"
     status: TaskStatus = "draft"
 
+    # History/catalogue metadata.  These are IDs, not embedded mutable
+    # objects: course_id must refer to a course owned by owner_id and tag_ids
+    # must refer to tags owned by owner_id (enforced by the Tasks API).
+    semester_id: Optional[str] = None
+    course_id: Optional[str] = None
+    tag_ids: List[str] = Field(default_factory=list)
+
     problem_data: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     student_data: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
@@ -422,6 +463,9 @@ class Task(BaseModel):
             "name": self.name,
             "owner_id": self.owner_id,
             "status": self.status,
+            "semester_id": self.semester_id,
+            "course_id": self.course_id,
+            "tag_ids": list(self.tag_ids),
             "extract_job_id": self.extract_job_id,
             "parse_job_id": self.parse_job_id,
             "grading_job_id": self.grading_job_id,
@@ -436,6 +480,12 @@ class Task(BaseModel):
             "kb_docs": dict(self.kb_docs),
             "kb_doc_count": len(self.kb_docs),
             "error": self.error,
+            # List endpoints enrich this with grading-result review signals.
+            # The base value remains truthful for state/detail responses.
+            "needs_attention": (
+                self.status in {"draft", "problems_ready", "submissions_ready", "graded", "error"}
+                or bool(self.error)
+            ),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
