@@ -4,23 +4,31 @@ from __future__ import annotations
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from backend.auth import get_current_user, require_teacher
 from backend.models import Course, User
 from backend.state import (
+    create_or_get_course,
     get_course_store,
     get_user_store,
+    list_courses_for_teacher,
+)
+from backend.tools.catalog_matching import (
+    CatalogMatch,
+    match_catalog_items,
+    normalize_catalog_text,
 )
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
 
 class CreateCourseRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=120)
     code: str = ""
     description: str = ""
+    force_create: bool = False
 
 
 class EnrollRequest(BaseModel):
@@ -30,16 +38,53 @@ class EnrollRequest(BaseModel):
 
 @router.post("/")
 def create_course(req: CreateCourseRequest, current: User = Depends(require_teacher)):
-    course = Course(
+    name, normalized_name = normalize_catalog_text(req.name)
+    code, normalized_code = normalize_catalog_text(req.code)
+    if not name:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Course name cannot be blank",
+        )
+
+    owner_courses = list_courses_for_teacher(current.id)
+    exact = next((
+        course for course in owner_courses
+        if normalize_catalog_text(course.name)[1] == normalized_name
+        or (
+            normalized_code
+            and normalize_catalog_text(course.code)[1] == normalized_code
+        )
+    ), None)
+    if exact is not None:
+        current.course_ids = list(dict.fromkeys([*current.course_ids, exact.id]))
+        return {**_serialize(exact), "created": False}
+
+    candidates = _merge_course_matches(name, code, owner_courses)
+    related = [match for match in candidates if match.match_kind == "related"][:5]
+    if related and not req.force_create:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "similar_items",
+                "resource": "course",
+                "candidates": [_serialize_match(match) for match in related],
+            },
+        )
+
+    proposed = Course(
         id=f"c_{uuid.uuid4().hex[:10]}",
-        name=req.name,
-        code=req.code,
+        name=name,
+        code=code,
         description=req.description,
         teacher_id=current.id,
     )
-    get_course_store()[course.id] = course
-    current.course_ids = list(set([*current.course_ids, course.id]))
-    return _serialize(course)
+    course, created = create_or_get_course(
+        proposed,
+        normalized_name=normalized_name,
+        normalized_code=normalized_code,
+    )
+    current.course_ids = list(dict.fromkeys([*current.course_ids, course.id]))
+    return {**_serialize(course), "created": created}
 
 
 @router.get("/")
@@ -52,6 +97,30 @@ def list_courses(current: User = Depends(get_current_user)):
     else:
         items = [c for c in store.values() if current.id in c.student_ids]
     return [_serialize(c) for c in items]
+
+
+@router.get("/search")
+def search_courses(
+    q: str = Query(min_length=1, max_length=120),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    current: User = Depends(require_teacher),
+):
+    matches = match_catalog_items(
+        q,
+        list_courses_for_teacher(current.id),
+        fields_for_item=_course_fields,
+    )
+    start = (page - 1) * page_size
+    return {
+        "items": [
+            _serialize_match(match)
+            for match in matches[start:start + page_size]
+        ],
+        "total": len(matches),
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.get("/{course_id}")
@@ -132,3 +201,39 @@ def _serialize(c: Course) -> dict:
         "student_count": len(c.student_ids),
         "created_at": c.created_at,
     }
+
+
+def _course_fields(course: Course) -> dict[str, str]:
+    return {"name": course.name, "code": course.code}
+
+
+def _serialize_match(match: CatalogMatch[Course]) -> dict:
+    return {
+        "item": _serialize(match.item),
+        "match_kind": match.match_kind,
+        "score": match.score,
+        "reason": match.reason,
+    }
+
+
+def _merge_course_matches(
+    name: str,
+    code: str,
+    courses: list[Course],
+) -> list[CatalogMatch[Course]]:
+    by_id: dict[str, CatalogMatch[Course]] = {}
+    for query in (name, code):
+        if not query:
+            continue
+        for match in match_catalog_items(
+            query, courses, fields_for_item=_course_fields,
+        ):
+            current = by_id.get(match.item.id)
+            if current is None or match.score > current.score:
+                by_id[match.item.id] = match
+    return sorted(by_id.values(), key=lambda match: (
+        0 if match.match_kind == "exact" else 1,
+        -match.score,
+        normalize_catalog_text(match.item.name)[1],
+        match.item.id,
+    ))

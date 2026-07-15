@@ -134,64 +134,6 @@ export function countHistoryFilters(query: TaskHistoryQuery): number {
     + Number(query.sort !== "updated_desc");
 }
 
-export interface SemesterOption {
-  id: string;
-  academicYear: string;
-  season: "autumn" | "winter" | "spring" | "summer";
-}
-
-export function buildSemesterOptions(now = new Date()): SemesterOption[] {
-  const current = getCurrentSemester(now);
-  const end = nextSemester(current);
-  const options: SemesterOption[] = [];
-  let cursor: SemesterOption = {
-    id: "2025-2026-autumn",
-    academicYear: "2025-2026",
-    season: "autumn",
-  };
-
-  while (compareSemester(cursor, end) <= 0 && options.length < 40) {
-    options.push(cursor);
-    cursor = nextSemester(cursor);
-  }
-  return options;
-}
-
-function getCurrentSemester(now: Date): SemesterOption {
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  if (month >= 8 && month <= 11) return semester(year, "autumn");
-  if (month === 12) return semester(year, "winter");
-  if (month <= 2) return semester(year - 1, "winter");
-  if (month <= 5) return semester(year - 1, "spring");
-  return semester(year - 1, "summer");
-}
-
-function semester(startYear: number, season: SemesterOption["season"]): SemesterOption {
-  const academicYear = `${startYear}-${startYear + 1}`;
-  return { id: `${academicYear}-${season}`, academicYear, season };
-}
-
-function nextSemester(current: SemesterOption): SemesterOption {
-  const startYear = Number(current.academicYear.slice(0, 4));
-  switch (current.season) {
-    case "autumn": return semester(startYear, "winter");
-    case "winter": return semester(startYear, "spring");
-    case "spring": return semester(startYear, "summer");
-    case "summer": return semester(startYear + 1, "autumn");
-  }
-}
-
-function compareSemester(a: SemesterOption, b: SemesterOption): number {
-  return semesterRank(a) - semesterRank(b);
-}
-
-function semesterRank(value: SemesterOption): number {
-  const startYear = Number(value.academicYear.slice(0, 4));
-  const seasonIndex = ["autumn", "winter", "spring", "summer"].indexOf(value.season);
-  return startYear * 4 + seasonIndex;
-}
-
 function compactHistoryQuery(query: TaskHistoryQuery): TaskHistoryQuery {
   return {
     page: Math.max(1, Math.floor(query.page)),

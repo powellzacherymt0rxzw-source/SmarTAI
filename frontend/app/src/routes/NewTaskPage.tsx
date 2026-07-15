@@ -1,64 +1,287 @@
-import type { FormEvent } from "react";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { ArrowRight, LoaderCircle } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
+import { Link, useBeforeUnload, useBlocker, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { normalizeAPIError } from "@/api/client";
-import { useCreateTask } from "@/api/hooks";
-import { Button } from "@/components/ui/Button";
-import { Card, SectionHeader } from "@/components/ui/Card";
-import { Field } from "@/components/ui/Field";
-import { Input } from "@/components/ui/Input";
+import {
+  useCourses,
+  useCourseSearch,
+  useCreateCourse,
+  useCreateTag,
+  useCreateTask,
+  useExperts,
+  useTags,
+  useTagSearch,
+} from "@/api/hooks";
+import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
+import { SmartCatalogField } from "@/components/new-task/SmartCatalogField";
+import { useI18n } from "@/i18n/I18nProvider";
+import { buildSemesterOptions, formatSemesterLabel, getCurrentSemesterId } from "@/lib/semesters";
+import type { Course, TaskTag } from "@/types";
 
 export function NewTaskPage() {
+  const { t } = useI18n();
   const navigate = useNavigate();
-  const createTask = useCreateTask();
+  const semesterOptions = useMemo(() => buildSemesterOptions(), []);
+  const initialSemester = useMemo(() => {
+    const current = getCurrentSemesterId();
+    return semesterOptions.some((option) => option.id === current)
+      ? current
+      : semesterOptions.at(-1)?.id ?? "";
+  }, [semesterOptions]);
   const [name, setName] = useState("");
+  const [semesterId, setSemesterId] = useState(initialSemester);
+  const [course, setCourse] = useState<Course | null>(null);
+  const [courseDraft, setCourseDraft] = useState("");
+  const [tags, setTags] = useState<TaskTag[]>([]);
+  const [tagDraft, setTagDraft] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const submittedRef = useRef(false);
+  const idempotencyRef = useRef<{ signature: string; key: string } | null>(null);
+  const stayButtonRef = useRef<HTMLButtonElement>(null);
+  const leaveButtonRef = useRef<HTMLButtonElement>(null);
+
+  const debouncedCourseDraft = useDebouncedValue(courseDraft, 180);
+  const debouncedTagDraft = useDebouncedValue(tagDraft, 180);
+  const coursesQuery = useCourses();
+  const courseSearch = useCourseSearch(debouncedCourseDraft);
+  const tagsQuery = useTags();
+  const tagSearch = useTagSearch(debouncedTagDraft);
+  const createCourse = useCreateCourse();
+  const createTag = useCreateTag();
+  const createTask = useCreateTask();
+  const expertsQuery = useExperts();
+  const enabledExperts = (expertsQuery.data ?? []).filter((expert) => expert.enabled);
+  const courseQueryIsCurrent = debouncedCourseDraft.trim() === courseDraft.trim();
+  const tagQueryIsCurrent = debouncedTagDraft.trim() === tagDraft.trim();
+
+  const isDirty = Boolean(
+    name.trim()
+    || course
+    || courseDraft.trim()
+    || tags.length
+    || tagDraft.trim()
+    || semesterId !== initialSemester,
+  );
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => (
+    !submittedRef.current && isDirty && currentLocation.pathname !== nextLocation.pathname
+  ));
+  const blockerState = blocker.state;
+  const resetBlockedNavigation = blocker.state === "blocked" ? blocker.reset : undefined;
+
+  useEffect(() => {
+    if (blockerState !== "blocked" || !resetBlockedNavigation) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const focusFrame = window.requestAnimationFrame(() => stayButtonRef.current?.focus());
+
+    function keepFocusInDialog(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        resetBlockedNavigation?.();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [stayButtonRef.current, leaveButtonRef.current].filter(
+        (element): element is HTMLButtonElement => Boolean(element),
+      );
+      if (!focusable.length) return;
+      const currentIndex = focusable.indexOf(document.activeElement as HTMLButtonElement);
+      const nextIndex = event.shiftKey
+        ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+        : (currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
+      event.preventDefault();
+      focusable[nextIndex].focus();
+    }
+
+    document.addEventListener("keydown", keepFocusInDialog);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", keepFocusInDialog);
+      if (previouslyFocused && document.contains(previouslyFocused)) previouslyFocused.focus();
+    };
+  }, [blockerState, resetBlockedNavigation]);
+
+  useBeforeUnload(useCallback((event) => {
+    if (!submittedRef.current && isDirty) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  }, [isDirty]));
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
-
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setFormError("请输入任务名称。");
+      setFormError(t("newTaskNameRequired"));
+      return;
+    }
+    if (!semesterId) {
+      setFormError(t("newTaskSemesterRequired"));
+      return;
+    }
+    if (courseDraft.trim() || tagDraft.trim()) {
+      setFormError(t("newTaskUncommittedCatalog"));
       return;
     }
 
+    const payload = {
+      name: trimmedName,
+      semester_id: semesterId,
+      course_id: course?.id ?? null,
+      tag_ids: tags.map((tag) => tag.id).sort(),
+    };
+    const signature = JSON.stringify(payload);
+    if (!idempotencyRef.current || idempotencyRef.current.signature !== signature) {
+      idempotencyRef.current = { signature, key: createIdempotencyKey() };
+    }
+
     try {
-      const task = await createTask.mutateAsync(trimmedName);
-      toast.success("任务已创建，进入配置页。");
-      navigate(`/tasks/${task.task_id}/setup`);
+      const task = await createTask.mutateAsync({
+        ...payload,
+        idempotencyKey: idempotencyRef.current.key,
+      });
+      submittedRef.current = true;
+      toast.success(t("newTaskCreateSuccess"));
+      navigate(`/tasks/${task.task_id}/upload/problems`);
     } catch (error) {
       setFormError(normalizeAPIError(error).message);
     }
   }
 
+  const modelSummary = expertsQuery.isLoading
+    ? t("newTaskModelsLoading")
+    : enabledExperts.length
+      ? `${t("newTaskModelsConfiguredPrefix")}${enabledExperts.length}${t("newTaskModelsConfiguredSuffix")}${enabledExperts.slice(0, 2).map((expert) => expert.display_name || expert.model).join("、")}${enabledExperts.length > 2 ? t("newTaskModelsMore") : ""}`
+      : t("newTaskModelsMissing");
+
   return (
-    <div className="grid gap-5">
-      <SectionHeader title="新建任务" description="创建一个面向本次批改的任务流程。" />
-      <Card className="max-w-2xl">
-        <form className="grid gap-4" onSubmit={handleSubmit}>
-          <Field label="任务名称" hint="例如：大学物理第一次习题">
-            <Input
+    <div className="w-full max-w-[1300px]">
+      <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">{t("newTaskTitle")}</h1>
+      <NewTaskStepper />
+
+      <form id="new-task-form" onSubmit={handleSubmit} className="mt-[35px] min-h-[510px] max-w-full rounded-[8px] border bg-card p-5 sm:p-10 xl:ml-[200px] xl:w-[900px] xl:px-[49px] xl:pb-[39px] xl:pt-[39px]">
+        <div className="grid gap-5 xl:block">
+          <div>
+            <label htmlFor="new-task-name" className="block text-[14px] font-semibold leading-5 text-foreground">{t("newTaskNameLabel")}</label>
+            <input
+              id="new-task-name"
               autoFocus
               disabled={createTask.isPending}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="输入任务名称"
-              required
               value={name}
+              onChange={(event) => { setName(event.target.value); setFormError(null); }}
+              placeholder={t("newTaskNamePlaceholder")}
+              className="mt-1 h-11 w-full rounded-[8px] border bg-card px-3 text-[14px] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
+              required
             />
-          </Field>
-          {formError ? (
-            <div className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
-              {formError}
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2 md:gap-10 xl:mt-[22px]">
+            <div>
+              <label htmlFor="new-task-semester" className="block text-[14px] font-semibold leading-5 text-foreground">{t("newTaskSemesterLabel")}</label>
+              <p className="sr-only">{t("newTaskSemesterHint")}</p>
+              <select id="new-task-semester" disabled={createTask.isPending} value={semesterId} onChange={(event) => setSemesterId(event.target.value)} className="mt-1 h-11 w-full rounded-[8px] border bg-card px-3 text-[14px] text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-wait disabled:opacity-60" required>
+                {semesterOptions.map((semester) => <option key={semester.id} value={semester.id}>{formatSemesterLabel(semester.id, t)}</option>)}
+              </select>
             </div>
-          ) : null}
-          <Button type="submit" className="w-fit" disabled={createTask.isPending}>
-            {createTask.isPending ? "创建中..." : "创建并进入配置"}
-          </Button>
-        </form>
-      </Card>
+            <SmartCatalogField<Course>
+              label={t("newTaskCourseLabel")}
+              hint={t("newTaskCourseHint")}
+              placeholder={t("newTaskCoursePlaceholder")}
+              resource="course"
+              query={courseDraft}
+              onQueryChange={setCourseDraft}
+              selected={course ? [course] : []}
+              initialItems={coursesQuery.data ?? []}
+              searchCandidates={courseQueryIsCurrent ? courseSearch.data?.items ?? [] : []}
+              isSearching={!courseQueryIsCurrent || courseSearch.isFetching}
+              isCreating={createCourse.isPending || createTask.isPending}
+              getId={(item) => item.id}
+              getLabel={(item) => item.name}
+              getMeta={(item) => item.code || undefined}
+              onSelect={setCourse}
+              onRemove={() => setCourse(null)}
+              onCreate={async (value, force) => createCourse.mutateAsync({ name: value, force_create: force })}
+            />
+          </div>
+
+          <div className="xl:mt-[22px]">
+            <SmartCatalogField<TaskTag>
+              label={t("newTaskTagsLabel")}
+              hint={t("newTaskTagsHint")}
+              placeholder={t("newTaskTagsPlaceholder")}
+              resource="tag"
+              query={tagDraft}
+              onQueryChange={setTagDraft}
+              selected={tags}
+              initialItems={tagsQuery.data ?? []}
+              searchCandidates={tagQueryIsCurrent ? tagSearch.data?.items ?? [] : []}
+              isSearching={!tagQueryIsCurrent || tagSearch.isFetching}
+              isCreating={createTag.isPending || createTask.isPending}
+              multiple
+              getId={(item) => item.id}
+              getLabel={(item) => item.name}
+              getMeta={(item) => item.usage_count ? `${item.usage_count}${t("newTaskTagUsageSuffix")}` : undefined}
+              onSelect={(item) => setTags((current) => current.some((tag) => tag.id === item.id) ? current : [...current, item])}
+              onRemove={(item) => setTags((current) => current.filter((tag) => tag.id !== item.id))}
+              onCreate={async (value, force) => createTag.mutateAsync({ name: value, color: "slate", force_create: force })}
+            />
+          </div>
+
+          <div className="flex h-14 items-center justify-between gap-4 rounded-[8px] border bg-slate-50 px-4 dark:bg-slate-800/50 xl:mt-[27px]">
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold text-foreground">{t("newTaskModelSummaryLabel")}</p>
+              <p className="mt-1 truncate text-xs text-muted-foreground">{modelSummary}</p>
+            </div>
+            <Link to="/settings/byok" aria-disabled={createTask.isPending} tabIndex={createTask.isPending ? -1 : undefined} onClick={(event) => { if (createTask.isPending) event.preventDefault(); }} className="shrink-0 text-xs font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-wait aria-disabled:opacity-50">{t("newTaskManageModels")}</Link>
+          </div>
+
+          {formError ? <div role="alert" className="rounded-[6px] border border-danger/30 bg-red-50 px-3 py-2 text-xs text-danger dark:bg-red-950/30 xl:mt-[19px]">{formError}</div> : null}
+        </div>
+      </form>
+
+      <div className="mt-[30px] flex max-w-full justify-end xl:ml-[200px] xl:w-[900px] xl:pr-[10px]">
+        <button form="new-task-form" type="submit" disabled={createTask.isPending} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-5 text-[14px] font-semibold text-primary-foreground outline-none transition hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[180px]">
+          {createTask.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
+          {createTask.isPending ? t("newTaskCreatingTask") : t("newTaskCreateAndAdd")}
+          {!createTask.isPending ? <ArrowRight aria-hidden="true" className="h-4 w-4" /> : null}
+        </button>
+      </div>
+
+      {blocker.state === "blocked" ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/35 p-5" role="presentation">
+          <div role="alertdialog" aria-modal="true" aria-labelledby="leave-new-task-title" aria-describedby="leave-new-task-description" className="w-full max-w-sm rounded-[10px] border bg-card p-5 shadow-xl">
+            <h2 id="leave-new-task-title" className="text-base font-semibold text-foreground">{t("newTaskLeaveTitle")}</h2>
+            <p id="leave-new-task-description" className="mt-2 text-sm leading-5 text-muted-foreground">{t("newTaskLeaveDescription")}</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button ref={stayButtonRef} type="button" className="h-9 rounded-md border px-4 text-sm font-medium hover:bg-muted" onClick={() => blocker.reset()}>{t("newTaskStay")}</button>
+              <button ref={leaveButtonRef} type="button" className="h-9 rounded-md bg-danger px-4 text-sm font-medium text-white hover:opacity-90" onClick={() => blocker.proceed()}>{t("newTaskLeave")}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function useDebouncedValue(value: string, delay: number): string {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timeout);
+  }, [delay, value]);
+  return debounced;
+}
+
+function createIdempotencyKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }

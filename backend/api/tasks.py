@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 import time
@@ -36,7 +37,7 @@ from collections import Counter
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from backend.auth import require_teacher
@@ -74,7 +75,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 # ─── Request models ──────────────────────────────────────────────────────────
 
 class CreateTaskRequest(BaseModel):
-    name: str = "Untitled task"
+    name: str = Field(min_length=1, max_length=200)
     semester_id: Optional[str] = None
     course_id: Optional[str] = None
     tag_ids: List[str] = Field(default_factory=list, max_length=30)
@@ -308,25 +309,94 @@ def _split_query_values(*groups: Optional[List[str]]) -> List[str]:
 @router.post("/")
 def create_task(
     req: CreateTaskRequest,
+    idempotency_key: Optional[str] = Header(
+        default=None,
+        alias="Idempotency-Key",
+        max_length=200,
+    ),
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
     tag_store: TagStore = Depends(get_tag_store),
 ):
-    semester_id = _validate_semester_id(req.semester_id)
+    if not req.name.strip():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Task name cannot be blank",
+        )
+    effective_name = req.name.strip()
+    normalized_key = idempotency_key.strip() if idempotency_key is not None else None
+    if normalized_key == "":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Idempotency-Key cannot be blank",
+        )
+    canonical_semester_id = (
+        req.semester_id.strip().lower() if req.semester_id is not None else None
+    )
+    canonical_tag_ids = sorted(dict.fromkeys(req.tag_ids))
+    payload = {
+        "name": effective_name,
+        "semester_id": canonical_semester_id,
+        "course_id": req.course_id,
+        "tag_ids": canonical_tag_ids,
+    }
+    payload_hash = hashlib.sha256(json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    if normalized_key is not None:
+        replay, conflict = task_store.lookup_idempotent(
+            owner_id=current.id,
+            idempotency_key=normalized_key,
+            payload_hash=payload_hash,
+        )
+        if conflict:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "idempotency_key_reused",
+                    "task_id": replay.task_id if replay is not None else None,
+                },
+            )
+        if replay is not None:
+            return replay.lite()
+
+    semester_id = _validate_semester_id(canonical_semester_id)
     course_id = _validate_course_id(req.course_id, current.id)
-    tag_ids = _validate_tag_ids(req.tag_ids, current.id, tag_store)
+    tag_ids = _validate_tag_ids(canonical_tag_ids, current.id, tag_store)
     task = Task(
         task_id=f"T_{uuid.uuid4().hex[:10]}",
-        name=req.name or "Untitled task",
+        name=effective_name,
         owner_id=current.id,
         status="draft",
         semester_id=semester_id,
         course_id=course_id,
         tag_ids=tag_ids,
     )
-    task_store.create(task)
-    logger.info(f"Created task {task.task_id} for {current.id}")
-    return task.lite()
+    if normalized_key is None:
+        task_store.create(task)
+        logger.info(f"Created task {task.task_id} for {current.id}")
+        return task.lite()
+
+    stored, created, conflict = task_store.create_idempotent(
+        task,
+        idempotency_key=normalized_key,
+        payload_hash=payload_hash,
+    )
+    if conflict:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "idempotency_key_reused",
+                "task_id": stored.task_id if stored is not None else None,
+            },
+        )
+    assert stored is not None
+    if created:
+        logger.info(f"Created task {stored.task_id} for {current.id}")
+    return stored.lite()
 
 
 @router.get("/")

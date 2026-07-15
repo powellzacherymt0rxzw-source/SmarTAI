@@ -10,6 +10,15 @@ export function useTags() {
   });
 }
 
+export function useTagSearch(query: string) {
+  const normalized = query.trim();
+  return useQuery({
+    queryKey: tagKeys.search(normalized),
+    queryFn: () => tagsApi.searchTags(normalized),
+    enabled: normalized.length > 0,
+  });
+}
+
 export function useCreateTag() {
   const queryClient = useQueryClient();
   return useMutation({

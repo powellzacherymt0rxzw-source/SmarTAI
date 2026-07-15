@@ -11,9 +11,8 @@ import type {
   TaskTag,
 } from "@/types";
 import { cn } from "@/lib/cn";
-import { buildSemesterOptions } from "./historyQuery";
+import { buildSemesterOptions, formatSemesterLabel } from "@/lib/semesters";
 import {
-  formatSemesterLabel,
   HISTORY_STAGE_KEYS,
   HISTORY_STATUS_OPTIONS,
   TAG_TONE_CLASSES,

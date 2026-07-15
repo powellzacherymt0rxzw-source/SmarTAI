@@ -35,8 +35,15 @@ export function buildGradePayload(options: { multiSampleN?: number | null } = {}
   return payload;
 }
 
-export function createTask(name: string, metadata: Omit<TaskMetadataPatch, "name"> = {}): Promise<TaskLite> {
-  return postJSON<TaskLite, TaskMetadataPatch>("/tasks/", { name, ...metadata });
+export interface CreateTaskInput extends Omit<TaskMetadataPatch, "name"> {
+  name: string;
+  idempotencyKey: string;
+}
+
+export function createTask({ idempotencyKey, ...body }: CreateTaskInput): Promise<TaskLite> {
+  return postJSON<TaskLite, TaskMetadataPatch>("/tasks/", body, {
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
 }
 
 export function listTasks(): Promise<TaskListResponse> {

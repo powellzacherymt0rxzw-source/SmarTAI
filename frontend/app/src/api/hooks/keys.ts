@@ -15,6 +15,13 @@ export const taskKeys = {
 export const tagKeys = {
   all: ["tags"] as const,
   list: () => ["tags", "list"] as const,
+  search: (query: string) => ["tags", "search", query] as const,
+};
+
+export const courseKeys = {
+  all: ["courses"] as const,
+  list: () => ["courses", "list"] as const,
+  search: (query: string) => ["courses", "search", query] as const,
 };
 
 export const kbKeys = {

@@ -1,6 +1,8 @@
 import type { MessageKey } from "@/i18n/messages";
 import type { TagColor, TaskStatus } from "@/types";
 
+export { formatSemesterLabel } from "@/lib/semesters";
+
 export const HISTORY_STAGE_KEYS: Record<TaskStatus, MessageKey> = {
   draft: "dashboardStageDraft",
   extracting_problems: "dashboardStageExtracting",
@@ -67,21 +69,6 @@ export function historyStatusTone(status: TaskStatus): string {
     default:
       return "bg-slate-100 text-slate-600 dark:bg-slate-700/60 dark:text-slate-200";
   }
-}
-
-export function formatSemesterLabel(
-  id: string,
-  t: (key: MessageKey) => string,
-): string {
-  const match = /^(\d{4}-\d{4})-(autumn|winter|spring|summer)$/.exec(id);
-  if (!match) return id;
-  const seasonKeys: Record<string, MessageKey> = {
-    autumn: "historySemesterAutumn",
-    winter: "historySemesterWinter",
-    spring: "historySemesterSpring",
-    summer: "historySemesterSummer",
-  };
-  return `${match[1]} ${t(seasonKeys[match[2]])}`;
 }
 
 export function formatHistoryTime(timestamp: number | undefined, locale: string): string {

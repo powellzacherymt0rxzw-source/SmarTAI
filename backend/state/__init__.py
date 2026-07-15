@@ -167,12 +167,70 @@ class TaskStore:
 
     def __init__(self) -> None:
         self._tasks: OrderedDict[str, Task] = OrderedDict()
+        self._idempotency: Dict[tuple[str, str], tuple[str, str]] = {}
         self._lock = RLock()
 
     def create(self, task: Task) -> None:
         with self._lock:
             self._tasks[task.task_id] = task
             self._prune_if_needed()
+
+    def create_idempotent(
+        self,
+        task: Task,
+        *,
+        idempotency_key: str,
+        payload_hash: str,
+    ) -> tuple[Optional[Task], bool, bool]:
+        """Atomically create or replay a task for an owner-scoped key.
+
+        Returns ``(task, created, conflict)``.  A stale record whose task was
+        pruned or cleared is discarded so test resets and TTL cleanup cannot
+        permanently consume a key.
+        """
+
+        record_key = (task.owner_id, idempotency_key)
+        with self._lock:
+            record = self._idempotency.get(record_key)
+            if record is not None:
+                recorded_hash, task_id = record
+                existing = self._tasks.get(task_id)
+                if existing is None:
+                    self._idempotency.pop(record_key, None)
+                elif recorded_hash == payload_hash:
+                    return existing, False, False
+                else:
+                    return existing, False, True
+            self._tasks[task.task_id] = task
+            self._idempotency[record_key] = (payload_hash, task.task_id)
+            self._prune_if_needed()
+            return task, True, False
+
+    def lookup_idempotent(
+        self,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        payload_hash: str,
+    ) -> tuple[Optional[Task], bool]:
+        """Return an existing replay before re-validating mutable references.
+
+        The boolean is true when the key exists with a different payload.
+        Creation still goes through :meth:`create_idempotent` so a concurrent
+        first request cannot race this read into a duplicate task.
+        """
+
+        record_key = (owner_id, idempotency_key)
+        with self._lock:
+            record = self._idempotency.get(record_key)
+            if record is None:
+                return None, False
+            recorded_hash, task_id = record
+            existing = self._tasks.get(task_id)
+            if existing is None:
+                self._idempotency.pop(record_key, None)
+                return None, False
+            return existing, recorded_hash != payload_hash
 
     def get(self, task_id: str) -> Optional[Task]:
         with self._lock:
@@ -190,7 +248,10 @@ class TaskStore:
 
     def delete(self, task_id: str) -> bool:
         with self._lock:
-            return self._tasks.pop(task_id, None) is not None
+            deleted = self._tasks.pop(task_id, None) is not None
+            if deleted:
+                self._remove_idempotency_for_task(task_id)
+            return deleted
 
     def list_for_owner(self, owner_id: str) -> List[Task]:
         with self._lock:
@@ -206,8 +267,15 @@ class TaskStore:
             t = self._tasks[k]
             if now - t.updated_at > self.DEFAULT_TTL and t.status in ("graded", "error", "draft"):
                 self._tasks.pop(k)
+                self._remove_idempotency_for_task(k)
         while len(self._tasks) > self.MAX_TASKS:
-            self._tasks.popitem(last=False)
+            task_id, _ = self._tasks.popitem(last=False)
+            self._remove_idempotency_for_task(task_id)
+
+    def _remove_idempotency_for_task(self, task_id: str) -> None:
+        for key, (_, recorded_task_id) in list(self._idempotency.items()):
+            if recorded_task_id == task_id:
+                self._idempotency.pop(key, None)
 
 
 _task_store = TaskStore()
@@ -334,6 +402,7 @@ _user_store: Dict[str, User] = {}
 _user_by_username: Dict[str, str] = {}  # username → user_id
 
 _course_store: Dict[str, Course] = {}
+_course_store_lock = RLock()
 
 _assignment_store: Dict[str, Assignment] = {}
 
@@ -368,6 +437,40 @@ def remove_user(user_id: str) -> bool:
 
 def get_course_store() -> Dict[str, Course]:
     return _course_store
+
+
+def list_courses_for_teacher(teacher_id: str) -> List[Course]:
+    """Return an owner-scoped snapshot safe against endpoint writes."""
+
+    with _course_store_lock:
+        return [
+            course for course in _course_store.values()
+            if course.teacher_id == teacher_id
+        ]
+
+
+def create_or_get_course(
+    course: Course,
+    *,
+    normalized_name: str,
+    normalized_code: str,
+) -> tuple[Course, bool]:
+    """Atomically preserve normalized name/code uniqueness per teacher."""
+
+    from backend.tools.catalog_matching import normalize_catalog_text
+
+    with _course_store_lock:
+        for existing in _course_store.values():
+            if existing.teacher_id != course.teacher_id:
+                continue
+            _, existing_name = normalize_catalog_text(existing.name)
+            _, existing_code = normalize_catalog_text(existing.code)
+            if existing_name == normalized_name or (
+                normalized_code and existing_code == normalized_code
+            ):
+                return existing, False
+        _course_store[course.id] = course
+        return course, True
 
 
 def get_assignment_store() -> Dict[str, Assignment]:

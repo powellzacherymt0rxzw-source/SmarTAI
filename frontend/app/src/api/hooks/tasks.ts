@@ -76,7 +76,7 @@ export function useCreateTask() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (name: string) => tasksApi.createTask(name),
+    mutationFn: tasksApi.createTask,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
     },
