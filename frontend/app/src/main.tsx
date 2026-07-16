@@ -40,6 +40,9 @@ const TaskStudentDetailPage = React.lazy(() =>
 const TaskUploadPage = React.lazy(() =>
   import("@/routes/tasks/TaskUploadPage").then((module) => ({ default: module.TaskUploadPage })),
 );
+const AddProblemsPage = React.lazy(() =>
+  import("@/routes/tasks/AddProblemsPage").then((module) => ({ default: module.AddProblemsPage })),
+);
 
 function RouteFallback() {
   const { t } = useI18n();
@@ -74,7 +77,9 @@ const router = createBrowserRouter([
       { path: "tasks/new", element: routeElement(<NewTaskPage />) },
       { path: "tasks/:taskId", element: <Navigate to="setup" replace /> },
       { path: "tasks/:taskId/setup", element: routeElement(<TaskSetupPage />) },
+      { path: "tasks/:taskId/upload/problems", element: routeElement(<AddProblemsPage />) },
       { path: "tasks/:taskId/upload/:kind", element: routeElement(<TaskUploadPage />) },
+      { path: "tasks/:taskId/problems/progress", element: routeElement(<TaskUploadPage />) },
       { path: "tasks/:taskId/results", element: routeElement(<TaskResultsPage />) },
       { path: "tasks/:taskId/results/:studentId", element: routeElement(<TaskStudentDetailPage />) },
       { path: "tasks/:taskId/questions/:questionId", element: routeElement(<TaskQuestionDetailPage />) },

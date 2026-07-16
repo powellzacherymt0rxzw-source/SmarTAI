@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import OrderedDict
+from dataclasses import dataclass
+from threading import RLock
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -41,8 +44,71 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 _RATE_WINDOW_SEC = 30.0
 _last_query_at: Dict[str, float] = {}  # owner_id → ts of last NL query
 
-# Per-question common-mistakes cache: (task_id, q_id) → markdown
-_cm_cache: Dict[str, str] = {}
+# Per-question common-mistakes cache. Entries are bound to the grading job that
+# produced them so a late async write can never be served after replace/delete.
+_CM_CACHE_TTL_SECONDS = 2 * 60 * 60
+_CM_CACHE_MAX_ENTRIES = 1000
+
+
+@dataclass(frozen=True)
+class _CommonMistakesEntry:
+    markdown: str
+    grading_job_id: str
+    created_at: float
+
+
+_cm_cache: "OrderedDict[str, _CommonMistakesEntry]" = OrderedDict()
+_cm_cache_lock = RLock()
+
+
+def _prune_common_mistakes_cache(now: Optional[float] = None) -> None:
+    current = time.monotonic() if now is None else now
+    for cache_key, entry in list(_cm_cache.items()):
+        if current - entry.created_at > _CM_CACHE_TTL_SECONDS:
+            _cm_cache.pop(cache_key, None)
+    while len(_cm_cache) > _CM_CACHE_MAX_ENTRIES:
+        _cm_cache.popitem(last=False)
+
+
+def get_task_common_mistakes(task: Task, q_id: str) -> Optional[str]:
+    if not task.grading_job_id:
+        return None
+    cache_key = f"{task.task_id}::{q_id}"
+    with _cm_cache_lock:
+        _prune_common_mistakes_cache()
+        entry = _cm_cache.get(cache_key)
+        if entry is None or entry.grading_job_id != task.grading_job_id:
+            return None
+        _cm_cache.move_to_end(cache_key)
+        return entry.markdown
+
+
+def cache_task_common_mistakes(
+    *,
+    task_id: str,
+    q_id: str,
+    grading_job_id: str,
+    markdown: str,
+) -> None:
+    cache_key = f"{task_id}::{q_id}"
+    with _cm_cache_lock:
+        _cm_cache[cache_key] = _CommonMistakesEntry(
+            markdown=markdown,
+            grading_job_id=grading_job_id,
+            created_at=time.monotonic(),
+        )
+        _cm_cache.move_to_end(cache_key)
+        _prune_common_mistakes_cache()
+
+
+def clear_task_analytics_cache(task_id: str) -> None:
+    """Drop all derived analytics for one task after replace/delete."""
+
+    prefix = f"{task_id}::"
+    with _cm_cache_lock:
+        for cache_key in list(_cm_cache):
+            if cache_key.startswith(prefix):
+                _cm_cache.pop(cache_key, None)
 
 
 def _check_rate_limit(owner_id: str) -> None:
@@ -62,6 +128,16 @@ def _check_owner(task: Task, user: User) -> None:
         return
     if task.owner_id != user.id:
         raise HTTPException(403, detail="Not your task")
+
+
+def _require_task_llm_principal(task: Task, user: User) -> None:
+    """Never let an admin silently spend another owner's BYOK credentials."""
+
+    if task.owner_id != user.id:
+        raise HTTPException(
+            403,
+            detail={"code": "task_llm_impersonation_forbidden"},
+        )
 
 
 def _get_results_payload(task: Task, job_store: JobStore) -> Dict[str, Any]:
@@ -95,12 +171,13 @@ async def nl_query(
     if task is None:
         raise HTTPException(404, detail="Task not found")
     _check_owner(task, current)
+    _require_task_llm_principal(task, current)
 
     # Rate limit (per owner)
     _check_rate_limit(current.id)
 
     payload = _get_results_payload(task, job_store)
-    provider = registry.pick_default()
+    provider = registry.for_owner(current.id).pick_default()
     if provider is None:
         raise HTTPException(503, detail="No LLM provider configured.")
 
@@ -137,9 +214,17 @@ async def nl_query(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.exception(f"NL query failed for task={task_id} mode={req.mode}")
-        raise HTTPException(500, detail=f"Analytics error: {e}")
+    except Exception as exc:
+        logger.error(
+            "NL query failed for task=%s mode=%s; exception_type=%s",
+            task_id,
+            req.mode,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            500,
+            detail={"code": "analytics_query_failed"},
+        ) from exc
 
 
 @router.get("/{task_id}/per_question/{q_id}")
@@ -155,14 +240,15 @@ async def per_question(
     if task is None:
         raise HTTPException(404, detail="Task not found")
     _check_owner(task, current)
+    _require_task_llm_principal(task, current)
 
     payload = _get_results_payload(task, job_store)
     breakdown = analytics_agent.per_question_breakdown(q_id, payload, task.problem_data)
 
-    cache_key = f"{task_id}::{q_id}"
-    common_mistakes_md = _cm_cache.get(cache_key)
+    common_mistakes_md = get_task_common_mistakes(task, q_id)
     if common_mistakes_md is None:
-        provider = registry.pick_default()
+        expected_grading_job_id = task.grading_job_id
+        provider = registry.for_owner(current.id).pick_default()
         if provider is not None and breakdown["rows"]:
             try:
                 out = await analytics_agent.question_common_mistakes(
@@ -171,9 +257,24 @@ async def per_question(
                     provider=provider,
                 )
                 common_mistakes_md = out.common_mistakes_md
-                _cm_cache[cache_key] = common_mistakes_md
-            except Exception as e:
-                logger.warning(f"common-mistakes summary failed: {e}")
+                latest_task = task_store.get(task_id)
+                if (
+                    expected_grading_job_id
+                    and latest_task is not None
+                    and latest_task.status == "graded"
+                    and latest_task.grading_job_id == expected_grading_job_id
+                ):
+                    cache_task_common_mistakes(
+                        task_id=task_id,
+                        q_id=q_id,
+                        grading_job_id=expected_grading_job_id,
+                        markdown=common_mistakes_md,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "common-mistakes summary failed; exception_type=%s",
+                    type(exc).__name__,
+                )
                 common_mistakes_md = ""
         else:
             common_mistakes_md = ""
@@ -195,5 +296,6 @@ def reset_per_question_cache(
     if task is None:
         raise HTTPException(404, detail="Task not found")
     _check_owner(task, current)
-    _cm_cache.pop(f"{task_id}::{q_id}", None)
+    with _cm_cache_lock:
+        _cm_cache.pop(f"{task_id}::{q_id}", None)
     return {"status": "cleared"}

@@ -94,6 +94,10 @@ async def extract_problems(
     provider: BaseProvider,
     problem_store: Dict[str, Dict[str, Any]],
     reporter: Optional["ProgressReporter"] = None,
+    *,
+    structure_mode: str = "organized",
+    extraction_hint: str = "",
+    confirmed_candidates: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Extract and classify problems from assignment text.
@@ -110,10 +114,42 @@ async def extract_problems(
     if reporter:
         await reporter.set_phase("extracting")
 
-    messages = [SystemMessage(content=PROB_SYSTEM_PROMPT), HumanMessage(content=text)]
+    confirmed_candidates = confirmed_candidates or []
+    if structure_mode == "extract_from_source":
+        candidate_context = [
+            {
+                "question_number": item.get("question_number", ""),
+                "preview": item.get("preview", ""),
+                "line_number": item.get("line_number"),
+            }
+            for item in confirmed_candidates
+        ]
+        source_guidance = (
+            "Source mode: extract_from_source. The document may contain much more than the assignment.\n"
+            "Use the teacher's extraction hint and confirmed local heading candidates to locate only the intended questions. "
+            "Do not treat the local candidates as semantic matches; verify them against the document.\n"
+            f"Teacher extraction hint:\n{extraction_hint}\n\n"
+            f"Confirmed local candidates (possibly empty):\n{json.dumps(candidate_context, ensure_ascii=False)}"
+        )
+    else:
+        source_guidance = (
+            "Source mode: organized. The uploaded document is intended to contain the assignment questions already arranged by question. "
+            "Extract all actual questions, preserve their displayed numbers, and do not invent missing questions."
+        )
+    user_content = (
+        f"**[Source Handling Configuration]**\n{source_guidance}\n\n"
+        f"**[Problem Source Document]**\n---\n{text}\n---"
+    )
+    messages = [
+        SystemMessage(content=PROB_SYSTEM_PROMPT),
+        HumanMessage(content=user_content),
+    ]
 
     logger.info("extract_problems: calling LLM...")
     if reporter:
+        await reporter._emit_message(
+            f"Applying source mode {structure_mode} with {len(confirmed_candidates)} confirmed local candidates..."
+        )
         await reporter._emit_message(f"Calling {provider.provider_id}...")
     response = await ainvoke_with_retry(provider, messages)
     raw_output = response.content
@@ -204,12 +240,19 @@ async def parse_student_answers(
                     await reporter._emit_message(f"Parsed {filename} → {parsed.stu_name}")
                     await reporter.increment_completed()
                 return parsed.model_dump(), None
-            except Exception as e:
-                logger.error(f"Failed to parse {filename}: {e}")
+            except Exception as exc:
+                logger.error(
+                    "Failed to parse submission; filename=%s exception_type=%s",
+                    filename,
+                    type(exc).__name__,
+                )
                 if reporter:
-                    await reporter._emit_message(f"Failed: {filename} ({e})", level="warn")
+                    await reporter._emit_message(
+                        f"Failed to parse {filename}. Check the model configuration and retry.",
+                        level="warn",
+                    )
                     await reporter.increment_completed()
-                return None, str(e)
+                return None, "submission_parse_failed"
 
     results = await asyncio.gather(*[process_one(f) for f in files_data])
 
@@ -222,13 +265,10 @@ async def parse_student_answers(
     # returns "0 students" and the frontend shows a successful empty result.
     # The most common cause is an LLM connectivity issue (proxy/network/quota)
     # that affects every concurrent request identically, so we report the first
-    # error message as representative.
+    # stable error code as representative.
     if not stu_dict and files_data:
         first_err = next((err for (_r, err) in results if err), None) or "unknown error"
-        msg = (
-            f"All {len(files_data)} student files failed to parse. "
-            f"First error: {first_err}"
-        )
+        msg = f"All {len(files_data)} student files failed to parse ({first_err})."
         if reporter:
             await reporter.set_error(msg)
         raise RuntimeError(msg)

@@ -129,7 +129,7 @@ async def test_all_experts_failed_raises(monkeypatch):
 @pytest.mark.asyncio
 async def test_grading_agent_handles_all_failed(monkeypatch):
     """grading_agent._grade_single_answer should catch AllExpertsFailed and
-    return a synthesis_method='all_failed' Correction with clean comment."""
+    return a synthesis_method='all_failed' Correction with a safe user comment."""
     p1 = _FakeProvider("zhipu:glm-4.5-air")
     p2 = _FakeProvider("gemini:gemini-3-flash-preview")
     _patch_skill_returning(monkeypatch, {
@@ -147,8 +147,9 @@ async def test_grading_agent_handles_all_failed(monkeypatch):
     assert correction.score == 0.0
     assert correction.confidence == 0.0
     assert "AI 专家批改失败" in correction.comment
-    assert "zhipu:glm-4.5-air" in correction.comment
-    assert "gemini:gemini-3-flash-preview" in correction.comment
+    assert "请检查 BYOK 配置" in correction.comment
+    assert "zhipu:glm-4.5-air" not in correction.comment
+    assert "gemini:gemini-3-flash-preview" not in correction.comment
     # both failures preserved for frontend accordion
     assert len(correction.expert_results) == 2
 

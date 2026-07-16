@@ -259,7 +259,7 @@ export function getTaskStepGate(task: TaskLite | undefined, requestedStep: TaskW
     available,
     currentStep,
     currentStepLabel: currentStepConfig.label,
-    currentStepHref: taskId ? currentStepConfig.href(taskId) : "/history",
+    currentStepHref: task ? getTaskDestination(task) : "/history",
     requestedStepLabel: requestedStepConfig.label,
     title: `还不能进入${requestedStepConfig.label}`,
     description: task
@@ -273,7 +273,7 @@ export function getTaskDestination(task: Pick<TaskLite, "task_id" | "status">): 
   switch (task.status) {
     case "extracting_problems":
     case "problems_ready":
-      return `/tasks/${task.task_id}/upload/problems`;
+      return `/tasks/${task.task_id}/problems/progress`;
     case "parsing_submissions":
     case "submissions_ready":
       return `/tasks/${task.task_id}/upload/submissions`;
@@ -334,6 +334,7 @@ export function getTaskNextStep(task: TaskLite | undefined, taskId: string): Tas
   }
 
   const problemUpload = `/tasks/${taskId}/upload/problems`;
+  const problemProgress = `/tasks/${taskId}/problems/progress`;
   const submissionUpload = `/tasks/${taskId}/upload/submissions`;
   const results = `/tasks/${taskId}/results`;
 
@@ -350,14 +351,14 @@ export function getTaskNextStep(task: TaskLite | undefined, taskId: string): Tas
         title: "等待题目识别完成",
         description: "可以留在进度页观察子步骤，也可以稍后从任务总览回来。",
         buttonLabel: "查看进度",
-        to: problemUpload,
+        to: problemProgress,
       };
     case "problems_ready":
       return {
         title: "校对题目并补充资料",
         description: "确认题干、评分标准、标答和测试样例，再添加学生作答。",
         buttonLabel: "校对题目",
-        to: problemUpload,
+        to: problemProgress,
       };
     case "parsing_submissions":
       return {

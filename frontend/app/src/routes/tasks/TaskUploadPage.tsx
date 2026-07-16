@@ -576,9 +576,12 @@ export function TaskUploadPage() {
             </WorkflowSection>
           ) : null}
           <div className="grid gap-2 sm:flex sm:flex-wrap sm:justify-end">
-            <Link to={isProblems ? `/tasks/${safeTaskId}/setup` : `/tasks/${safeTaskId}/upload/problems`} className="min-w-0">
+            <Link
+              to={isProblems ? `/tasks/${safeTaskId}/upload/problems` : `/tasks/${safeTaskId}/problems/progress`}
+              className="min-w-0"
+            >
               <Button type="button" variant="secondary" className="w-full sm:w-auto">
-                {isProblems ? "返回资料配置" : "返回题目准备"}
+                {isProblems ? "返回添加题目" : "返回题目准备"}
               </Button>
             </Link>
             {isProblems ? (

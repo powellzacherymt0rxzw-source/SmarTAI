@@ -1,6 +1,7 @@
-import { AlertTriangle, KeyRound, Loader2, Power, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, KeyRound, Loader2, Power, RefreshCw, Trash2 } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { normalizeAPIError } from "@/api/client";
 import { useAddExpertKey, useExperts, useRemoveExpert, useSelectExpert } from "@/api/hooks";
@@ -10,6 +11,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Field } from "@/components/ui/Field";
 import { HorizontalScrollHint } from "@/components/ui/HorizontalScrollHint";
 import { Input } from "@/components/ui/Input";
+import { useI18n } from "@/i18n/I18nProvider";
 import type { ExpertConfig, ProviderType } from "@/types";
 
 const providerOptions: Array<{ value: ProviderType; label: string; defaultModel: string }> = [
@@ -33,6 +35,9 @@ const providerDefaults = providerOptions.reduce<Record<ProviderType, string>>(
 );
 
 export function ExpertsPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { t } = useI18n();
   const expertsQuery = useExperts();
   const addExpertKey = useAddExpertKey();
   const selectExpert = useSelectExpert();
@@ -48,6 +53,7 @@ export function ExpertsPage() {
   const enabledCount = experts.filter((expert) => expert.enabled).length;
   const defaultModel = providerDefaults[provider];
   const isAdding = addExpertKey.isPending;
+  const returnTo = safeAddProblemsReturnTo(new URLSearchParams(location.search).get("returnTo"));
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -97,6 +103,10 @@ export function ExpertsPage() {
   }
 
   async function handleToggle(expert: ExpertConfig) {
+    if (expert.editable === false) {
+      toast.info(t("expertsSharedReadOnly"));
+      return;
+    }
     try {
       const nextEnabled = !expert.enabled;
       const response = await selectExpert.mutateAsync({
@@ -118,6 +128,10 @@ export function ExpertsPage() {
   }
 
   async function handleRemove(expert: ExpertConfig) {
+    if (expert.editable === false) {
+      toast.info(t("expertsSharedDeleteReadOnly"));
+      return;
+    }
     const confirmed = window.confirm(`删除 ${expert.provider_id}？此操作会移除这把 BYOK key。`);
     if (!confirmed) {
       return;
@@ -143,19 +157,31 @@ export function ExpertsPage() {
         title="BYOK 专家"
         description="添加教师自己持有的模型 API key，用于当前教师端批改流程；本页不配置平台共享池，也不会回显 key。"
         action={
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => void expertsQuery.refetch()}
-            disabled={expertsQuery.isFetching}
-          >
-            <RefreshCw
-              aria-hidden="true"
-              className={expertsQuery.isFetching ? "animate-spin" : undefined}
-              size={16}
-            />
-            刷新
-          </Button>
+          <div className="flex flex-wrap justify-end gap-2">
+            {returnTo ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => navigate(returnTo, { state: location.state })}
+              >
+                <ArrowLeft aria-hidden="true" size={16} />
+                {t("expertsReturnToAddProblems")}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void expertsQuery.refetch()}
+              disabled={expertsQuery.isFetching}
+            >
+              <RefreshCw
+                aria-hidden="true"
+                className={expertsQuery.isFetching ? "animate-spin" : undefined}
+                size={16}
+              />
+              刷新
+            </Button>
+          </div>
         }
       />
 
@@ -203,7 +229,7 @@ export function ExpertsPage() {
                   <ExpertRow
                     key={expert.provider_id}
                     expert={expert}
-                    controlsDisabled={selectExpert.isPending || removeExpert.isPending}
+                    controlsDisabled={expert.editable === false || selectExpert.isPending || removeExpert.isPending}
                     onRemove={() => void handleRemove(expert)}
                     onToggle={() => void handleToggle(expert)}
                   />
@@ -308,11 +334,16 @@ function ExpertRow({
   onRemove: () => void;
   onToggle: () => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <tr className="align-top">
       <td className="border-b px-3 py-3">
         <div className="font-medium">{providerLabel(expert.provider_type)}</div>
-        <div className="mt-1 break-all text-xs text-muted-foreground">{expert.provider_id}</div>
+        <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="break-all">{expert.provider_id}</span>
+          {expert.is_shared ? <span className="shrink-0 rounded-full bg-muted px-2 py-0.5">{t("expertsSharedBadge")}</span> : null}
+        </div>
       </td>
       <td className="border-b px-3 py-3">
         <div className="break-all font-medium">{expert.model}</div>
@@ -366,4 +397,8 @@ function providerLabel(providerType: string) {
 
 function formatRpm(rpm: number) {
   return rpm > 0 ? `${rpm} / min` : "0（不限）";
+}
+
+function safeAddProblemsReturnTo(value: string | null): string | null {
+  return value && /^\/tasks\/[^/?#]+\/upload\/problems$/.test(value) ? value : null;
 }

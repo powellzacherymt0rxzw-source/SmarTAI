@@ -261,7 +261,11 @@ class InMemoryTaskRetriever(KnowledgeRetriever):
                 chunk_texts=[c.content for c in chunks_snap] if not embedder.is_dense else None,
             )
         except Exception as e:
-            logger.warning(f"[KB] retrieve failed for task={scope}: {e}")
+            logger.warning(
+                "[KB] retrieve failed for task=%s; exception_type=%s",
+                scope,
+                type(e).__name__,
+            )
             return []
 
         if scores.shape[0] != len(chunks_snap):

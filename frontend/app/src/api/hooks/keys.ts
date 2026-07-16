@@ -29,6 +29,12 @@ export const kbKeys = {
   list: (taskId: string) => ["kb", "list", taskId] as const,
 };
 
+export const problemSourceKeys = {
+  all: ["problem-sources"] as const,
+  library: (taskId: string, scope: string, query: string) =>
+    ["problem-sources", "library", taskId, scope, query] as const,
+};
+
 export const expertKeys = {
   all: ["experts"] as const,
   list: () => ["experts", "list"] as const,

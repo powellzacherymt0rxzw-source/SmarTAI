@@ -7,10 +7,8 @@ Two dependencies are exposed:
     accept anonymous calls when SMARTAI_REQUIRE_AUTH=false).
   - get_current_user: returns User or raises 401 (used by all new endpoints).
 
-Demo tokens (prefix "demo-"): the frontend's "Demo login (no backend)" button sets
-a synthetic token like "demo-teacher-alice". This module decodes them into a
-synthetic User without needing a backend record. Disable in production by setting
-SMARTAI_REQUIRE_AUTH=true (real JWT only).
+Demo tokens (prefix "demo-") are accepted only when SMARTAI_REQUIRE_AUTH=false.
+Production auth mode rejects them before decoding and requires a stored JWT user.
 """
 from __future__ import annotations
 
@@ -105,7 +103,15 @@ def get_optional_user(
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Missing token")
         return None
 
-    # Demo token shortcut
+    # Demo tokens are development-only.  Check the production flag before
+    # decoding so an attacker cannot forge arbitrary teacher/admin principals.
+    if token.startswith("demo-") and settings.require_auth:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Demo tokens are disabled",
+        )
+
+    # Demo token shortcut (development mode only)
     demo = _decode_demo_token(token)
     if demo is not None:
         return demo

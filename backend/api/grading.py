@@ -30,13 +30,19 @@ from pydantic import BaseModel
 from backend.config import settings
 from backend.state import get_problem_store, get_student_store, get_job_store, JobStore
 from backend.models import GradingJob, JobProgress
-from backend.llm.registry import get_expert_registry, ExpertRegistry
+from backend.llm.registry import get_expert_registry, ExpertRegistry, ExpertRegistryView
 from backend.agents.grading_agent import grade_student, grade_batch
 from backend.progress.tracker import get_or_create_reporter, get_reporter
+from backend.progress.tracker import remove_reporter
+from backend.auth import require_admin
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/ai_grading", tags=["ai_grading"])
+router = APIRouter(
+    prefix="/ai_grading",
+    tags=["ai_grading"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 # ─── Request models ──────────────────────────────────────────────────────────
@@ -56,7 +62,7 @@ async def _run_student_grading(
     student_id: str,
     problem_store: Dict,
     student_store: Dict,
-    registry: ExpertRegistry,
+    registry: ExpertRegistryView,
     job_store: JobStore,
     language: str = "en",
 ):
@@ -90,17 +96,22 @@ async def _run_student_grading(
         await reporter.set_phase("done")
         logger.info(f"[grading] Job {job_id} completed for student {student_id}")
 
-    except Exception as e:
-        logger.exception(f"[grading] Job {job_id} failed")
-        job_store.fail(job_id, str(e))
-        await reporter.set_error(str(e))
+    except Exception as exc:
+        logger.error(
+            "[grading] Job %s failed; exception_type=%s",
+            job_id,
+            type(exc).__name__,
+        )
+        safe_error = "grading_failed"
+        job_store.fail(job_id, safe_error)
+        await reporter.set_error("Grading failed. Check the model configuration and retry.")
 
 
 async def _run_batch_grading(
     job_id: str,
     problem_store: Dict,
     student_store: Dict,
-    registry: ExpertRegistry,
+    registry: ExpertRegistryView,
     job_store: JobStore,
     language: str = "en",
 ):
@@ -134,12 +145,16 @@ async def _run_batch_grading(
         })
         logger.info(f"[grading] Batch job {job_id} completed, {len(serialized)} students")
 
-    except Exception as e:
-        logger.exception(f"[grading] Batch job {job_id} failed")
-        job_store.fail(job_id, str(e))
+    except Exception as exc:
+        logger.error(
+            "[grading] Batch job %s failed; exception_type=%s",
+            job_id,
+            type(exc).__name__,
+        )
+        job_store.fail(job_id, "grading_failed")
         reporter_obj = get_reporter(job_id)
         if reporter_obj:
-            await reporter_obj.set_error(str(e))
+            await reporter_obj.set_error("Grading failed. Check the model configuration and retry.")
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -161,7 +176,8 @@ async def start_grading(
     job_store.create(job)
 
     asyncio.create_task(_run_student_grading(
-        job_id, request.student_id, problem_store, student_store, registry, job_store, request.language
+        job_id, request.student_id, problem_store, student_store,
+        registry.shared_view(), job_store, request.language,
     ))
     return {"job_id": job_id}
 
@@ -183,7 +199,8 @@ async def start_batch_grading(
     job_store.create(job)
 
     asyncio.create_task(_run_batch_grading(
-        job_id, problem_store, student_store, registry, job_store, request.language
+        job_id, problem_store, student_store, registry.shared_view(), job_store,
+        request.language,
     ))
     return {"job_id": job_id}
 
@@ -245,6 +262,7 @@ async def stream_progress(job_id: str):
 @router.delete("/discard_job/{job_id}")
 def discard_job(job_id: str, job_store: JobStore = Depends(get_job_store)):
     job_store.discard(job_id)
+    remove_reporter(job_id)
     return {"status": "success", "message": f"Job {job_id} discarded."}
 
 
@@ -262,7 +280,10 @@ def rename_job(job_id: str, req: RenameRequest, job_store: JobStore = Depends(ge
 
 @router.delete("/reset_all_grading")
 def reset_all(job_store: JobStore = Depends(get_job_store)):
+    active_ids = job_store.list_active_ids()
     job_store.reset_active()
+    for job_id in active_ids:
+        remove_reporter(job_id)
     return {"status": "success", "message": "All active grading results reset."}
 
 

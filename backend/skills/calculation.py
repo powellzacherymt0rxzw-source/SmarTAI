@@ -174,7 +174,10 @@ async def _generate_sympy_program(
         )
         return result.code
     except Exception as e:
-        logger.warning(f"_generate_sympy_program failed: {e}")
+        logger.warning(
+            "_generate_sympy_program failed; exception_type=%s",
+            type(e).__name__,
+        )
         return None
 
 
@@ -188,7 +191,10 @@ async def _run_sympy_in_sandbox(code: str, *, timeout: float = 10.0) -> Optional
     try:
         result = await run_python_subprocess(code, "", timeout=timeout)
     except Exception as e:
-        logger.warning(f"_run_sympy_in_sandbox subprocess error: {e}")
+        logger.warning(
+            "_run_sympy_in_sandbox failed; exception_type=%s",
+            type(e).__name__,
+        )
         return None
     if result.passed and result.actual_output:
         return result.actual_output.strip()
@@ -396,7 +402,10 @@ class CalculationSkill(GradingSkill):
             )
 
         except Exception as e:
-            logger.error(f"CalculationSkill failed: {e}", exc_info=True)
+            logger.error(
+                "CalculationSkill failed; exception_type=%s",
+                type(e).__name__,
+            )
             from backend.skills.base import classify_skill_error
             kind, friendly = classify_skill_error(e)
             return self._blank_result(problem.q_id, 10.0, friendly, error_kind=kind)

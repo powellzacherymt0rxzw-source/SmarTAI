@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
         )
     logger.info(f"Starting SmarTAI with GRADING_ENGINE={engine}")
     if settings.http_proxy:
-        logger.info(f"Proxy enabled: {settings.http_proxy}")
+        logger.info("HTTP proxy enabled")
 
     # ── Wire up task-scoped knowledge retriever (RAG MVP) ─────────────
     # Replaces the default NoOpRetriever set in backend/tools/knowledge.py.

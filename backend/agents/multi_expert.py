@@ -418,8 +418,10 @@ async def _synthesize(
 
     except Exception as e:
         logger.warning(
-            f"Synthesis LLM call failed for q_id={problem.q_id}, "
-            f"falling back to weighted_average: {e}"
+            "Synthesis LLM call failed for q_id=%s; exception_type=%s; "
+            "falling back to weighted_average",
+            problem.q_id,
+            type(e).__name__,
         )
         return _weighted_average_fallback(problem, expert_results)
 

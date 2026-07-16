@@ -98,6 +98,9 @@ def _classify_exception(e: Exception) -> Exception:
     server-suggested wait so the retry wait function can honor it precisely
     (Gemini commonly suggests 20-40s, far beyond our exponential cap).
     """
+    if getattr(e, "retryable", True) is False:
+        return PermanentLLMError("non_retryable_provider_limit")
+
     msg = str(e)
     lower = msg.lower()
 

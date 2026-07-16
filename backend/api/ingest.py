@@ -17,13 +17,18 @@ from backend.state import get_problem_store, get_student_store
 from backend.llm.registry import get_expert_registry, ExpertRegistry
 from backend.agents.ingest_agent import extract_problems, parse_student_answers
 from backend.tools.file_processing import extract_files_from_archive, decode_text_bytes, extract_text_from_pdf
+from backend.auth import require_admin
 
 logger = logging.getLogger(__name__)
 
 
 # ─── Problem preview router ──────────────────────────────────────────────────
 
-prob_router = APIRouter(prefix="/prob_preview", tags=["prob_preview"])
+prob_router = APIRouter(
+    prefix="/prob_preview",
+    tags=["prob_preview"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 @prob_router.post("/")
@@ -35,7 +40,8 @@ async def handle_problem_upload(
     """Upload assignment doc → extract and classify problems."""
     logger.info(f"[prob_preview] Received file: {file.filename}, type: {file.content_type}")
 
-    provider = registry.pick_default()
+    # Legacy route has no authenticated owner context: shared pool only.
+    provider = registry.shared_view().pick_default()
     if provider is None:
         raise HTTPException(status_code=503, detail="No LLM provider configured. Add an API key first.")
 
@@ -53,14 +59,24 @@ async def handle_problem_upload(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.exception(f"[prob_preview] Error processing {file.filename}")
-        raise HTTPException(status_code=500, detail=f"Error processing file: {e}")
+    except Exception as exc:
+        logger.error(
+            "[prob_preview] processing failed; exception_type=%s",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "legacy_problem_ingest_failed"},
+        ) from exc
 
 
 # ─── Homework preview router ─────────────────────────────────────────────────
 
-hw_router = APIRouter(prefix="/hw_preview", tags=["hw_preview"])
+hw_router = APIRouter(
+    prefix="/hw_preview",
+    tags=["hw_preview"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 @hw_router.post("/")
@@ -73,7 +89,8 @@ async def handle_answer_upload(
     """Upload student submissions (archive or single file) → parse answers."""
     logger.info(f"[hw_preview] Received file: {file.filename}, type: {file.content_type}")
 
-    provider = registry.pick_default()
+    # Legacy route has no authenticated owner context: shared pool only.
+    provider = registry.shared_view().pick_default()
     if provider is None:
         raise HTTPException(status_code=503, detail="No LLM provider configured. Add an API key first.")
 
@@ -97,8 +114,21 @@ async def handle_answer_upload(
 
     except HTTPException:
         raise
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.exception(f"[hw_preview] Error processing {file.filename}")
-        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+    except ValueError as exc:
+        logger.warning(
+            "[hw_preview] invalid upload; exception_type=%s",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "legacy_submission_upload_invalid"},
+        ) from exc
+    except Exception as exc:
+        logger.error(
+            "[hw_preview] processing failed; exception_type=%s",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "legacy_submission_ingest_failed"},
+        ) from exc

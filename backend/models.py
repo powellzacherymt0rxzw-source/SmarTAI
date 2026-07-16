@@ -316,6 +316,70 @@ class Course(BaseModel):
     created_at: float = Field(default_factory=time.time)
 
 
+ProblemStructureMode = Literal["organized", "extract_from_source"]
+
+
+class CourseMaterial(BaseModel):
+    """Owner-scoped course-library source kept in process memory for Stage 1.
+
+    Extracted ``text`` is deliberately excluded from ``public()`` so listing
+    endpoints never expose source contents. Raw upload bytes are never retained
+    after preflight. A future object-storage /
+    PostgreSQL repository can replace the in-memory store without changing the
+    API shape.
+    """
+
+    material_id: str
+    owner_id: str
+    course_id: Optional[str] = None
+    filename: str
+    content_type: str = "application/octet-stream"
+    size_bytes: int
+    sha256: str
+    text: str = Field(repr=False)
+    resident_bytes: int = 0
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+    def public(self) -> Dict[str, Any]:
+        return {
+            "material_id": self.material_id,
+            "course_id": self.course_id,
+            "filename": self.filename,
+            "content_type": self.content_type,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+class ProblemSourceDraft(BaseModel):
+    """Short-lived, owner/task-scoped source prepared before LLM extraction."""
+
+    source_token: str
+    task_id: str
+    owner_id: str
+    source_kind: Literal["upload", "library"]
+    structure_mode: ProblemStructureMode
+    extraction_hint: str = ""
+    filename: str
+    content_type: str = "application/octet-stream"
+    size_bytes: int
+    content_sha256: str
+    # Library-backed drafts retain only the stable material reference + hash.
+    # Unsaved uploads retain only extracted text, never the original bytes.
+    text: Optional[str] = Field(default=None, repr=False)
+    library_material_id: Optional[str] = None
+    base_workflow_revision: int = 0
+    resident_bytes: int = 0
+    candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    not_found: List[str] = Field(default_factory=list)
+    requires_confirmation: bool = False
+    created_at: float = Field(default_factory=time.time)
+    expires_at: float
+
+
 TagColor = Literal["slate", "blue", "teal", "green", "amber", "rose", "violet"]
 
 
@@ -418,6 +482,7 @@ class Task(BaseModel):
     semester_id: Optional[str] = None
     course_id: Optional[str] = None
     tag_ids: List[str] = Field(default_factory=list)
+    workflow_revision: int = 0
 
     problem_data: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     student_data: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
@@ -430,6 +495,21 @@ class Task(BaseModel):
     submission_file_hash: Optional[str] = None
     problem_file_name: Optional[str] = None
     submission_file_name: Optional[str] = None
+
+    # The successful extraction fingerprint includes bytes + structure mode +
+    # hint + confirmed candidates.  Pending fields keep replacement atomic: a
+    # failed extraction must not destroy the previous successful source/data.
+    problem_request_fingerprint: Optional[str] = None
+    pending_problem_request_fingerprint: Optional[str] = None
+    pending_problem_file_hash: Optional[str] = None
+    pending_problem_file_name: Optional[str] = None
+    problem_structure_mode: ProblemStructureMode = "organized"
+    problem_extraction_hint: str = ""
+    problem_confirmed_candidates: List[str] = Field(default_factory=list)
+    problem_library_material_id: Optional[str] = None
+    pending_submission_file_hash: Optional[str] = None
+    pending_submission_file_name: Optional[str] = None
+    last_failed_job_id: Optional[str] = None
 
     # Reference answers (calculation-style problems) — auxiliary upload, does NOT
     # change task.status. Stored per-question in problem_data[q_id]["reference_answer"]
@@ -466,10 +546,18 @@ class Task(BaseModel):
             "semester_id": self.semester_id,
             "course_id": self.course_id,
             "tag_ids": list(self.tag_ids),
+            "workflow_revision": self.workflow_revision,
             "extract_job_id": self.extract_job_id,
             "parse_job_id": self.parse_job_id,
             "grading_job_id": self.grading_job_id,
             "problem_file_name": self.problem_file_name,
+            "pending_problem_file_name": self.pending_problem_file_name,
+            "pending_submission_file_name": self.pending_submission_file_name,
+            "last_failed_job_id": self.last_failed_job_id,
+            "problem_structure_mode": self.problem_structure_mode,
+            "problem_extraction_hint": self.problem_extraction_hint,
+            "problem_confirmed_candidates": list(self.problem_confirmed_candidates),
+            "problem_library_material_id": self.problem_library_material_id,
             "submission_file_name": self.submission_file_name,
             "reference_file_name": self.reference_file_name,
             "test_cases_file_name": self.test_cases_file_name,

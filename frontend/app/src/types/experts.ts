@@ -10,6 +10,9 @@ export interface ExpertConfig {
   max_concurrent: number;
   rpm: number;
   api_key?: string;
+  scope?: "shared" | "owner";
+  is_shared?: boolean;
+  editable?: boolean;
 }
 
 export interface AddExpertKeyRequest {

@@ -163,7 +163,7 @@ class ProofSkill(GradingSkill):
             )
 
         except Exception as e:
-            logger.error(f"ProofSkill failed: {e}")
+            logger.error("ProofSkill failed; exception_type=%s", type(e).__name__)
             from backend.skills.base import classify_skill_error
             kind, friendly = classify_skill_error(e)
             return self._blank_result(problem.q_id, 10.0, friendly, error_kind=kind)

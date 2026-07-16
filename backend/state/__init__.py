@@ -13,7 +13,13 @@ from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 from threading import RLock
 
-from backend.models import GradingJob, Tag, Task
+from backend.models import (
+    CourseMaterial,
+    GradingJob,
+    ProblemSourceDraft,
+    Tag,
+    Task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +169,7 @@ class TaskStore:
     """
 
     MAX_TASKS = 500
+    MAX_TASKS_PER_OWNER = 100
     DEFAULT_TTL = 7 * 24 * 60 * 60  # 7 days
 
     def __init__(self) -> None:
@@ -172,8 +179,8 @@ class TaskStore:
 
     def create(self, task: Task) -> None:
         with self._lock:
+            self._ensure_capacity(task.owner_id, replacing_task_id=task.task_id)
             self._tasks[task.task_id] = task
-            self._prune_if_needed()
 
     def create_idempotent(
         self,
@@ -201,9 +208,9 @@ class TaskStore:
                     return existing, False, False
                 else:
                     return existing, False, True
+            self._ensure_capacity(task.owner_id, replacing_task_id=task.task_id)
             self._tasks[task.task_id] = task
             self._idempotency[record_key] = (payload_hash, task.task_id)
-            self._prune_if_needed()
             return task, True, False
 
     def lookup_idempotent(
@@ -246,6 +253,447 @@ class TaskStore:
             task.updated_at = time.time()
             return task
 
+    @staticmethod
+    def _has_problem_replacement_artifacts(task: Task) -> bool:
+        return bool(
+            task.problem_data
+            or task.student_data
+            or task.problem_file_hash
+            or task.submission_file_hash
+            or task.grading_job_id
+            or task.reference_file_hash
+            or task.test_cases_file_hash
+        )
+
+    @classmethod
+    def _problem_extraction_gate(
+        cls,
+        task: Task,
+        *,
+        expected_revision: int,
+        request_fingerprint: str,
+        legacy_same_completed_request: bool,
+        replace_confirmed: bool,
+    ) -> str:
+        """Return the current extraction gate result without mutating ``task``."""
+
+        if task.status == "extracting_problems" and task.extract_job_id:
+            if task.pending_problem_request_fingerprint == request_fingerprint:
+                return "already_running"
+            return "different_source_running"
+        if task.workflow_revision != expected_revision:
+            return "stale_revision"
+        if (
+            task.problem_request_fingerprint == request_fingerprint
+            or legacy_same_completed_request
+        ) and task.status in {
+            "problems_ready", "parsing_submissions", "submissions_ready",
+            "grading", "graded",
+        }:
+            return "already_done"
+        if (
+            task.status in {"parsing_submissions", "grading"}
+            or task.reference_parse_job_id
+            or task.test_cases_parse_job_id
+        ):
+            return "workflow_busy"
+        if cls._has_problem_replacement_artifacts(task) and not replace_confirmed:
+            return "replacement_confirmation_required"
+        return "ready"
+
+    def inspect_problem_extraction(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        request_fingerprint: str,
+        legacy_same_completed_request: bool,
+        replace_confirmed: bool,
+    ) -> tuple[str, Optional[Task]]:
+        """Read the extraction gate before doing provider-dependent work.
+
+        ``begin_problem_extraction`` repeats this check under the mutation lock,
+        so this inspection is only an early UX/security gate and not the CAS.
+        """
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return "not_found", None
+            return self._problem_extraction_gate(
+                task,
+                expected_revision=expected_revision,
+                request_fingerprint=request_fingerprint,
+                legacy_same_completed_request=legacy_same_completed_request,
+                replace_confirmed=replace_confirmed,
+            ), task
+
+    def begin_problem_extraction(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        job_id: str,
+        request_fingerprint: str,
+        content_sha256: str,
+        filename: str,
+        legacy_same_completed_request: bool,
+        replace_confirmed: bool,
+    ) -> tuple[str, Optional[Task]]:
+        """CAS the task into extraction without an await-sized race window."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return "not_found", None
+            outcome = self._problem_extraction_gate(
+                task,
+                expected_revision=expected_revision,
+                request_fingerprint=request_fingerprint,
+                legacy_same_completed_request=legacy_same_completed_request,
+                replace_confirmed=replace_confirmed,
+            )
+            if outcome != "ready":
+                return outcome, task
+            task.status = "extracting_problems"
+            task.extract_job_id = job_id
+            task.pending_problem_request_fingerprint = request_fingerprint
+            task.pending_problem_file_hash = content_sha256
+            task.pending_problem_file_name = filename
+            task.error = None
+            task.last_failed_job_id = None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return "started", task
+
+    def commit_problem_extraction(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+        problem_data: Dict[str, Dict[str, Any]],
+        structure_mode: str,
+        extraction_hint: str,
+        confirmed_candidates: List[str],
+        library_material_id: Optional[str],
+    ) -> tuple[Optional[Task], Optional[str]]:
+        """Atomically publish a completed problem extraction.
+
+        The worker must still own ``extract_job_id``; stale workers are ignored.
+        Downstream data is cleared only after the new problem set is complete,
+        so a failed replacement never destroys the last usable questions.
+        Returns the committed task and any grading job id that should be
+        discarded by the API layer.
+        """
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.extract_job_id != job_id:
+                return None, None
+            old_grading_job_id = task.grading_job_id
+            task.problem_data = dict(problem_data)
+            task.student_data = {}
+            task.problem_file_hash = task.pending_problem_file_hash
+            task.problem_file_name = task.pending_problem_file_name
+            task.problem_request_fingerprint = task.pending_problem_request_fingerprint
+            task.pending_problem_request_fingerprint = None
+            task.pending_problem_file_hash = None
+            task.pending_problem_file_name = None
+            task.problem_structure_mode = structure_mode
+            task.problem_extraction_hint = extraction_hint
+            task.problem_confirmed_candidates = list(confirmed_candidates)
+            task.problem_library_material_id = library_material_id
+            task.submission_file_hash = None
+            task.submission_file_name = None
+            task.pending_submission_file_hash = None
+            task.pending_submission_file_name = None
+            task.parse_job_id = None
+            task.grading_job_id = None
+            task.reference_file_hash = None
+            task.reference_file_name = None
+            task.reference_parse_job_id = None
+            task.test_cases_file_hash = None
+            task.test_cases_file_name = None
+            task.test_cases_parse_job_id = None
+            task.status = "problems_ready"
+            task.error = None
+            task.last_failed_job_id = None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return task, old_grading_job_id
+
+    def fail_problem_extraction(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+        error: str,
+    ) -> Optional[Task]:
+        """Fail only the current extraction and retain prior problem data."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.extract_job_id != job_id:
+                return None
+            task.pending_problem_request_fingerprint = None
+            task.pending_problem_file_hash = None
+            task.pending_problem_file_name = None
+            task.status = "error"
+            task.error = error
+            task.last_failed_job_id = job_id
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return task
+
+    def begin_submission_parse(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        job_id: str,
+        content_sha256: str,
+        filename: str,
+    ) -> tuple[str, Optional[Task]]:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return "not_found", None
+            if task.status == "parsing_submissions" and task.parse_job_id:
+                if task.pending_submission_file_hash == content_sha256:
+                    return "already_running", task
+                return "different_submission_running", task
+            if (
+                task.submission_file_hash == content_sha256
+                and task.status in {"submissions_ready", "grading", "graded"}
+            ):
+                return "already_done", task
+            if task.workflow_revision != expected_revision:
+                return "stale_revision", task
+            if (
+                task.status in {"extracting_problems", "grading"}
+                or task.reference_parse_job_id
+                or task.test_cases_parse_job_id
+            ):
+                return "workflow_busy", task
+            if task.status not in {"problems_ready", "submissions_ready", "graded", "error"}:
+                return "invalid_state", task
+            if not task.problem_data:
+                return "invalid_state", task
+            task.status = "parsing_submissions"
+            task.parse_job_id = job_id
+            task.pending_submission_file_hash = content_sha256
+            task.pending_submission_file_name = filename
+            task.error = None
+            task.last_failed_job_id = None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return "started", task
+
+    def commit_submission_parse(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+        student_data: Dict[str, Dict[str, Any]],
+    ) -> tuple[Optional[Task], Optional[str]]:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if (
+                task is None
+                or task.status != "parsing_submissions"
+                or task.parse_job_id != job_id
+            ):
+                return None, None
+            old_grading_job_id = task.grading_job_id
+            task.student_data = dict(student_data)
+            task.submission_file_hash = task.pending_submission_file_hash
+            task.submission_file_name = task.pending_submission_file_name
+            task.pending_submission_file_hash = None
+            task.pending_submission_file_name = None
+            task.grading_job_id = None
+            task.status = "submissions_ready"
+            task.error = None
+            task.last_failed_job_id = None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return task, old_grading_job_id
+
+    def fail_submission_parse(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+        error: str,
+    ) -> Optional[Task]:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.parse_job_id != job_id:
+                return None
+            task.pending_submission_file_hash = None
+            task.pending_submission_file_name = None
+            task.status = "error"
+            task.error = error
+            task.last_failed_job_id = job_id
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return task
+
+    def begin_auxiliary_parse(
+        self,
+        task_id: str,
+        *,
+        kind: str,
+        expected_revision: int,
+        job_id: str,
+        content_sha256: str,
+        filename: str,
+    ) -> tuple[str, Optional[Task]]:
+        if kind not in {"reference", "test_cases"}:
+            raise ValueError("Unknown auxiliary parse kind")
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return "not_found", None
+            job_field = f"{kind}_parse_job_id"
+            hash_field = f"{kind}_file_hash"
+            name_field = f"{kind}_file_name"
+            active_job = getattr(task, job_field)
+            if active_job:
+                return "already_running", task
+            if getattr(task, hash_field) == content_sha256:
+                return "already_done", task
+            if task.workflow_revision != expected_revision:
+                return "stale_revision", task
+            if (
+                task.status in {"extracting_problems", "parsing_submissions", "grading"}
+                or task.reference_parse_job_id
+                or task.test_cases_parse_job_id
+            ):
+                return "workflow_busy", task
+            if not task.problem_data:
+                return "invalid_state", task
+            setattr(task, hash_field, content_sha256)
+            setattr(task, name_field, filename)
+            setattr(task, job_field, job_id)
+            task.error = None
+            task.last_failed_job_id = None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return "started", task
+
+    def finish_auxiliary_parse(
+        self,
+        task_id: str,
+        *,
+        kind: str,
+        job_id: str,
+        error: Optional[str] = None,
+    ) -> Optional[Task]:
+        if kind not in {"reference", "test_cases"}:
+            raise ValueError("Unknown auxiliary parse kind")
+        with self._lock:
+            task = self._tasks.get(task_id)
+            job_field = f"{kind}_parse_job_id"
+            if task is None or getattr(task, job_field) != job_id:
+                return None
+            setattr(task, job_field, None)
+            task.error = error
+            task.last_failed_job_id = job_id if error else None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return task
+
+    def begin_grading(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        job_id: str,
+    ) -> tuple[str, Optional[Task]]:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return "not_found", None
+            if task.status == "grading" and task.grading_job_id:
+                return "already_running", task
+            if task.status == "graded" and task.grading_job_id:
+                return "already_done", task
+            if task.workflow_revision != expected_revision:
+                return "stale_revision", task
+            if (
+                task.status in {"extracting_problems", "parsing_submissions"}
+                or task.reference_parse_job_id
+                or task.test_cases_parse_job_id
+            ):
+                return "workflow_busy", task
+            if task.status not in {"submissions_ready", "graded", "error"}:
+                return "invalid_state", task
+            if not task.problem_data or not task.student_data:
+                return "invalid_state", task
+            task.status = "grading"
+            task.grading_job_id = job_id
+            task.error = None
+            task.last_failed_job_id = None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return "started", task
+
+    def finish_grading(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+        error: Optional[str] = None,
+    ) -> Optional[Task]:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.grading_job_id != job_id:
+                return None
+            task.status = "error" if error else "graded"
+            task.error = error
+            task.last_failed_job_id = job_id if error else None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return task
+
+    def update_workflow(self, task_id: str, **fields: Any) -> Optional[Task]:
+        """Update a completed workflow artifact and invalidate old drafts."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            for key, value in fields.items():
+                setattr(task, key, value)
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return task
+
+    def update_workflow_cas(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        **fields: Any,
+    ) -> Optional[Task]:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.workflow_revision != expected_revision:
+                return None
+            if (
+                task.status in {
+                    "extracting_problems", "parsing_submissions", "grading",
+                }
+                or task.reference_parse_job_id
+                or task.test_cases_parse_job_id
+            ):
+                return None
+            for key, value in fields.items():
+                setattr(task, key, value)
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return task
+
     def delete(self, task_id: str) -> bool:
         with self._lock:
             deleted = self._tasks.pop(task_id, None) is not None
@@ -261,16 +709,22 @@ class TaskStore:
         with self._lock:
             return list(self._tasks.values())
 
-    def _prune_if_needed(self) -> None:
-        now = time.time()
-        for k in list(self._tasks.keys()):
-            t = self._tasks[k]
-            if now - t.updated_at > self.DEFAULT_TTL and t.status in ("graded", "error", "draft"):
-                self._tasks.pop(k)
-                self._remove_idempotency_for_task(k)
-        while len(self._tasks) > self.MAX_TASKS:
-            task_id, _ = self._tasks.popitem(last=False)
-            self._remove_idempotency_for_task(task_id)
+    def _ensure_capacity(
+        self,
+        owner_id: str,
+        *,
+        replacing_task_id: Optional[str] = None,
+    ) -> None:
+        existing = self._tasks.get(replacing_task_id or "")
+        if existing is not None and existing.owner_id == owner_id:
+            return
+        owner_count = sum(
+            1 for task in self._tasks.values() if task.owner_id == owner_id
+        )
+        if owner_count >= self.MAX_TASKS_PER_OWNER:
+            raise ResourceQuotaError("task_owner_count_limit", 429)
+        if len(self._tasks) >= self.MAX_TASKS:
+            raise ResourceQuotaError("task_global_count_limit", 429)
 
     def _remove_idempotency_for_task(self, task_id: str) -> None:
         for key, (_, recorded_task_id) in list(self._idempotency.items()):
@@ -283,6 +737,172 @@ _task_store = TaskStore()
 
 def get_task_store() -> TaskStore:
     return _task_store
+
+
+# ─── Q-01 problem source stores (owner scoped, in-memory) ───────────────────
+
+class ResourceQuotaError(RuntimeError):
+    """Stable store-layer quota signal translated by the API."""
+
+    def __init__(self, code: str, status_code: int) -> None:
+        super().__init__(code)
+        self.code = code
+        self.status_code = status_code
+
+class CourseMaterialStore:
+    """Extracted course text with non-evicting owner/global quotas."""
+
+    MAX_MATERIALS = 500
+    MAX_MATERIALS_PER_OWNER = 50
+    MAX_RESIDENT_BYTES = 128 * 1024 * 1024
+    MAX_RESIDENT_BYTES_PER_OWNER = 20 * 1024 * 1024
+
+    def __init__(self) -> None:
+        self._materials: OrderedDict[str, CourseMaterial] = OrderedDict()
+        self._lock = RLock()
+
+    def create_or_get(self, material: CourseMaterial) -> tuple[CourseMaterial, bool]:
+        with self._lock:
+            existing = next((
+                item for item in self._materials.values()
+                if item.owner_id == material.owner_id
+                and item.course_id == material.course_id
+                and item.sha256 == material.sha256
+            ), None)
+            if existing is not None:
+                return existing, False
+            owner_rows = [
+                item for item in self._materials.values()
+                if item.owner_id == material.owner_id
+            ]
+            owner_bytes = sum(item.resident_bytes for item in owner_rows)
+            total_bytes = sum(item.resident_bytes for item in self._materials.values())
+            if material.resident_bytes > self.MAX_RESIDENT_BYTES_PER_OWNER:
+                raise ResourceQuotaError("course_material_too_large", 413)
+            if len(owner_rows) >= self.MAX_MATERIALS_PER_OWNER:
+                raise ResourceQuotaError("course_material_owner_count_limit", 429)
+            if len(self._materials) >= self.MAX_MATERIALS:
+                raise ResourceQuotaError("course_material_global_count_limit", 429)
+            if owner_bytes + material.resident_bytes > self.MAX_RESIDENT_BYTES_PER_OWNER:
+                raise ResourceQuotaError("course_material_owner_bytes_limit", 413)
+            if total_bytes + material.resident_bytes > self.MAX_RESIDENT_BYTES:
+                raise ResourceQuotaError("course_material_global_bytes_limit", 413)
+            self._materials[material.material_id] = material
+            return material, True
+
+    def get_for_owner(self, material_id: str, owner_id: str) -> Optional[CourseMaterial]:
+        with self._lock:
+            material = self._materials.get(material_id)
+            return material if material is not None and material.owner_id == owner_id else None
+
+    def delete_for_owner(self, material_id: str, owner_id: str) -> bool:
+        with self._lock:
+            material = self._materials.get(material_id)
+            if material is None or material.owner_id != owner_id:
+                return False
+            self._materials.pop(material_id, None)
+            return True
+
+    def list_for_owner(
+        self,
+        owner_id: str,
+        *,
+        course_id: Optional[str] = None,
+        restrict_course: bool = False,
+        query: str = "",
+    ) -> List[CourseMaterial]:
+        normalized_query = " ".join(query.casefold().split())
+        with self._lock:
+            rows = [item for item in self._materials.values() if item.owner_id == owner_id]
+            if restrict_course:
+                rows = [item for item in rows if item.course_id == course_id]
+            if normalized_query:
+                rows = [
+                    item for item in rows
+                    if normalized_query in " ".join(item.filename.casefold().split())
+                ]
+            return sorted(rows, key=lambda item: (-item.updated_at, item.filename.casefold(), item.material_id))
+
+    def clear(self) -> None:
+        with self._lock:
+            self._materials.clear()
+
+
+class ProblemSourceDraftStore:
+    """Short-lived tokens with non-evicting owner/global quotas."""
+
+    MAX_DRAFTS = 1000
+    MAX_DRAFTS_PER_OWNER = 20
+    MAX_RESIDENT_BYTES = 64 * 1024 * 1024
+    MAX_RESIDENT_BYTES_PER_OWNER = 8 * 1024 * 1024
+
+    def __init__(self) -> None:
+        self._drafts: OrderedDict[str, ProblemSourceDraft] = OrderedDict()
+        self._lock = RLock()
+
+    def create(self, draft: ProblemSourceDraft) -> ProblemSourceDraft:
+        with self._lock:
+            self._prune_expired()
+            owner_rows = [
+                item for item in self._drafts.values()
+                if item.owner_id == draft.owner_id
+            ]
+            owner_bytes = sum(item.resident_bytes for item in owner_rows)
+            total_bytes = sum(item.resident_bytes for item in self._drafts.values())
+            if draft.resident_bytes > self.MAX_RESIDENT_BYTES_PER_OWNER:
+                raise ResourceQuotaError("problem_source_draft_too_large", 413)
+            if len(owner_rows) >= self.MAX_DRAFTS_PER_OWNER:
+                raise ResourceQuotaError("problem_source_draft_owner_count_limit", 429)
+            if len(self._drafts) >= self.MAX_DRAFTS:
+                raise ResourceQuotaError("problem_source_draft_global_count_limit", 429)
+            if owner_bytes + draft.resident_bytes > self.MAX_RESIDENT_BYTES_PER_OWNER:
+                raise ResourceQuotaError("problem_source_draft_owner_bytes_limit", 413)
+            if total_bytes + draft.resident_bytes > self.MAX_RESIDENT_BYTES:
+                raise ResourceQuotaError("problem_source_draft_global_bytes_limit", 413)
+            self._drafts[draft.source_token] = draft
+            return draft
+
+    def get_for_owner_task(
+        self,
+        source_token: str,
+        *,
+        owner_id: str,
+        task_id: str,
+    ) -> Optional[ProblemSourceDraft]:
+        with self._lock:
+            self._prune_expired()
+            draft = self._drafts.get(source_token)
+            if draft is None or draft.owner_id != owner_id or draft.task_id != task_id:
+                return None
+            return draft
+
+    def delete_for_task(self, task_id: str) -> None:
+        with self._lock:
+            for token, draft in list(self._drafts.items()):
+                if draft.task_id == task_id:
+                    self._drafts.pop(token, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._drafts.clear()
+
+    def _prune_expired(self) -> None:
+        now = time.time()
+        for token, draft in list(self._drafts.items()):
+            if draft.expires_at <= now:
+                self._drafts.pop(token, None)
+
+
+_course_material_store = CourseMaterialStore()
+_problem_source_draft_store = ProblemSourceDraftStore()
+
+
+def get_course_material_store() -> CourseMaterialStore:
+    return _course_material_store
+
+
+def get_problem_source_draft_store() -> ProblemSourceDraftStore:
+    return _problem_source_draft_store
 
 
 # ─── Tag store (owner-scoped task labels) ────────────────────────────────────

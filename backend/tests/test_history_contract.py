@@ -35,6 +35,9 @@ OTHER_ID = "demo_historyother"
 
 
 class _NoProviderRegistry:
+    def for_owner(self, _owner_id):
+        return self
+
     def pick_default(self):
         return None
 
@@ -352,7 +355,10 @@ def test_optional_llm_path_uses_owner_candidates_and_progress(client, monkeypatc
         provider_id = "mock:history"
 
     class _Registry:
-        def pick_shared_default(self):
+        def for_owner(self, _owner_id):
+            return self
+
+        def pick_default(self):
             return _Provider()
 
     app.dependency_overrides[get_expert_registry] = lambda: _Registry()
@@ -409,7 +415,10 @@ def test_llm_kill_switch_defaults_to_deterministic_fallback(client, monkeypatch)
         provider_id = "mock:shared"
 
     class _Registry:
-        def pick_shared_default(self):
+        def for_owner(self, _owner_id):
+            return self
+
+        def pick_default(self):
             return _Provider()
 
     app.dependency_overrides[get_expert_registry] = lambda: _Registry()

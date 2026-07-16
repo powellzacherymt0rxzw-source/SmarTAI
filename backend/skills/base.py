@@ -186,8 +186,8 @@ def classify_skill_error(e: Exception) -> tuple[str, str]:
     Used by every skill's catch-all block so the raw English error text
     (e.g. "Quota exceeded for metric: generativelanguage…") never leaks into
     the student-facing batch comment. The returned `friendly_zh_comment` is
-    what gets stored in `ExpertResult.comment`; the raw `str(e)` still lives
-    in logs for ops triage.
+    what gets stored in `ExpertResult.comment`; logs retain only the exception
+    type so provider responses or credentials cannot leak into diagnostics.
 
     Recognition is text-based because by the time we reach the skill's
     `except`, tenacity has unwrapped the original exception type — we only see

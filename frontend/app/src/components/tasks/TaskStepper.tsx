@@ -43,6 +43,9 @@ export function TaskStepper({ current, task }: { current: TaskWorkflowStepKey; t
             const isActive = step.key === current;
             const isComplete = index < currentIndex;
             const isAvailable = task ? isTaskStepAvailable(task.status, step.key) : true;
+            const stepHref = step.key === "problems" && task && task.status !== "draft"
+              ? `/tasks/${taskId}/problems/progress`
+              : step.href(taskId);
             const Icon = isComplete ? Check : CircleDot;
             const itemClassName = cn(
               "flex min-w-44 items-center gap-3 rounded-md border border-transparent px-3 py-2 text-left transition",
@@ -84,19 +87,19 @@ export function TaskStepper({ current, task }: { current: TaskWorkflowStepKey; t
 
             return (
               <li key={step.key} className="flex items-stretch">
-                {isAvailable ? (
+                {isAvailable && !isActive ? (
                   <Link
-                    to={step.href(taskId)}
+                    to={stepHref}
                     className={itemClassName}
-                    aria-current={isActive ? "step" : undefined}
                   >
                     {itemContent}
                   </Link>
                 ) : (
                   <span
                     className={itemClassName}
-                    aria-disabled="true"
-                    title="当前任务还未进入此阶段"
+                    aria-current={isActive ? "step" : undefined}
+                    aria-disabled={isAvailable ? undefined : "true"}
+                    title={isAvailable ? undefined : "当前任务还未进入此阶段"}
                   >
                     {itemContent}
                   </span>

@@ -265,7 +265,10 @@ async def _generate_test_cases(
             output_model=TestCaseList,
         )
     except Exception as e:
-        logger.warning(f"_generate_test_cases LLM call failed: {e}")
+        logger.warning(
+            "_generate_test_cases LLM call failed; exception_type=%s",
+            type(e).__name__,
+        )
         return [], "llm_failed_transient"
 
     if not result.cases:
@@ -305,7 +308,10 @@ def _coerce_test_cases(raw: object) -> List[TestCase]:
             try:
                 out.append(TestCase(**item))
             except Exception as e:
-                logger.warning(f"Skipping invalid test case dict {item}: {e}")
+                logger.warning(
+                    "Skipping invalid test case; exception_type=%s",
+                    type(e).__name__,
+                )
     return out
 
 
@@ -660,7 +666,10 @@ class ProgrammingSkill(GradingSkill):
             )
 
         except Exception as e:
-            logger.error(f"ProgrammingSkill failed: {e}", exc_info=True)
+            logger.error(
+                "ProgrammingSkill failed; exception_type=%s",
+                type(e).__name__,
+            )
             from backend.skills.base import classify_skill_error
             kind, friendly = classify_skill_error(e)
             return self._blank_result(problem.q_id, 10.0, friendly, error_kind=kind)

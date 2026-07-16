@@ -16,8 +16,9 @@ from __future__ import annotations
 import time
 import logging
 import asyncio
-from collections import deque
+from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
+from threading import RLock
 from typing import Optional, Deque
 
 from backend.config import settings
@@ -120,6 +121,7 @@ class ProgressReporter:
 
     async def _emit(self, event: ProgressEvent) -> None:
         """Add event to ring buffer and push to SSE subscribers."""
+        _mark_reporter_active(self.job_id)
         self._events.append(event)
         logger.info(f"[progress:{self.job_id}] {event.message}")
         for q in self._subscribers:
@@ -147,20 +149,59 @@ class ProgressReporter:
 
 # ─── Job-level progress store (in-memory, maps job_id → reporter) ──────────
 
-_reporters: dict[str, ProgressReporter] = {}
+_REPORTER_TTL_SECONDS = 2 * 60 * 60
+_REPORTER_MAX_ENTRIES = 500
+_reporters: "OrderedDict[str, ProgressReporter]" = OrderedDict()
+_reporter_last_seen: dict[str, float] = {}
+_reporters_lock = RLock()
+
+
+def _prune_reporters(now: Optional[float] = None) -> None:
+    current = time.monotonic() if now is None else now
+    for reporter_id, touched_at in list(_reporter_last_seen.items()):
+        if current - touched_at > _REPORTER_TTL_SECONDS:
+            _reporters.pop(reporter_id, None)
+            _reporter_last_seen.pop(reporter_id, None)
+    while len(_reporters) > _REPORTER_MAX_ENTRIES:
+        reporter_id, _ = _reporters.popitem(last=False)
+        _reporter_last_seen.pop(reporter_id, None)
+
+
+def _mark_reporter_active(job_id: str) -> None:
+    with _reporters_lock:
+        if job_id not in _reporters:
+            return
+        _reporters.move_to_end(job_id)
+        _reporter_last_seen[job_id] = time.monotonic()
+        _prune_reporters()
 
 
 def get_or_create_reporter(
     job_id: str, total_students: int = 0, total_questions: int = 0
 ) -> ProgressReporter:
-    if job_id not in _reporters:
-        _reporters[job_id] = ProgressReporter(job_id, total_students, total_questions)
-    return _reporters[job_id]
+    with _reporters_lock:
+        _prune_reporters()
+        reporter = _reporters.get(job_id)
+        if reporter is None:
+            reporter = ProgressReporter(job_id, total_students, total_questions)
+            _reporters[job_id] = reporter
+        _reporters.move_to_end(job_id)
+        _reporter_last_seen[job_id] = time.monotonic()
+        _prune_reporters()
+        return reporter
 
 
 def get_reporter(job_id: str) -> Optional[ProgressReporter]:
-    return _reporters.get(job_id)
+    with _reporters_lock:
+        _prune_reporters()
+        reporter = _reporters.get(job_id)
+        if reporter is not None:
+            _reporters.move_to_end(job_id)
+            _reporter_last_seen[job_id] = time.monotonic()
+        return reporter
 
 
 def remove_reporter(job_id: str) -> None:
-    _reporters.pop(job_id, None)
+    with _reporters_lock:
+        _reporters.pop(job_id, None)
+        _reporter_last_seen.pop(job_id, None)

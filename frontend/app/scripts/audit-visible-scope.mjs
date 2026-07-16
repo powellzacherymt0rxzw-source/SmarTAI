@@ -146,6 +146,21 @@ function isAllowedVisibleText(relativePath, line, rule) {
 
   if (
     rule.id === "visible-course-management" &&
+    (
+      relativePath === "src/routes/tasks/AddProblemsPage.tsx"
+      || relativePath.startsWith("src/api/problemSources")
+      || relativePath.startsWith("src/api/hooks/problemSources")
+      || relativePath === "src/types/problemSources.ts"
+      || (relativePath === "src/i18n/messages.ts" && /^\s*addProblems/.test(line))
+    )
+  ) {
+    // Q-01 may select real owner-scoped course-library material for the
+    // current task. It does not expose course CRUD, enrollment, or publishing.
+    return true;
+  }
+
+  if (
+    rule.id === "visible-course-management" &&
     (relativePath.startsWith("src/components/history/") || relativePath === "src/routes/HistoryPage.tsx")
   ) {
     // History exposes course metadata and filtering backed by the task API. It

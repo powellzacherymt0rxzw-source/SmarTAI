@@ -35,20 +35,21 @@ import time
 import uuid
 from collections import Counter
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from backend.auth import require_teacher
-from backend.models import (
-    GradingJob, Task, User,
-)
+from backend.models import CourseMaterial, GradingJob, ProblemSourceDraft, Task, User
 from backend.state import (
-    JobStore, TagStore, TaskStore,
-    get_course_store, get_job_store, get_tag_store, get_task_store,
+    CourseMaterialStore, JobStore, ProblemSourceDraftStore, ResourceQuotaError,
+    TagStore, TaskStore,
+    get_course_material_store, get_course_store, get_job_store,
+    get_problem_source_draft_store, get_tag_store, get_task_store,
 )
-from backend.llm.registry import ExpertRegistry, get_expert_registry
+from backend.llm.registry import ExpertRegistry, ExpertRegistryView, get_expert_registry
 from backend.agents.ingest_agent import (
     extract_problems,
     parse_student_answers,
@@ -151,6 +152,26 @@ def _check_owner(task: Task, user: User) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Not your task")
 
 
+def _require_task_llm_principal(task: Task, user: User) -> None:
+    """Block implicit admin impersonation from consuming an owner's BYOK."""
+
+    if task.owner_id != user.id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={"code": "task_llm_impersonation_forbidden"},
+        )
+
+
+def _task_workflow_is_busy(task: Task) -> bool:
+    return bool(
+        task.status in {
+            "extracting_problems", "parsing_submissions", "grading",
+        }
+        or task.reference_parse_job_id
+        or task.test_cases_parse_job_id
+    )
+
+
 def _get_or_404(task_store: TaskStore, task_id: str) -> Task:
     t = task_store.get(task_id)
     if t is None:
@@ -169,6 +190,295 @@ _TASK_SORTS = {
 _SEMESTER_PATTERN = re.compile(
     r"^(20\d{2})-(20\d{2})-(autumn|winter|spring|summer)$",
 )
+_PROBLEM_SOURCE_MAX_BYTES = 5 * 1024 * 1024
+_PROBLEM_SOURCE_DRAFT_TTL_SECONDS = 2 * 60 * 60
+_PROBLEM_SOURCE_EXTENSIONS = {".pdf", ".txt", ".md"}
+_PROBLEM_SOURCE_MAX_CHARACTERS = 400_000
+_PROBLEM_SOURCE_MAX_ESTIMATED_TOKENS = 120_000
+_PROBLEM_REPLACEMENT_CLEARS = [
+    "problem_data",
+    "student_data",
+    "submission_file",
+    "grading_result",
+    "reference_answers",
+    "test_cases",
+]
+_PROBLEM_REPLACEMENT_PRESERVES = [
+    "task_metadata",
+    "tags",
+    "course_library_materials",
+    "task_knowledge_base_documents",
+]
+_QUESTION_HEADING_PATTERNS = (
+    re.compile(
+        r"(?im)^\s*(?P<number>(?:q(?:uestion)?\s*)?\d+(?:\.\d+)*|[IVXLCDM]+)"
+        r"\s*(?:[.、):：]|题\b)\s*(?P<title>[^\n]{0,180})"
+    ),
+    re.compile(
+        r"(?im)^\s*第\s*(?P<number>\d+(?:\.\d+)*|[一二三四五六七八九十百]+)"
+        r"\s*题\s*(?P<title>[^\n]{0,180})"
+    ),
+)
+_HINT_QUESTION_PATTERNS = (
+    re.compile(r"(?i)(?:q(?:uestion)?\s*)(\d+(?:\.\d+)*)"),
+    re.compile(r"第\s*(\d+(?:\.\d+)*)\s*题"),
+    re.compile(r"题(?:号)?\s*[:：]?\s*(\d+(?:\.\d+)*)"),
+)
+
+
+async def _read_problem_source_upload(
+    file: UploadFile,
+) -> tuple[str, str, bytes, str, str]:
+    """Validate and decode a Q-01 source without claiming OCR support."""
+
+    filename = Path(file.filename or "").name.strip()
+    extension = Path(filename).suffix.casefold()
+    if not filename or extension not in _PROBLEM_SOURCE_EXTENSIONS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported problem source type. Allowed: PDF, TXT, MD. DOCX and OCR/images are not supported yet.",
+        )
+    body = await file.read(_PROBLEM_SOURCE_MAX_BYTES + 1)
+    if not body:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Problem source file is empty.")
+    if len(body) > _PROBLEM_SOURCE_MAX_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Problem source is larger than {_PROBLEM_SOURCE_MAX_BYTES} bytes.",
+        )
+    try:
+        text = await (
+            extract_text_from_pdf(body)
+            if extension == ".pdf"
+            else decode_text_bytes(body)
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Problem source decode failed; exception_type=%s",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "problem_source_decode_failed"},
+        ) from exc
+    text = (text or "").strip()
+    if not text:
+        if extension == ".pdf":
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="PDF contains no extractable text. Scanned/image PDFs require OCR, which is not supported yet.",
+            )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Problem source contains no usable text.")
+    _validate_problem_source_text(text)
+    return filename, file.content_type or "application/octet-stream", body, text, hashlib.sha256(body).hexdigest()
+
+
+def _estimate_problem_source_tokens(text: str) -> int:
+    cjk_count = sum(1 for char in text if "\u3400" <= char <= "\u9fff")
+    non_cjk_count = len(text) - cjk_count
+    return cjk_count + (non_cjk_count + 3) // 4
+
+
+def _validate_problem_source_text(text: str) -> None:
+    if len(text) > _PROBLEM_SOURCE_MAX_CHARACTERS:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "code": "problem_source_character_limit_exceeded",
+                "max_characters": _PROBLEM_SOURCE_MAX_CHARACTERS,
+            },
+        )
+    estimated_tokens = _estimate_problem_source_tokens(text)
+    if estimated_tokens > _PROBLEM_SOURCE_MAX_ESTIMATED_TOKENS:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "code": "problem_source_token_limit_exceeded",
+                "max_estimated_tokens": _PROBLEM_SOURCE_MAX_ESTIMATED_TOKENS,
+            },
+        )
+
+
+def _normalize_question_number(value: str) -> str:
+    normalized = re.sub(r"(?i)^question\s*|^q\s*", "", value.strip())
+    return normalized.casefold().rstrip(".、):：")
+
+
+def _detect_problem_source_candidates(
+    text: str,
+    *,
+    structure_mode: Literal["organized", "extract_from_source"],
+    extraction_hint: str,
+) -> tuple[List[Dict[str, Any]], List[str]]:
+    """Find explicit headings locally; this is intentionally not semantic AI."""
+
+    matches: List[tuple[int, str, str]] = []
+    seen: set[tuple[int, str]] = set()
+    for pattern in _QUESTION_HEADING_PATTERNS:
+        for match in pattern.finditer(text):
+            number = " ".join(match.group("number").split())
+            dedupe_key = (match.start(), _normalize_question_number(number))
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            preview = " ".join((match.group("title") or "").strip().split())
+            matches.append((match.start(), number, preview[:180]))
+    matches.sort(key=lambda item: item[0])
+
+    kind = "matched" if structure_mode == "organized" else "possible_match"
+    candidates: List[Dict[str, Any]] = []
+    detected_numbers: set[str] = set()
+    for index, (offset, number, preview) in enumerate(matches[:200], start=1):
+        normalized_number = _normalize_question_number(number)
+        detected_numbers.add(normalized_number)
+        candidates.append({
+            "candidate_id": f"candidate_{index}",
+            "question_number": number,
+            "preview": preview,
+            "line_number": text.count("\n", 0, offset) + 1,
+            "match_kind": kind,
+            "reason": "explicit_heading_detected",
+        })
+
+    requested: List[str] = []
+    for pattern in _HINT_QUESTION_PATTERNS:
+        requested.extend(match.group(1) for match in pattern.finditer(extraction_hint))
+    not_found = [
+        number for number in dict.fromkeys(requested)
+        if _normalize_question_number(number) not in detected_numbers
+    ]
+    return candidates, not_found
+
+
+def _problem_source_fingerprint(
+    *,
+    content_sha256: str,
+    structure_mode: str,
+    extraction_hint: str,
+    confirmed_candidate_ids: List[str],
+) -> str:
+    payload = {
+        "content_sha256": content_sha256,
+        "structure_mode": structure_mode,
+        "extraction_hint": " ".join(extraction_hint.split()),
+        "confirmed_candidate_ids": sorted(dict.fromkeys(confirmed_candidate_ids)),
+    }
+    return hashlib.sha256(json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _problem_extraction_gate_response(
+    outcome: str,
+    current_task: Optional[Task],
+    *,
+    expected_workflow_revision: int,
+) -> Optional[Dict[str, Any]]:
+    """Map a problem-extraction gate outcome to its public API contract."""
+
+    if outcome in {"ready", "started"}:
+        return None
+    if outcome == "not_found" or current_task is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if outcome == "already_running":
+        return {
+            "status": "already_running",
+            "job_id": current_task.extract_job_id,
+            "task_id": current_task.task_id,
+            "workflow_revision": current_task.workflow_revision,
+        }
+    if outcome == "already_done":
+        return {
+            "status": "already_done",
+            "unchanged": True,
+            "job_id": current_task.extract_job_id,
+            "task_id": current_task.task_id,
+            "problem_count": len(current_task.problem_data),
+            "workflow_revision": current_task.workflow_revision,
+        }
+    if outcome == "different_source_running":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "different_problem_source_running",
+                "job_id": current_task.extract_job_id,
+                "workflow_revision": current_task.workflow_revision,
+            },
+        )
+    if outcome == "stale_revision":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "stale_problem_source",
+                "base_workflow_revision": expected_workflow_revision,
+                "workflow_revision": current_task.workflow_revision,
+            },
+        )
+    if outcome == "replacement_confirmation_required":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "problem_replacement_confirmation_required",
+                "will_clear": _PROBLEM_REPLACEMENT_CLEARS,
+                "will_preserve": _PROBLEM_REPLACEMENT_PRESERVES,
+                "workflow_revision": current_task.workflow_revision,
+            },
+        )
+    if outcome == "workflow_busy":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "task_workflow_busy",
+                "workflow_revision": current_task.workflow_revision,
+            },
+        )
+    raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": outcome})
+
+
+def _parse_confirmed_candidate_ids(
+    raw: Optional[str],
+    draft: ProblemSourceDraft,
+) -> tuple[List[str], List[Dict[str, Any]]]:
+    if not draft.requires_confirmation:
+        # "Already organized" means every explicit heading is included.  Do
+        # not let a generic client field accidentally narrow this mode.
+        selected = [item["candidate_id"] for item in draft.candidates]
+    elif raw is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "candidate_confirmation_required",
+                "source_token": draft.source_token,
+            },
+        )
+    else:
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="confirmed_candidate_ids must be a JSON array of candidate IDs.",
+            ) from exc
+        if not isinstance(decoded, list) or not all(isinstance(item, str) for item in decoded):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="confirmed_candidate_ids must be a JSON array of candidate IDs.",
+            )
+        selected = list(dict.fromkeys(item.strip() for item in decoded if item.strip()))
+
+    by_id = {item["candidate_id"]: item for item in draft.candidates}
+    unknown = [candidate_id for candidate_id in selected if candidate_id not in by_id]
+    if unknown:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "unknown_candidate_ids", "candidate_ids": unknown},
+        )
+    return selected, [by_id[candidate_id] for candidate_id in selected]
 
 
 def _allowed_semester_ids(now: Optional[datetime] = None) -> List[str]:
@@ -375,16 +685,22 @@ def create_task(
         course_id=course_id,
         tag_ids=tag_ids,
     )
-    if normalized_key is None:
-        task_store.create(task)
-        logger.info(f"Created task {task.task_id} for {current.id}")
-        return task.lite()
+    try:
+        if normalized_key is None:
+            task_store.create(task)
+            logger.info(f"Created task {task.task_id} for {current.id}")
+            return task.lite()
 
-    stored, created, conflict = task_store.create_idempotent(
-        task,
-        idempotency_key=normalized_key,
-        payload_hash=payload_hash,
-    )
+        stored, created, conflict = task_store.create_idempotent(
+            task,
+            idempotency_key=normalized_key,
+            payload_hash=payload_hash,
+        )
+    except ResourceQuotaError as exc:
+        raise HTTPException(
+            exc.status_code,
+            detail={"code": exc.code},
+        ) from exc
     if conflict:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -599,13 +915,7 @@ async def interpret_task_query(
         }
         for item in tag_store.list_for_owner(current.id)
     ]
-    # Never spend another user's globally-registered BYOK key. The current
-    # registry predates owner isolation, so History LLM enhancement is limited
-    # to explicitly shared environment providers until that migration lands.
-    pick_shared = getattr(registry, "pick_shared_default", None)
-    # Fail closed: a registry/wrapper without an explicit shared-pool method
-    # must never fall back to a process-global BYOK provider.
-    provider = pick_shared() if callable(pick_shared) else None
+    provider = registry.for_owner(current.id).pick_default()
     result = await interpret_history_query(
         req.query,
         semesters=_allowed_semester_ids(),
@@ -669,134 +979,492 @@ def delete_task(
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
     job_store: JobStore = Depends(get_job_store),
+    source_draft_store: ProblemSourceDraftStore = Depends(get_problem_source_draft_store),
 ):
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
     if t.grading_job_id:
         job_store.discard(t.grading_job_id)
-    if t.extract_job_id:
-        remove_reporter(t.extract_job_id)
-    if t.parse_job_id:
-        remove_reporter(t.parse_job_id)
+    for job_id in {
+        t.extract_job_id,
+        t.parse_job_id,
+        t.grading_job_id,
+        t.reference_parse_job_id,
+        t.test_cases_parse_job_id,
+        t.last_failed_job_id,
+    }:
+        if job_id:
+            remove_reporter(job_id)
+    from backend.api.analytics import clear_task_analytics_cache
+    clear_task_analytics_cache(task_id)
     # Drop any in-memory KB index attached to this task. Safe even if the
     # active retriever is the NoOp default — remove_task is a no-op there.
     retriever = get_retriever()
     if isinstance(retriever, InMemoryTaskRetriever):
         retriever.remove_task(task_id)
+    source_draft_store.delete_for_task(task_id)
     task_store.delete(task_id)
     return {"status": "success"}
+
+
+# ─── Q-01 problem source preflight (local, no LLM spend) ────────────────────
+
+@router.get("/{task_id}/problem-sources/library")
+def list_problem_source_library(
+    task_id: str,
+    scope: Literal["course", "all"] = Query(default="course"),
+    q: str = Query(default="", max_length=200),
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    material_store: CourseMaterialStore = Depends(get_course_material_store),
+):
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    if task.course_id is not None:
+        _validate_course_id(task.course_id, task.owner_id)
+    materials = material_store.list_for_owner(
+        task.owner_id,
+        course_id=task.course_id,
+        restrict_course=scope == "course",
+        query=q,
+    )
+    return {
+        "items": [material.public() for material in materials],
+        "total": len(materials),
+        "scope": scope,
+        "course_id": task.course_id if scope == "course" else None,
+        "storage": "memory",
+    }
+
+
+@router.post("/{task_id}/problem-sources/preflight")
+async def preflight_problem_source(
+    task_id: str,
+    file: Optional[UploadFile] = File(default=None),
+    library_material_id: Optional[str] = Form(default=None),
+    structure_mode: Literal["organized", "extract_from_source"] = Form(default="organized"),
+    extraction_hint: str = Form(default=""),
+    save_to_library: bool = Form(default=False),
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    material_store: CourseMaterialStore = Depends(get_course_material_store),
+    source_draft_store: ProblemSourceDraftStore = Depends(get_problem_source_draft_store),
+):
+    """Validate a source and detect explicit question headings without an LLM."""
+
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    base_workflow_revision = task.workflow_revision
+    material_id = (library_material_id or "").strip() or None
+    if (file is None) == (material_id is None):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide exactly one of file or library_material_id.",
+        )
+    hint = extraction_hint.strip()
+    if len(hint) > 2000:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="extraction_hint cannot exceed 2000 characters.",
+        )
+    saved_material: Optional[CourseMaterial] = None
+    saved_material_created = False
+    if file is not None:
+        filename, content_type, raw_bytes, text, content_sha256 = await _read_problem_source_upload(file)
+        source_kind: Literal["upload", "library"] = "upload"
+        if save_to_library:
+            if task.course_id is not None:
+                _validate_course_id(task.course_id, task.owner_id)
+            proposed = CourseMaterial(
+                material_id=f"material_{uuid.uuid4().hex[:12]}",
+                owner_id=task.owner_id,
+                course_id=task.course_id,
+                filename=filename,
+                content_type=content_type,
+                size_bytes=len(raw_bytes),
+                sha256=content_sha256,
+                text=text,
+                resident_bytes=len(text.encode("utf-8")),
+            )
+            try:
+                saved_material, saved_material_created = material_store.create_or_get(proposed)
+            except ResourceQuotaError as exc:
+                raise HTTPException(
+                    exc.status_code,
+                    detail={"code": exc.code},
+                ) from exc
+            material_id = saved_material.material_id
+    else:
+        material = material_store.get_for_owner(material_id or "", task.owner_id)
+        if material is None:
+            # Non-disclosure: another owner's material has the same response.
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Course material not found")
+        if material.course_id is not None:
+            _validate_course_id(material.course_id, task.owner_id)
+        filename = material.filename
+        content_type = material.content_type
+        source_size_bytes = material.size_bytes
+        text = material.text
+        content_sha256 = material.sha256
+        source_kind = "library"
+
+    if file is not None:
+        source_size_bytes = len(raw_bytes)
+
+    candidates, not_found = _detect_problem_source_candidates(
+        text,
+        structure_mode=structure_mode,
+        extraction_hint=hint,
+    )
+    requires_confirmation = structure_mode == "extract_from_source"
+    now = time.time()
+    library_backed = material_id is not None
+    draft_text = None if library_backed else text
+    draft_resident_bytes = (
+        len(draft_text.encode("utf-8")) if draft_text is not None else 0
+    ) + len(hint.encode("utf-8")) + len(
+        json.dumps(candidates, ensure_ascii=False).encode("utf-8")
+    )
+    proposed_draft = ProblemSourceDraft(
+        source_token=f"ps_{uuid.uuid4().hex}",
+        task_id=task.task_id,
+        owner_id=task.owner_id,
+        source_kind=source_kind,
+        structure_mode=structure_mode,
+        extraction_hint=hint,
+        filename=filename,
+        content_type=content_type,
+        size_bytes=source_size_bytes,
+        content_sha256=content_sha256,
+        text=draft_text,
+        library_material_id=material_id,
+        base_workflow_revision=base_workflow_revision,
+        resident_bytes=draft_resident_bytes,
+        candidates=candidates,
+        not_found=not_found,
+        requires_confirmation=requires_confirmation,
+        created_at=now,
+        expires_at=now + _PROBLEM_SOURCE_DRAFT_TTL_SECONDS,
+    )
+    try:
+        draft = source_draft_store.create(proposed_draft)
+    except ResourceQuotaError as exc:
+        if saved_material_created and saved_material is not None:
+            material_store.delete_for_owner(saved_material.material_id, task.owner_id)
+        raise HTTPException(
+            exc.status_code,
+            detail={"code": exc.code},
+        ) from exc
+    matched = [item for item in candidates if item["match_kind"] == "matched"]
+    possible = [item for item in candidates if item["match_kind"] == "possible_match"]
+    response: Dict[str, Any] = {
+        "status": "ready",
+        "source_token": draft.source_token,
+        "source": {
+            "kind": source_kind,
+            "filename": filename,
+            "size_bytes": source_size_bytes,
+            "sha256": content_sha256,
+            "library_material_id": draft.library_material_id,
+        },
+        "structure_mode": structure_mode,
+        "requires_confirmation": requires_confirmation,
+        "candidate_summary": {
+            "matched": matched,
+            "possible_matches": possible,
+            "not_found": not_found,
+            "matching_method": "local_explicit_heading_detection",
+            "semantic_match_performed": False,
+            "notice": "Preflight only detects explicit local headings. When supplied, the extraction hint is applied by the configured model during formal recognition.",
+        },
+        "expires_at": draft.expires_at,
+        "base_workflow_revision": draft.base_workflow_revision,
+        "workflow_revision": task.workflow_revision,
+        "storage": "memory",
+    }
+    if saved_material is not None:
+        response["saved_material"] = {
+            **saved_material.public(),
+            "created": saved_material_created,
+        }
+    return response
 
 
 # ─── Extract problems (with idempotency) ─────────────────────────────────────
 
 async def _run_extract(
-    task: Task,
+    task_id: str,
     text: str,
     provider,
     job_id: str,
     task_store: TaskStore,
+    job_store: JobStore,
+    *,
+    structure_mode: Literal["organized", "extract_from_source"],
+    extraction_hint: str,
+    confirmed_candidates: List[Dict[str, Any]],
+    confirmed_candidate_ids: List[str],
+    library_material_id: Optional[str],
+    superseded_job_ids: List[str],
 ):
     reporter = get_or_create_reporter(job_id)
+    new_problem_data: Dict[str, Dict[str, Any]] = {}
     try:
-        await extract_problems(text, provider, task.problem_data, reporter=reporter)
-        task_store.update(task.task_id, status="problems_ready", error=None)
-        logger.info(f"[task:{task.task_id}] extract done, {len(task.problem_data)} problems")
-    except Exception as e:
-        logger.exception(f"[task:{task.task_id}] extract failed")
-        task_store.update(task.task_id, status="error", error=str(e))
+        await extract_problems(
+            text,
+            provider,
+            new_problem_data,
+            reporter=reporter,
+            structure_mode=structure_mode,
+            extraction_hint=extraction_hint,
+            confirmed_candidates=confirmed_candidates,
+        )
+        committed, old_grading_job_id = task_store.commit_problem_extraction(
+            task_id,
+            job_id=job_id,
+            problem_data=new_problem_data,
+            structure_mode=structure_mode,
+            extraction_hint=extraction_hint,
+            confirmed_candidates=confirmed_candidate_ids,
+            library_material_id=library_material_id,
+        )
+        if committed is None:
+            logger.warning(f"[task:{task_id}] ignored stale extract worker {job_id}")
+            return
+        if old_grading_job_id:
+            job_store.discard(old_grading_job_id)
+        for superseded_job_id in superseded_job_ids:
+            remove_reporter(superseded_job_id)
+        from backend.api.analytics import clear_task_analytics_cache
+        clear_task_analytics_cache(task_id)
+        logger.info(f"[task:{task_id}] extract done, {len(new_problem_data)} problems")
+    except Exception as exc:
+        logger.error(
+            "[task:%s] problem extraction failed; exception_type=%s",
+            task_id,
+            type(exc).__name__,
+        )
+        await reporter.set_error(
+            "Problem recognition failed. Check the model configuration and retry."
+        )
+        task_store.fail_problem_extraction(
+            task_id,
+            job_id=job_id,
+            error="problem_extraction_failed",
+        )
 
 
 @router.post("/{task_id}/extract_problems")
 async def task_extract_problems(
     task_id: str,
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(default=None),
+    source_token: Optional[str] = Form(default=None),
+    confirmed_candidate_ids: Optional[str] = Form(default=None),
+    replace_confirmed: bool = Form(default=False),
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
+    job_store: JobStore = Depends(get_job_store),
+    material_store: CourseMaterialStore = Depends(get_course_material_store),
+    source_draft_store: ProblemSourceDraftStore = Depends(get_problem_source_draft_store),
     registry: ExpertRegistry = Depends(get_expert_registry),
 ):
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
+    _require_task_llm_principal(t, current)
+    superseded_job_ids = [
+        prior_job_id for prior_job_id in {
+            t.extract_job_id,
+            t.parse_job_id,
+            t.grading_job_id,
+            t.reference_parse_job_id,
+            t.test_cases_parse_job_id,
+            t.last_failed_job_id,
+        }
+        if prior_job_id
+    ]
+    direct_base_workflow_revision = t.workflow_revision
+    normalized_token = (source_token or "").strip() or None
+    if (file is None) == (normalized_token is None):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide exactly one of file or source_token.",
+        )
+    if normalized_token is not None:
+        draft = source_draft_store.get_for_owner_task(
+            normalized_token,
+            owner_id=t.owner_id,
+            task_id=t.task_id,
+        )
+        if draft is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail="Problem source token not found or expired.",
+            )
+        confirmed_candidate_ids_list, selected_candidates = _parse_confirmed_candidate_ids(
+            confirmed_candidate_ids,
+            draft,
+        )
+        filename = draft.filename
+        content_sha256 = draft.content_sha256
+        expected_workflow_revision = draft.base_workflow_revision
+        if draft.library_material_id is not None:
+            material = material_store.get_for_owner(
+                draft.library_material_id,
+                t.owner_id,
+            )
+            if material is None or material.sha256 != draft.content_sha256:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail={"code": "problem_source_material_changed"},
+                )
+            text = material.text
+        else:
+            text = draft.text
+        if text is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "problem_source_text_unavailable"},
+            )
+        structure_mode = draft.structure_mode
+        extraction_hint = draft.extraction_hint
+        library_material_id = draft.library_material_id
+    else:
+        assert file is not None
+        filename, _content_type, _raw_bytes, text, content_sha256 = await _read_problem_source_upload(file)
+        expected_workflow_revision = direct_base_workflow_revision
+        structure_mode = "organized"
+        extraction_hint = ""
+        selected_candidates, _ = _detect_problem_source_candidates(
+            text,
+            structure_mode="organized",
+            extraction_hint="",
+        )
+        confirmed_candidate_ids_list = [item["candidate_id"] for item in selected_candidates]
+        library_material_id = None
 
-    provider = registry.pick_default()
+    fingerprint = _problem_source_fingerprint(
+        content_sha256=content_sha256,
+        structure_mode=structure_mode,
+        extraction_hint=extraction_hint,
+        confirmed_candidate_ids=confirmed_candidate_ids_list,
+    )
+
+    legacy_same_completed_request = (
+        t.problem_request_fingerprint is None
+        and structure_mode == "organized"
+        and not extraction_hint
+        and t.problem_file_hash == content_sha256
+    )
+    inspected_outcome, inspected_task = task_store.inspect_problem_extraction(
+        task_id,
+        expected_revision=expected_workflow_revision,
+        request_fingerprint=fingerprint,
+        legacy_same_completed_request=legacy_same_completed_request,
+        replace_confirmed=replace_confirmed,
+    )
+    inspected_response = _problem_extraction_gate_response(
+        inspected_outcome,
+        inspected_task,
+        expected_workflow_revision=expected_workflow_revision,
+    )
+    if inspected_response is not None:
+        return inspected_response
+
+    provider = registry.for_owner(current.id).pick_default()
     if provider is None:
         raise HTTPException(503, detail="No LLM provider configured. Add an API key first.")
 
-    bytes_ = await file.read()
-    new_hash = hashlib.sha256(bytes_).hexdigest()
-
-    # Idempotency: same task is already extracting
-    if t.status == "extracting_problems" and t.extract_job_id:
-        return {
-            "status": "already_running",
-            "job_id": t.extract_job_id,
-            "task_id": t.task_id,
-        }
-
-    # Idempotency: same file already processed
-    if (
-        t.problem_file_hash == new_hash
-        and t.status in ("problems_ready", "parsing_submissions",
-                         "submissions_ready", "grading", "graded")
-    ):
-        return {
-            "status": "already_done",
-            "unchanged": True,
-            "job_id": t.extract_job_id,
-            "task_id": t.task_id,
-            "problem_count": len(t.problem_data),
-        }
-
-    # Decode text content
-    try:
-        if file.content_type == "application/pdf" or (file.filename or "").lower().endswith(".pdf"):
-            text = await extract_text_from_pdf(bytes_)
-        else:
-            text = await decode_text_bytes(bytes_)
-    except Exception as e:
-        raise HTTPException(400, detail=f"Could not decode file: {e}")
-
-    # Start fresh job
     job_id = str(uuid.uuid4())
-    task_store.update(
+    outcome, current_task = task_store.begin_problem_extraction(
         task_id,
-        status="extracting_problems",
-        extract_job_id=job_id,
-        problem_file_hash=new_hash,
-        problem_file_name=file.filename,
-        problem_data={},  # clear old data
-        error=None,
+        expected_revision=expected_workflow_revision,
+        job_id=job_id,
+        request_fingerprint=fingerprint,
+        content_sha256=content_sha256,
+        filename=filename,
+        legacy_same_completed_request=legacy_same_completed_request,
+        replace_confirmed=replace_confirmed,
     )
-    asyncio.create_task(_run_extract(t, text, provider, job_id, task_store))
+    existing_response = _problem_extraction_gate_response(
+        outcome,
+        current_task,
+        expected_workflow_revision=expected_workflow_revision,
+    )
+    if existing_response is not None:
+        return existing_response
+    assert current_task is not None
+    asyncio.create_task(_run_extract(
+        task_id,
+        text,
+        provider,
+        job_id,
+        task_store,
+        job_store,
+        structure_mode=structure_mode,
+        extraction_hint=extraction_hint,
+        confirmed_candidates=selected_candidates,
+        confirmed_candidate_ids=confirmed_candidate_ids_list,
+        library_material_id=library_material_id,
+        superseded_job_ids=superseded_job_ids,
+    ))
     return {
         "status": "started",
         "job_id": job_id,
         "task_id": t.task_id,
+        "request_fingerprint": fingerprint,
+        "workflow_revision": current_task.workflow_revision,
+        "replace_confirmed": replace_confirmed,
     }
 
 
 # ─── Parse submissions (with idempotency) ────────────────────────────────────
 
 async def _run_parse(
-    task: Task,
+    task_id: str,
+    problems_data: Dict[str, Dict[str, Any]],
     files_data,
     provider,
     job_id: str,
     task_store: TaskStore,
+    job_store: JobStore,
 ):
     reporter = get_or_create_reporter(job_id, total_students=len(files_data))
+    new_student_data: Dict[str, Dict[str, Any]] = {}
     try:
         await parse_student_answers(
             files_data=files_data,
-            problems_data=task.problem_data,
-            student_store=task.student_data,
+            problems_data=problems_data,
+            student_store=new_student_data,
             provider=provider,
             reporter=reporter,
         )
-        task_store.update(task.task_id, status="submissions_ready", error=None)
-        logger.info(f"[task:{task.task_id}] parse done, {len(task.student_data)} students")
-    except Exception as e:
-        logger.exception(f"[task:{task.task_id}] parse failed")
-        task_store.update(task.task_id, status="error", error=str(e))
+        committed, old_grading_job_id = task_store.commit_submission_parse(
+            task_id,
+            job_id=job_id,
+            student_data=new_student_data,
+        )
+        if committed is None:
+            logger.warning("[task:%s] ignored stale submission parser", task_id)
+            return
+        if old_grading_job_id:
+            job_store.discard(old_grading_job_id)
+        logger.info(
+            "[task:%s] submission parse done, %s students",
+            task_id,
+            len(new_student_data),
+        )
+    except Exception as exc:
+        logger.error(
+            "[task:%s] submission parse failed; exception_type=%s",
+            task_id,
+            type(exc).__name__,
+        )
+        await reporter.set_error("Submission recognition failed. Please retry.")
+        task_store.fail_submission_parse(
+            task_id,
+            job_id=job_id,
+            error="submission_parse_failed",
+        )
 
 
 @router.post("/{task_id}/parse_submissions")
@@ -805,77 +1473,89 @@ async def task_parse_submissions(
     file: UploadFile = File(...),
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
+    job_store: JobStore = Depends(get_job_store),
     registry: ExpertRegistry = Depends(get_expert_registry),
 ):
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
+    _require_task_llm_principal(t, current)
+    base_workflow_revision = t.workflow_revision
+    problems_snapshot = {
+        q_id: dict(problem) for q_id, problem in t.problem_data.items()
+    }
 
-    if t.status not in ("problems_ready", "submissions_ready", "graded", "error"):
-        if t.status == "draft":
-            raise HTTPException(409, detail="Upload problems first.")
-        if t.status == "extracting_problems":
-            raise HTTPException(409, detail="Wait for problem extraction to finish.")
-        if t.status == "parsing_submissions":
-            return {
-                "status": "already_running",
-                "job_id": t.parse_job_id,
-                "task_id": t.task_id,
-            }
-        if t.status == "grading":
-            raise HTTPException(409, detail="Cannot replace submissions while grading.")
-
-    provider = registry.pick_default()
+    provider = registry.for_owner(current.id).pick_default()
     if provider is None:
         raise HTTPException(503, detail="No LLM provider configured.")
 
     bytes_ = await file.read()
     new_hash = hashlib.sha256(bytes_).hexdigest()
 
-    # Idempotency: already running same task (defensive — covered above)
-    if t.status == "parsing_submissions" and t.parse_job_id:
-        return {
-            "status": "already_running",
-            "job_id": t.parse_job_id,
-            "task_id": t.task_id,
-        }
-
-    # Idempotency: same file already parsed
-    if (
-        t.submission_file_hash == new_hash
-        and t.status in ("submissions_ready", "grading", "graded")
-    ):
-        return {
-            "status": "already_done",
-            "unchanged": True,
-            "job_id": t.parse_job_id,
-            "task_id": t.task_id,
-            "student_count": len(t.student_data),
-        }
-
     try:
         files_data = await extract_files_from_archive(bytes_, file.filename or "submissions")
-    except Exception as e:
-        raise HTTPException(400, detail=f"Could not extract archive: {e}")
+    except Exception as exc:
+        logger.warning(
+            "[task:%s] submission archive rejected; exception_type=%s",
+            task_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            400,
+            detail={"code": "submission_archive_invalid"},
+        ) from exc
 
     if not files_data:
         raise HTTPException(400, detail="No valid student files found in archive.")
 
     job_id = str(uuid.uuid4())
-    task_store.update(
+    outcome, current_task = task_store.begin_submission_parse(
         task_id,
-        status="parsing_submissions",
-        parse_job_id=job_id,
-        submission_file_hash=new_hash,
-        submission_file_name=file.filename,
-        student_data={},  # clear old data
-        error=None,
+        expected_revision=base_workflow_revision,
+        job_id=job_id,
+        content_sha256=new_hash,
+        filename=file.filename or "submissions",
     )
-    asyncio.create_task(_run_parse(t, files_data, provider, job_id, task_store))
+    if current_task is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if outcome == "already_running":
+        return {
+            "status": "already_running",
+            "job_id": current_task.parse_job_id,
+            "task_id": current_task.task_id,
+            "workflow_revision": current_task.workflow_revision,
+        }
+    if outcome == "already_done":
+        return {
+            "status": "already_done",
+            "unchanged": True,
+            "job_id": current_task.parse_job_id,
+            "task_id": current_task.task_id,
+            "student_count": len(current_task.student_data),
+            "workflow_revision": current_task.workflow_revision,
+        }
+    if outcome != "started":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": outcome,
+                "workflow_revision": current_task.workflow_revision,
+            },
+        )
+    asyncio.create_task(_run_parse(
+        task_id,
+        problems_snapshot,
+        files_data,
+        provider,
+        job_id,
+        task_store,
+        job_store,
+    ))
     return {
         "status": "started",
         "job_id": job_id,
         "task_id": t.task_id,
         "file_count": len(files_data),
+        "workflow_revision": current_task.workflow_revision,
     }
 
 
@@ -924,17 +1604,26 @@ async def _run_parse_reference(
         for q_id, ref_text in mapping.items():
             if q_id in task.problem_data:
                 task.problem_data[q_id]["reference_answer"] = ref_text
-        task_store.update(task.task_id, reference_parse_job_id=None, error=None)
+        task_store.finish_auxiliary_parse(
+            task.task_id,
+            kind="reference",
+            job_id=job_id,
+        )
         logger.info(
             f"[task:{task.task_id}] reference parse done, matched "
             f"{len(mapping)}/{len(task.problem_data)} problems"
         )
-    except Exception as e:
-        logger.exception(f"[task:{task.task_id}] reference parse failed")
-        task_store.update(
+    except Exception as exc:
+        logger.error(
+            "[task:%s] reference parse failed; exception_type=%s",
             task.task_id,
-            reference_parse_job_id=None,
-            error=f"Reference parse failed: {e}",
+            type(exc).__name__,
+        )
+        task_store.finish_auxiliary_parse(
+            task.task_id,
+            kind="reference",
+            job_id=job_id,
+            error="reference_parse_failed",
         )
 
 
@@ -961,6 +1650,8 @@ async def task_upload_reference(
     """
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
+    base_workflow_revision = t.workflow_revision
+    _require_task_llm_principal(t, current)
 
     # Need problems to anchor q_ids — uploading reference for a draft (no
     # problems yet) doesn't make sense.
@@ -972,40 +1663,49 @@ async def task_upload_reference(
     bytes_ = await file.read()
     new_hash = hashlib.sha256(bytes_).hexdigest()
 
-    # Idempotency: parsing in flight
-    if t.reference_parse_job_id:
-        return {
-            "status": "already_running",
-            "job_id": t.reference_parse_job_id,
-            "task_id": t.task_id,
-        }
-
-    # Idempotency: same file already merged
-    if t.reference_file_hash == new_hash:
-        return {
-            "status": "already_done",
-            "unchanged": True,
-            "task_id": t.task_id,
-            "reference_file_name": t.reference_file_name,
-        }
-
-    provider = registry.pick_default()
+    provider = registry.for_owner(current.id).pick_default()
     if provider is None:
         raise HTTPException(503, detail="No LLM provider configured. Add an API key first.")
 
     try:
         text = await _read_text_for_parse(file, bytes_)
-    except Exception as e:
-        raise HTTPException(400, detail=f"Could not decode file: {e}")
+    except Exception as exc:
+        logger.warning(
+            "[task:%s] reference file rejected; exception_type=%s",
+            task_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            400,
+            detail={"code": "reference_file_invalid"},
+        ) from exc
 
     job_id = str(uuid.uuid4())
-    task_store.update(
+    outcome, current_task = task_store.begin_auxiliary_parse(
         task_id,
-        reference_file_hash=new_hash,
-        reference_file_name=file.filename,
-        reference_parse_job_id=job_id,
-        error=None,
+        kind="reference",
+        expected_revision=base_workflow_revision,
+        job_id=job_id,
+        content_sha256=new_hash,
+        filename=file.filename or "reference",
     )
+    if current_task is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if outcome == "already_running":
+        return {
+            "status": "already_running",
+            "job_id": current_task.reference_parse_job_id,
+            "task_id": current_task.task_id,
+        }
+    if outcome == "already_done":
+        return {
+            "status": "already_done",
+            "unchanged": True,
+            "task_id": current_task.task_id,
+            "reference_file_name": current_task.reference_file_name,
+        }
+    if outcome != "started":
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": outcome})
     asyncio.create_task(_run_parse_reference(t, text, provider, job_id, task_store))
     return {
         "status": "started",
@@ -1041,17 +1741,26 @@ async def _run_parse_test_cases(
                 # Store as list[dict] for JSON serialization compatibility.
                 task.problem_data[q_id]["test_cases"] = [tc.model_dump() for tc in cases]
         total = sum(len(v) for v in mapping.values())
-        task_store.update(task.task_id, test_cases_parse_job_id=None, error=None)
+        task_store.finish_auxiliary_parse(
+            task.task_id,
+            kind="test_cases",
+            job_id=job_id,
+        )
         logger.info(
             f"[task:{task.task_id}] test-case parse done, "
             f"{len(mapping)} programming problems, {total} cases total"
         )
-    except Exception as e:
-        logger.exception(f"[task:{task.task_id}] test-case parse failed")
-        task_store.update(
+    except Exception as exc:
+        logger.error(
+            "[task:%s] test-case parse failed; exception_type=%s",
             task.task_id,
-            test_cases_parse_job_id=None,
-            error=f"Test-case parse failed: {e}",
+            type(exc).__name__,
+        )
+        task_store.finish_auxiliary_parse(
+            task.task_id,
+            kind="test_cases",
+            job_id=job_id,
+            error="test_cases_parse_failed",
         )
 
 
@@ -1074,6 +1783,8 @@ async def task_upload_test_cases(
     """
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
+    _require_task_llm_principal(t, current)
+    base_workflow_revision = t.workflow_revision
 
     if t.status == "draft" or not t.problem_data:
         raise HTTPException(
@@ -1083,38 +1794,49 @@ async def task_upload_test_cases(
     bytes_ = await file.read()
     new_hash = hashlib.sha256(bytes_).hexdigest()
 
-    if t.test_cases_parse_job_id:
-        return {
-            "status": "already_running",
-            "job_id": t.test_cases_parse_job_id,
-            "task_id": t.task_id,
-        }
-
-    if t.test_cases_file_hash == new_hash:
-        return {
-            "status": "already_done",
-            "unchanged": True,
-            "task_id": t.task_id,
-            "test_cases_file_name": t.test_cases_file_name,
-        }
-
-    provider = registry.pick_default()
+    provider = registry.for_owner(current.id).pick_default()
     if provider is None:
         raise HTTPException(503, detail="No LLM provider configured. Add an API key first.")
 
     try:
         text = await _read_text_for_parse(file, bytes_)
-    except Exception as e:
-        raise HTTPException(400, detail=f"Could not decode file: {e}")
+    except Exception as exc:
+        logger.warning(
+            "[task:%s] test-case file rejected; exception_type=%s",
+            task_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            400,
+            detail={"code": "test_case_file_invalid"},
+        ) from exc
 
     job_id = str(uuid.uuid4())
-    task_store.update(
+    outcome, current_task = task_store.begin_auxiliary_parse(
         task_id,
-        test_cases_file_hash=new_hash,
-        test_cases_file_name=file.filename,
-        test_cases_parse_job_id=job_id,
-        error=None,
+        kind="test_cases",
+        expected_revision=base_workflow_revision,
+        job_id=job_id,
+        content_sha256=new_hash,
+        filename=file.filename or "test_cases",
     )
+    if current_task is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if outcome == "already_running":
+        return {
+            "status": "already_running",
+            "job_id": current_task.test_cases_parse_job_id,
+            "task_id": current_task.task_id,
+        }
+    if outcome == "already_done":
+        return {
+            "status": "already_done",
+            "unchanged": True,
+            "task_id": current_task.task_id,
+            "test_cases_file_name": current_task.test_cases_file_name,
+        }
+    if outcome != "started":
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": outcome})
     asyncio.create_task(_run_parse_test_cases(t, text, provider, job_id, task_store))
     return {
         "status": "started",
@@ -1127,7 +1849,7 @@ async def task_upload_test_cases(
 
 async def _run_grade(
     task: Task,
-    registry: ExpertRegistry,
+    registry: ExpertRegistryView,
     job_id: str,
     task_store: TaskStore,
     job_store: JobStore,
@@ -1162,13 +1884,9 @@ async def _run_grade(
                 "student_answers": r.get("student_answers", []),
             })
 
-        # Mirror into JobStore for backwards compat with /ai_grading/grade_result/{id}
-        job = GradingJob(
-            job_id=job_id,
-            job_name=task.name,
-            job_type="batch",
-        )
-        job_store.create(job)
+        # Complete the pending JobStore row created before begin_grading.  If
+        # the task was deleted meanwhile, delete_task has already discarded it
+        # and this becomes a no-op rather than resurrecting student data.
         job_store.complete(job_id, {
             "results": serialized,
             "task_id": task.task_id,
@@ -1182,8 +1900,8 @@ async def _run_grade(
         # to avoid LLM rework). The deep-dive page is uncached without this.
         # Failures per-question are non-fatal; we log + continue so a single
         # bad LLM call doesn't block the "graded" transition.
+        common_mistakes_by_question: Dict[str, str] = {}
         try:
-            from backend.api.analytics import _cm_cache
             from backend.agents import analytics_agent
             provider_for_cm = registry.pick_default()
             results_payload = {"results": serialized}
@@ -1199,23 +1917,52 @@ async def _run_grade(
                             breakdown=breakdown,
                             provider=provider_for_cm,
                         )
-                        _cm_cache[f"{task.task_id}::{q_id}"] = out.common_mistakes_md
+                        common_mistakes_by_question[q_id] = out.common_mistakes_md
                         await reporter._emit_message(f"易错点完成：{q_id}", "info")
                 except Exception as cm_err:
                     logger.warning(
-                        f"[task:{task.task_id}] common_mistakes for {q_id} failed: {cm_err}"
+                        "[task:%s] common_mistakes for q_id=%s failed; exception_type=%s",
+                        task.task_id,
+                        q_id,
+                        type(cm_err).__name__,
                     )
-        except Exception as e:
-            logger.warning(f"[task:{task.task_id}] common_mistakes pre-bake failed: {e}")
+        except Exception as exc:
+            logger.warning(
+                "[task:%s] common_mistakes pre-bake failed; exception_type=%s",
+                task.task_id,
+                type(exc).__name__,
+            )
 
         # Only NOW mark the task as graded — the user's complaint was that
         # "graded" fired before the deep-dive analytics were ready.
-        task_store.update(task.task_id, status="graded", error=None)
-        logger.info(f"[task:{task.task_id}] grading done, {len(serialized)} students")
+        committed_task = task_store.finish_grading(task.task_id, job_id=job_id)
+        if committed_task is not None:
+            from backend.api.analytics import cache_task_common_mistakes
+            for q_id, markdown in common_mistakes_by_question.items():
+                cache_task_common_mistakes(
+                    task_id=task.task_id,
+                    q_id=q_id,
+                    grading_job_id=job_id,
+                    markdown=markdown,
+                )
+            logger.info(
+                "[task:%s] grading done, %s students",
+                task.task_id,
+                len(serialized),
+            )
 
-    except Exception as e:
-        logger.exception(f"[task:{task.task_id}] grading failed")
-        task_store.update(task.task_id, status="error", error=str(e))
+    except Exception as exc:
+        logger.error(
+            "[task:%s] grading failed; exception_type=%s",
+            task.task_id,
+            type(exc).__name__,
+        )
+        task_store.finish_grading(
+            task.task_id,
+            job_id=job_id,
+            error="grading_failed",
+        )
+        job_store.fail(job_id, "grading_failed")
 
 
 @router.post("/{task_id}/grade")
@@ -1229,47 +1976,71 @@ async def task_grade(
 ):
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
+    _require_task_llm_principal(t, current)
+    base_workflow_revision = t.workflow_revision
 
-    # Status gate
+    # Fast UX gate; begin_grading repeats these checks atomically.
     if t.status == "grading" and t.grading_job_id:
         return {
             "status": "already_running",
             "job_id": t.grading_job_id,
             "task_id": t.task_id,
         }
-
     if t.status == "graded" and t.grading_job_id:
         return {
             "status": "already_done",
             "job_id": t.grading_job_id,
             "task_id": t.task_id,
         }
+    if t.status not in {"submissions_ready", "graded", "error"}:
+        raise HTTPException(409, detail={"code": "invalid_state"})
+    if not t.problem_data or not t.student_data:
+        raise HTTPException(409, detail={"code": "invalid_state"})
 
-    if t.status not in ("submissions_ready", "graded", "error"):
-        raise HTTPException(409, detail=f"Cannot grade in status '{t.status}'")
-
-    if not t.problem_data:
-        raise HTTPException(409, detail="Task has no problems")
-
-    if not t.student_data:
-        raise HTTPException(409, detail="Task has no student submissions")
-
-    if registry.count() == 0:
+    owner_registry = registry.for_owner(current.id)
+    if owner_registry.count() == 0:
         raise HTTPException(503, detail="No LLM provider configured.")
+    effective_multi_sample_n = (
+        1 if owner_registry.uses_shared_pool() else req.multi_sample_n
+    )
 
     if job_store.active_count() >= 10:
         raise HTTPException(429, detail="Too many concurrent jobs. Try again later.")
 
     job_id = str(uuid.uuid4())
-    task_store.update(
+    job_store.create(GradingJob(
+        job_id=job_id,
+        job_name=t.name,
+        job_type="batch",
+    ))
+    outcome, current_task = task_store.begin_grading(
         task_id,
-        status="grading",
-        grading_job_id=job_id,
-        error=None,
+        expected_revision=base_workflow_revision,
+        job_id=job_id,
     )
+    if current_task is None:
+        job_store.discard(job_id)
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if outcome == "already_running":
+        job_store.discard(job_id)
+        return {
+            "status": "already_running",
+            "job_id": current_task.grading_job_id,
+            "task_id": current_task.task_id,
+        }
+    if outcome == "already_done":
+        job_store.discard(job_id)
+        return {
+            "status": "already_done",
+            "job_id": current_task.grading_job_id,
+            "task_id": current_task.task_id,
+        }
+    if outcome != "started":
+        job_store.discard(job_id)
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": outcome})
     asyncio.create_task(_run_grade(
-        t, registry, job_id, task_store, job_store, req.language,
-        multi_sample_n=req.multi_sample_n,
+        t, owner_registry, job_id, task_store, job_store, req.language,
+        multi_sample_n=effective_multi_sample_n,
     ))
 
     return {
@@ -1304,6 +2075,10 @@ async def task_state(
         active_job_id = t.parse_job_id
     elif t.status == "grading":
         active_job_id = t.grading_job_id
+    elif t.status == "error":
+        # Failed reporters remain available so the error screen can explain
+        # the last attempt without exposing the underlying provider exception.
+        active_job_id = t.last_failed_job_id
 
     progress = None
     if active_job_id:
@@ -1357,7 +2132,13 @@ def update_problem(
     """
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
+    base_workflow_revision = t.workflow_revision
 
+    if _task_workflow_is_busy(t):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_busy"},
+        )
     if t.status in ("draft", "extracting_problems"):
         raise HTTPException(409, detail="Problems not extracted yet")
 
@@ -1373,7 +2154,16 @@ def update_problem(
 
     new_problems = dict(t.problem_data)
     new_problems[q_id] = new_problem
-    task_store.update(task_id, problem_data=new_problems)
+    committed_task = task_store.update_workflow_cas(
+        task_id,
+        expected_revision=base_workflow_revision,
+        problem_data=new_problems,
+    )
+    if committed_task is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed"},
+        )
     logger.info(f"[task:{task_id}] problem {q_id} edited by {current.id}")
 
     return {"status": "ok", "q_id": q_id, "problem": new_problem}
@@ -1400,7 +2190,13 @@ def update_student_answer(
     """
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
+    base_workflow_revision = t.workflow_revision
 
+    if _task_workflow_is_busy(t):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_busy"},
+        )
     if t.status in ("draft", "extracting_problems", "problems_ready", "parsing_submissions"):
         raise HTTPException(409, detail="Submissions not parsed yet")
 
@@ -1436,7 +2232,16 @@ def update_student_answer(
 
     new_student_data = dict(t.student_data)
     new_student_data[stu_id] = new_student
-    task_store.update(task_id, student_data=new_student_data)
+    committed_task = task_store.update_workflow_cas(
+        task_id,
+        expected_revision=base_workflow_revision,
+        student_data=new_student_data,
+    )
+    if committed_task is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed"},
+        )
     logger.info(f"[task:{task_id}] student {stu_id} answer for {q_id} edited by {current.id}")
 
     return {"status": "ok", "stu_id": stu_id, "q_id": q_id, "answer": new_answer}
@@ -1490,6 +2295,19 @@ def set_teacher_comment(
             break
     if target_correction is None:
         raise HTTPException(404, detail=f"No correction for q_id={req.q_id} on student {req.student_id}")
+
+    # Advance the workflow revision before mutating the mirrored JobStore
+    # payload. This invalidates any older replacement preflight token so a
+    # concurrent Q-01 replace cannot silently discard a newly added comment.
+    committed_task = task_store.update_workflow_cas(
+        task_id,
+        expected_revision=t.workflow_revision,
+    )
+    if committed_task is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed"},
+        )
 
     # Mutate in place — JobStore keeps a reference to the dict, so this persists
     # for the lifetime of the in-memory job.
@@ -1569,13 +2387,21 @@ async def task_upload_kb(
     """Chunk + embed a reference document and add it to this task's KB index."""
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
+    _require_task_llm_principal(t, current)
+    base_workflow_revision = t.workflow_revision
 
-    if registry.count() == 0:
+    owner_registry = registry.for_owner(current.id)
+    if owner_registry.count() == 0:
         raise HTTPException(
             503,
             detail="Configure at least one BYOK provider before uploading KB; "
                    "the embedder needs an API key (Zhipu / OpenAI for dense; "
                    "any provider for BM25 fallback).",
+        )
+    if owner_registry.uses_shared_pool():
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={"code": "shared_pool_kb_requires_byok"},
         )
 
     retriever = get_retriever()
@@ -1612,7 +2438,7 @@ async def task_upload_kb(
         raise HTTPException(400, detail="Document produced no usable chunks.")
 
     # Embed + index. pick_embedder picks zhipu > openai > BM25 from BYOK.
-    embedder = pick_embedder(registry)
+    embedder = pick_embedder(owner_registry)
     doc_id = f"kb_{uuid.uuid4().hex[:10]}"
     try:
         entry = await retriever.add_document(
@@ -1623,18 +2449,43 @@ async def task_upload_kb(
             chunks=chunks,
             embedder=embedder,
         )
-    except ValueError as e:
+    except ValueError as exc:
         # Limit exceeded / dim mismatch / embedder switch — caller-facing 4xx
-        raise HTTPException(409, detail=str(e))
-    except Exception as e:
-        logger.exception(f"[task:{task_id}] KB embed failed")
-        raise HTTPException(502, detail=f"Embedding failed: {e}")
+        logger.warning(
+            "[task:%s] KB index conflict; exception_type=%s",
+            task_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            409,
+            detail={"code": "knowledge_base_index_conflict"},
+        ) from exc
+    except Exception as exc:
+        logger.error(
+            "[task:%s] KB embed failed; exception_type=%s",
+            task_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            502,
+            detail={"code": "knowledge_base_embedding_failed"},
+        ) from exc
 
     # Mirror metadata into the Task so frontend can list without hitting the
     # retriever directly.
     new_kb_docs = dict(t.kb_docs)
     new_kb_docs[doc_id] = entry.public()
-    task_store.update(task_id, kb_docs=new_kb_docs)
+    committed_task = task_store.update_workflow_cas(
+        task_id,
+        expected_revision=base_workflow_revision,
+        kb_docs=new_kb_docs,
+    )
+    if committed_task is None:
+        retriever.remove_doc(task_id, doc_id)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed"},
+        )
     logger.info(
         f"[task:{task_id}] KB upload doc_id={doc_id} filename={file.filename!r} "
         f"chunks={len(chunks)} embedder={embedder.name}"
@@ -1683,7 +2534,7 @@ def task_delete_kb(
     if doc_id in (t.kb_docs or {}):
         new_kb_docs = dict(t.kb_docs)
         new_kb_docs.pop(doc_id, None)
-        task_store.update(task_id, kb_docs=new_kb_docs)
+        task_store.update_workflow(task_id, kb_docs=new_kb_docs)
         removed = True
 
     if not removed:

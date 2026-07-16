@@ -83,7 +83,11 @@ async def grade_student(
         try:
             problem = ProblemInfo(**problem_raw)
         except Exception as e:
-            logger.error(f"Invalid problem data for {q_id}: {e}")
+            logger.error(
+                "Invalid problem data for q_id=%s; exception_type=%s",
+                q_id,
+                type(e).__name__,
+            )
             continue
 
         try:
@@ -95,7 +99,11 @@ async def grade_student(
                 flag=ans_raw.get("flag", []),
             )
         except Exception as e:
-            logger.error(f"Invalid answer data for {q_id}: {e}")
+            logger.error(
+                "Invalid answer data for q_id=%s; exception_type=%s",
+                q_id,
+                type(e).__name__,
+            )
             continue
 
         tasks.append(_grade_single_answer(
@@ -209,7 +217,10 @@ async def _grade_single_answer(
             synthesis_method=synthesis_method,
         )
     except Exception as e:
-        logger.exception(f"Error grading {student_id}/{problem.q_id}")
+        logger.error(
+            "Error grading student/q_id; exception_type=%s",
+            type(e).__name__,
+        )
         # Return a zero-score Correction so the batch doesn't silently drop.
         # Keep the comment friendly — raw stack traces don't belong in a batch.
         return Correction(

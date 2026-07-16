@@ -12,11 +12,16 @@ from typing import Dict
 
 from fastapi import APIRouter, Depends
 
+from backend.auth import require_admin
 from backend.state import get_problem_store, get_student_store
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/human_edit", tags=["human_edit"])
+router = APIRouter(
+    prefix="/human_edit",
+    tags=["human_edit"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 @router.post("/problems")

@@ -99,7 +99,7 @@ def test_update_task_name(client):
 async def test_extract_idempotent_same_hash(monkeypatch):
     """Same file uploaded twice → second call returns already_running or already_done."""
     # Mock the LLM extraction to immediately succeed
-    async def fake_extract(text, provider, store, reporter=None):
+    async def fake_extract(text, provider, store, reporter=None, **kwargs):
         store.clear()
         store["q1"] = {"q_id": "q1", "number": "1", "type": "概念题", "stem": "x", "criterion": "y"}
         if reporter:
@@ -108,7 +108,7 @@ async def test_extract_idempotent_same_hash(monkeypatch):
 
     monkeypatch.setattr("backend.api.tasks.extract_problems", fake_extract)
     monkeypatch.setattr(
-        "backend.llm.registry.ExpertRegistry.pick_default",
+        "backend.llm.registry.ExpertRegistryView.pick_default",
         lambda self: MagicMock(provider_id="mock"),
     )
 
@@ -143,7 +143,7 @@ async def test_extract_idempotent_same_hash(monkeypatch):
 
 def test_extract_different_file_starts_fresh(monkeypatch):
     """Different file content → status='started' even if status is problems_ready."""
-    async def fake_extract(text, provider, store, reporter=None):
+    async def fake_extract(text, provider, store, reporter=None, **kwargs):
         store.clear()
         store["q1"] = {"q_id": "q1", "number": "1", "type": "概念题", "stem": "x", "criterion": "y"}
         if reporter:
@@ -152,7 +152,7 @@ def test_extract_different_file_starts_fresh(monkeypatch):
 
     monkeypatch.setattr("backend.api.tasks.extract_problems", fake_extract)
     monkeypatch.setattr(
-        "backend.llm.registry.ExpertRegistry.pick_default",
+        "backend.llm.registry.ExpertRegistryView.pick_default",
         lambda self: MagicMock(provider_id="mock"),
     )
 
@@ -170,6 +170,7 @@ def test_extract_different_file_starts_fresh(monkeypatch):
     r2 = client.post(
         f"/tasks/{tid}/extract_problems",
         headers=TEACHER_HEADERS,
+        data={"replace_confirmed": "true"},
         files={"file": ("b.txt", b"BBB", "text/plain")},  # different content
     )
     assert r2.json()["status"] == "started"
@@ -184,7 +185,7 @@ def test_task_isolation(monkeypatch):
 
     counter = {"n": 0}
 
-    async def fake_extract(text, provider, store, reporter=None):
+    async def fake_extract(text, provider, store, reporter=None, **kwargs):
         counter["n"] += 1
         store.clear()
         if counter["n"] == 1:
@@ -197,7 +198,7 @@ def test_task_isolation(monkeypatch):
 
     monkeypatch.setattr("backend.api.tasks.extract_problems", fake_extract)
     monkeypatch.setattr(
-        "backend.llm.registry.ExpertRegistry.pick_default",
+        "backend.llm.registry.ExpertRegistryView.pick_default",
         lambda self: MagicMock(provider_id="mock"),
     )
 
@@ -256,7 +257,7 @@ def test_analytics_rate_limit(monkeypatch):
 
     monkeypatch.setattr("backend.agents.analytics_agent.filter_students", fake_filter)
     monkeypatch.setattr(
-        "backend.llm.registry.ExpertRegistry.pick_default",
+        "backend.llm.registry.ExpertRegistryView.pick_default",
         lambda self: MagicMock(provider_id="mock"),
     )
 
@@ -346,7 +347,7 @@ async def test_upload_reference_idempotent_same_hash(monkeypatch):
 
     monkeypatch.setattr("backend.api.tasks.parse_reference_to_per_question", fake_parse_ref)
     monkeypatch.setattr(
-        "backend.llm.registry.ExpertRegistry.pick_default",
+        "backend.llm.registry.ExpertRegistryView.pick_default",
         lambda self: MagicMock(provider_id="mock"),
     )
 
@@ -393,7 +394,7 @@ async def test_upload_reference_different_file_starts_fresh(monkeypatch):
 
     monkeypatch.setattr("backend.api.tasks.parse_reference_to_per_question", fake_parse_ref)
     monkeypatch.setattr(
-        "backend.llm.registry.ExpertRegistry.pick_default",
+        "backend.llm.registry.ExpertRegistryView.pick_default",
         lambda self: MagicMock(provider_id="mock"),
     )
 
@@ -423,7 +424,7 @@ async def test_upload_reference_different_file_starts_fresh(monkeypatch):
 def test_upload_reference_in_draft_blocked(monkeypatch):
     """Reference upload before problems exist → 409."""
     monkeypatch.setattr(
-        "backend.llm.registry.ExpertRegistry.pick_default",
+        "backend.llm.registry.ExpertRegistryView.pick_default",
         lambda self: MagicMock(provider_id="mock"),
     )
     client = TestClient(app)
@@ -449,7 +450,7 @@ async def test_upload_test_cases_idempotent(monkeypatch):
 
     monkeypatch.setattr("backend.api.tasks.parse_test_cases_to_per_question", fake_parse_tc)
     monkeypatch.setattr(
-        "backend.llm.registry.ExpertRegistry.pick_default",
+        "backend.llm.registry.ExpertRegistryView.pick_default",
         lambda self: MagicMock(provider_id="mock"),
     )
 
@@ -536,4 +537,3 @@ async def test_sandbox_semaphore_caps_concurrency():
 
     # Restore the default for any subsequent tests in this session
     init_sandbox_semaphore(limit=8)
-
