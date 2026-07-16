@@ -120,6 +120,13 @@ class ProblemInfo(BaseModel):
     type: str = Field(description="Question type: 概念题/计算题/编程题/证明题/推理题/其他")
     stem: str = Field(description="Complete question stem including all text, formulas, and code")
     criterion: str = Field(description="Grading rubric/criteria")
+    review_status: Literal["needs_review", "edited", "confirmed"] = Field(
+        default="needs_review",
+        description=(
+            "Teacher review state for the recognized problem. Newly recognized "
+            "problems require review until a teacher edits or confirms them."
+        ),
+    )
     reference_answer: Optional[str] = Field(
         default=None,
         description="Teacher-supplied reference answer (calculation-style problems). "
@@ -227,6 +234,14 @@ class JobProgress(BaseModel):
     total_students: int = 0
     total_questions: int = 0
     completed_units: int = Field(0, description="Number of (student, question) pairs finished")
+    # Optional stage fields keep older clients compatible while allowing
+    # non-grading jobs to expose factual milestones instead of fabricated ETA
+    # or page counts. They remain None until a workflow explicitly reports
+    # stage progress.
+    started_at: Optional[float] = None
+    current_step: Optional[str] = None
+    total_steps: Optional[int] = None
+    completed_steps: Optional[int] = None
     active: List[ActiveUnit] = Field(default_factory=list, description="Currently running units")
     messages: List[ProgressEvent] = Field(default_factory=list, description="Ring buffer of last N events")
     error_detail: Optional[str] = None

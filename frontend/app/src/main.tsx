@@ -43,6 +43,15 @@ const TaskUploadPage = React.lazy(() =>
 const AddProblemsPage = React.lazy(() =>
   import("@/routes/tasks/AddProblemsPage").then((module) => ({ default: module.AddProblemsPage })),
 );
+const ProblemRecognitionProgressPage = React.lazy(() =>
+  import("@/routes/tasks/ProblemRecognitionProgressPage").then((module) => ({ default: module.ProblemRecognitionProgressPage })),
+);
+const QuestionPreparationOverviewPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionPreparationOverviewPage").then((module) => ({ default: module.QuestionPreparationOverviewPage })),
+);
+const QuestionPreparationDetailPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionPreparationDetailPage").then((module) => ({ default: module.QuestionPreparationDetailPage })),
+);
 
 function RouteFallback() {
   const { t } = useI18n();
@@ -79,10 +88,13 @@ const router = createBrowserRouter([
       { path: "tasks/:taskId/setup", element: routeElement(<TaskSetupPage />) },
       { path: "tasks/:taskId/upload/problems", element: routeElement(<AddProblemsPage />) },
       { path: "tasks/:taskId/upload/:kind", element: routeElement(<TaskUploadPage />) },
-      { path: "tasks/:taskId/problems/progress", element: routeElement(<TaskUploadPage />) },
+      { path: "tasks/:taskId/problems/progress", element: routeElement(<ProblemRecognitionProgressPage />) },
+      { path: "tasks/:taskId/questions", element: routeElement(<QuestionPreparationOverviewPage />) },
+      { path: "tasks/:taskId/questions/:questionId", element: <Navigate to="content" replace /> },
+      { path: "tasks/:taskId/questions/:questionId/:section", element: routeElement(<QuestionPreparationDetailPage />) },
       { path: "tasks/:taskId/results", element: routeElement(<TaskResultsPage />) },
       { path: "tasks/:taskId/results/:studentId", element: routeElement(<TaskStudentDetailPage />) },
-      { path: "tasks/:taskId/questions/:questionId", element: routeElement(<TaskQuestionDetailPage />) },
+      { path: "tasks/:taskId/results/questions/:questionId", element: routeElement(<TaskQuestionDetailPage />) },
       { path: "settings/account", element: routeElement(<SettingsPage />) },
       { path: "settings/byok", element: routeElement(<ExpertsPage />) },
       { path: "experts", element: <Navigate to="/settings/byok" replace /> },

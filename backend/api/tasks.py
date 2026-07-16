@@ -42,7 +42,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from backend.auth import require_teacher
-from backend.models import CourseMaterial, GradingJob, ProblemSourceDraft, Task, User
+from backend.models import CourseMaterial, GradingJob, ProblemSourceDraft, Task, TestCase, User
 from backend.state import (
     CourseMaterialStore, JobStore, ProblemSourceDraftStore, ResourceQuotaError,
     TagStore, TaskStore,
@@ -111,13 +111,17 @@ class GradeRequest(BaseModel):
 
 
 class UpdateProblemRequest(BaseModel):
-    """Edit a single problem's stem and/or rubric.
+    """Edit one focused question-preparation field and/or review state.
 
-    Only fields you pass are applied; the rest stay as-is. Used by the
-    Problems-page edit-in-place UI.
+    Only fields you pass are applied; the rest stay as-is. Editing recognized
+    content marks it ``edited`` unless the same request explicitly confirms it.
+    Used by the Problems-page edit-in-place UI.
     """
     stem: Optional[str] = None
     criterion: Optional[str] = None
+    reference_answer: Optional[str] = None
+    test_cases: Optional[List[TestCase]] = None
+    review_status: Optional[Literal["needs_review", "edited", "confirmed"]] = None
 
 
 class UpdateStudentAnswerRequest(BaseModel):
@@ -2122,7 +2126,7 @@ def update_problem(
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
 ):
-    """Update a single problem's stem and/or criterion.
+    """Update a single problem's stem, criterion, and/or review status.
 
     Allowed in any post-extract status (problems_ready through graded). The
     new text is stored verbatim — math delimiters / markdown are preserved
@@ -2147,10 +2151,33 @@ def update_problem(
 
     # Patch in-place; updates Task.updated_at via TaskStore
     new_problem = dict(t.problem_data[q_id])
+    content_edited = (
+        ("stem" in req.model_fields_set and req.stem is not None)
+        or ("criterion" in req.model_fields_set and req.criterion is not None)
+        or "reference_answer" in req.model_fields_set
+        or "test_cases" in req.model_fields_set
+    )
     if req.stem is not None:
         new_problem["stem"] = req.stem
     if req.criterion is not None:
         new_problem["criterion"] = req.criterion
+    if "reference_answer" in req.model_fields_set:
+        new_problem["reference_answer"] = req.reference_answer
+    if "test_cases" in req.model_fields_set:
+        new_problem["test_cases"] = (
+            [case.model_dump() for case in req.test_cases]
+            if req.test_cases is not None
+            else None
+        )
+    if req.review_status == "confirmed":
+        new_problem["review_status"] = "confirmed"
+    elif content_edited:
+        # Recognition content changed manually, so it is no longer untouched
+        # even when a caller also asks to move it back to needs_review. Only an
+        # explicit confirmation may confirm a content edit in the same CAS.
+        new_problem["review_status"] = "edited"
+    elif req.review_status is not None:
+        new_problem["review_status"] = req.review_status
 
     new_problems = dict(t.problem_data)
     new_problems[q_id] = new_problem

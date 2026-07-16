@@ -113,6 +113,12 @@ async def extract_problems(
 
     if reporter:
         await reporter.set_phase("extracting")
+        await reporter.set_stage_progress(
+            "source_prepared",
+            total_steps=4,
+            completed_steps=1,
+            message="Problem source prepared.",
+        )
 
     confirmed_candidates = confirmed_candidates or []
     if structure_mode == "extract_from_source":
@@ -147,6 +153,12 @@ async def extract_problems(
 
     logger.info("extract_problems: calling LLM...")
     if reporter:
+        await reporter.set_stage_progress(
+            "calling_recognition",
+            total_steps=4,
+            completed_steps=1,
+            message="Problem recognition started.",
+        )
         await reporter._emit_message(
             f"Applying source mode {structure_mode} with {len(confirmed_candidates)} confirmed local candidates..."
         )
@@ -156,6 +168,12 @@ async def extract_problems(
     logger.info(f"extract_problems: LLM returned {len(raw_output)} chars")
 
     if reporter:
+        await reporter.set_stage_progress(
+            "organizing_structure",
+            total_steps=4,
+            completed_steps=2,
+            message="Organizing recognized problem structure.",
+        )
         await reporter._emit_message(f"Parsing JSON ({len(raw_output)} chars)...")
 
     parsed = extract_and_parse_json(raw_output, ProblemSet)
@@ -173,6 +191,12 @@ async def extract_problems(
 
     if reporter:
         await reporter.set_totals(students=0, questions=len(prob_dict))
+        await reporter.set_stage_progress(
+            "completed",
+            total_steps=4,
+            completed_steps=4,
+            message="Problem recognition completed.",
+        )
         await reporter.set_phase("done")
 
     return prob_dict

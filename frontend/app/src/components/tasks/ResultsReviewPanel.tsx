@@ -157,7 +157,7 @@ function ConfidenceHeatmap({
             <th className="sticky left-0 z-10 bg-muted/40 px-3 py-2 font-medium">学生</th>
             {questions.map((question) => (
               <th key={question.id} className="px-2 py-2 font-medium">
-                <Link to={`/tasks/${taskId}/questions/${question.id}`} className="hover:text-foreground">
+                <Link to={`/tasks/${taskId}/results/questions/${question.id}`} className="hover:text-foreground">
                   {question.label}
                 </Link>
               </th>
@@ -281,7 +281,7 @@ function ReviewQueue({
                     学生
                   </Button>
                 </Link>
-                <Link to={`/tasks/${taskId}/questions/${item.question.id}?studentId=${encodeURIComponent(item.student.id)}`}>
+                <Link to={`/tasks/${taskId}/results/questions/${item.question.id}?studentId=${encodeURIComponent(item.student.id)}`}>
                   <Button type="button" variant="ghost" className="h-8 px-2">
                     题目
                   </Button>

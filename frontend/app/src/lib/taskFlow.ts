@@ -272,8 +272,9 @@ export function getTaskStepGate(task: TaskLite | undefined, requestedStep: TaskW
 export function getTaskDestination(task: Pick<TaskLite, "task_id" | "status">): string {
   switch (task.status) {
     case "extracting_problems":
-    case "problems_ready":
       return `/tasks/${task.task_id}/problems/progress`;
+    case "problems_ready":
+      return `/tasks/${task.task_id}/questions`;
     case "parsing_submissions":
     case "submissions_ready":
       return `/tasks/${task.task_id}/upload/submissions`;
@@ -358,7 +359,7 @@ export function getTaskNextStep(task: TaskLite | undefined, taskId: string): Tas
         title: "校对题目并补充资料",
         description: "确认题干、评分标准、标答和测试样例，再添加学生作答。",
         buttonLabel: "校对题目",
-        to: problemProgress,
+        to: `/tasks/${taskId}/questions`,
       };
     case "parsing_submissions":
       return {

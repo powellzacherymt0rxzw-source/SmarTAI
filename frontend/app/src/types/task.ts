@@ -28,6 +28,7 @@ export interface ProblemInfo {
   type: string;
   stem: string;
   criterion: string;
+  review_status?: "needs_review" | "edited" | "confirmed";
   reference_answer?: string | null;
   test_cases?: TestCase[] | null;
 }

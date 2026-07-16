@@ -122,7 +122,7 @@ export function ResultsLayout({
       label: "题目详情",
       description: "全班作答",
       icon: FileText,
-      href: () => (targetQuestionId ? `/tasks/${taskId}/questions/${targetQuestionId}` : null),
+      href: () => (targetQuestionId ? `/tasks/${taskId}/results/questions/${targetQuestionId}` : null),
     },
   ];
 

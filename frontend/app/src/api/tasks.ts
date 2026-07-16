@@ -117,7 +117,7 @@ export function getTaskResult(taskId: string): Promise<TaskResultResponse> {
 export function updateProblem(
   taskId: string,
   qId: string,
-  patch: Pick<Partial<ProblemInfo>, "stem" | "criterion">,
+  patch: Pick<Partial<ProblemInfo>, "stem" | "criterion" | "review_status" | "reference_answer" | "test_cases">,
 ): Promise<{ status: "ok"; q_id: string; problem: ProblemInfo }> {
   return putJSON(`/tasks/${taskId}/problems/${qId}`, patch);
 }

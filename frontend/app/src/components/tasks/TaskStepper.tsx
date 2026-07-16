@@ -44,7 +44,9 @@ export function TaskStepper({ current, task }: { current: TaskWorkflowStepKey; t
             const isComplete = index < currentIndex;
             const isAvailable = task ? isTaskStepAvailable(task.status, step.key) : true;
             const stepHref = step.key === "problems" && task && task.status !== "draft"
-              ? `/tasks/${taskId}/problems/progress`
+              ? task.status === "extracting_problems"
+                ? `/tasks/${taskId}/problems/progress`
+                : `/tasks/${taskId}/questions`
               : step.href(taskId);
             const Icon = isComplete ? Check : CircleDot;
             const itemClassName = cn(

@@ -1,0 +1,374 @@
+import { ChevronRight, Search } from "lucide-react";
+import { useDeferredValue, useEffect, useMemo } from "react";
+import { Link, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { useTask } from "@/api/hooks/tasks";
+import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
+import { useI18n } from "@/i18n/I18nProvider";
+import type { MessageKey } from "@/i18n/messages";
+import { cn } from "@/lib/cn";
+import {
+  buildQuestionPreparationRows,
+  selectQuestionPreparationRows,
+  stripMissingFirstRule,
+  type QuestionPreparationRow,
+  type QuestionPreparationRule,
+  type QuestionPreparationSort,
+} from "@/lib/questionPreparation";
+
+const RULE_LABEL_KEYS: Record<QuestionPreparationRule, MessageKey> = {
+  missing_answer: "questionOverviewRuleMissingAnswer",
+  missing_rubric: "questionOverviewRuleMissingRubric",
+  programming: "questionOverviewRuleProgramming",
+  proof: "questionOverviewRuleProof",
+  keyword: "questionOverviewRuleKeyword",
+  missing_first: "questionOverviewRuleMissingFirst",
+};
+
+export function QuestionPreparationOverviewPage() {
+  const { taskId } = useParams();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { t } = useI18n();
+  const taskQuery = useTask(taskId);
+  const query = searchParams.get("q") ?? "";
+  const deferredQuery = useDeferredValue(query);
+  const sort = normalizeSort(searchParams.get("sort"));
+
+  const rows = useMemo(
+    () => buildQuestionPreparationRows(Object.values(taskQuery.data?.problem_data ?? {})),
+    [taskQuery.data?.problem_data],
+  );
+  const selection = useMemo(
+    () => selectQuestionPreparationRows(rows, deferredQuery, sort),
+    [deferredQuery, rows, sort],
+  );
+  const coverage = useMemo(() => getCoverage(rows), [rows]);
+
+  useEffect(() => {
+    if (!selection.rules.includes("missing_first") || sort === "missing") return;
+    const next = new URLSearchParams(searchParams);
+    next.set("sort", "missing");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, selection.rules, setSearchParams, sort]);
+
+  if (taskQuery.isSuccess && taskQuery.data.status === "draft") {
+    return <Navigate replace to={`/tasks/${taskId}/upload/problems`} />;
+  }
+
+  if (taskQuery.isSuccess && taskQuery.data.status === "extracting_problems") {
+    return <Navigate replace to={`/tasks/${taskId}/problems/progress`} />;
+  }
+
+  function updateQuery(nextQuery: string) {
+    const next = new URLSearchParams(searchParams);
+    if (nextQuery.trim()) next.set("q", nextQuery);
+    else next.delete("q");
+    setSearchParams(next, { replace: true });
+  }
+
+  function updateSort(nextSort: QuestionPreparationSort) {
+    const next = new URLSearchParams(searchParams);
+    if (nextSort === "number") next.delete("sort");
+    else next.set("sort", nextSort);
+
+    if (nextSort !== "missing" && selection.rules.includes("missing_first")) {
+      const nextQuery = stripMissingFirstRule(next.get("q") ?? "");
+      if (nextQuery) next.set("q", nextQuery);
+      else next.delete("q");
+    }
+    setSearchParams(next, { replace: true });
+  }
+
+  return (
+    <div className="w-full max-w-[1300px]">
+      <h1 className="min-h-9 text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
+        {t("questionOverviewTitle")}
+      </h1>
+      <NewTaskStepper currentStep={1} />
+
+      <section className="mt-[22px] min-w-0 overflow-hidden rounded-[10px] border bg-card" aria-labelledby="question-preparation-matrix">
+        <h2 id="question-preparation-matrix" className="sr-only">{t("questionOverviewTitle")}</h2>
+
+        <div className="grid min-w-0 gap-3 border-b px-4 py-3 lg:grid-cols-[minmax(440px,1fr)_minmax(440px,0.9fr)] lg:items-center xl:px-5">
+          <dl className="grid min-w-0 grid-cols-2 overflow-hidden rounded-[8px] border sm:grid-cols-4">
+            <CoverageMetric label={t("questionOverviewCoverageReview")} ready={coverage.reviewed} total={coverage.total} />
+            <CoverageMetric label={t("questionOverviewCoverageRubric")} ready={coverage.rubrics} total={coverage.total} />
+            <CoverageMetric label={t("questionOverviewCoverageAnswer")} ready={coverage.answers} total={coverage.total} />
+            <CoverageMetric
+              label={t("questionOverviewCoverageTests")}
+              ready={coverage.tests}
+              total={coverage.programming}
+              emptyLabel={t("questionOverviewNoProgramming")}
+            />
+          </dl>
+
+          <div className="grid min-w-0 gap-1.5 sm:grid-cols-[minmax(0,1fr)_150px]">
+            <label className="relative min-w-0">
+              <span className="sr-only">{t("questionOverviewSearchLabel")}</span>
+              <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-[11px] h-4 w-4 text-muted-foreground" />
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => updateQuery(event.target.value)}
+                placeholder={t("questionOverviewSearchPlaceholder")}
+                className="h-9 w-full min-w-0 rounded-[7px] border bg-background pl-9 pr-3 text-[13px] leading-5 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
+              />
+            </label>
+            <label className="min-w-0">
+              <span className="sr-only">{t("questionOverviewSortLabel")}</span>
+              <select
+                value={selection.effectiveSort}
+                onChange={(event) => updateSort(event.target.value as QuestionPreparationSort)}
+                className="h-9 w-full min-w-0 rounded-[7px] border bg-background px-3 text-[13px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+              >
+                <option value="number">{t("questionOverviewSortNumber")}</option>
+                <option value="missing">{t("questionOverviewSortMissing")}</option>
+                <option value="type">{t("questionOverviewSortType")}</option>
+              </select>
+            </label>
+            <p className="min-w-0 truncate text-[11px] leading-4 text-muted-foreground sm:col-span-2" title={getRuleDescription(selection.rules, t)}>
+              {getRuleDescription(selection.rules, t)}
+            </p>
+          </div>
+        </div>
+
+        {taskQuery.isLoading ? (
+          <QuestionTableLoading />
+        ) : taskQuery.isError ? (
+          <div className="flex min-h-[300px] flex-col items-center justify-center px-5 text-center">
+            <p className="text-sm font-semibold text-foreground">{t("questionOverviewLoadError")}</p>
+            <button
+              type="button"
+              className="mt-3 h-9 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground hover:bg-muted"
+              onClick={() => void taskQuery.refetch()}
+            >
+              {t("questionOverviewRetry")}
+            </button>
+          </div>
+        ) : !taskId ? (
+          <div className="flex min-h-[300px] flex-col items-center justify-center px-5 text-center">
+            <p className="text-sm font-semibold text-foreground">{t("questionOverviewTaskMissing")}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{t("questionOverviewTaskMissingDescription")}</p>
+            <Link className="mt-3 text-sm font-semibold text-primary hover:underline" to="/">
+              {t("questionOverviewBackWorkspace")}
+            </Link>
+          </div>
+        ) : (
+          <QuestionMatrix
+            rows={selection.rows}
+            taskId={taskId}
+            returnPath={buildReturnPath(location.pathname, query, selection.effectiveSort)}
+            t={t}
+          />
+        )}
+
+        {!taskQuery.isLoading && !taskQuery.isError && taskId ? (
+          <footer className="flex min-h-[58px] flex-col gap-2 border-t px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between xl:px-5">
+            <p className="text-xs text-muted-foreground">
+              {t("questionOverviewShowingPrefix")}{selection.rows.length}{t("questionOverviewShowingSeparator")}{rows.length}{t("questionOverviewShowingSuffix")}
+            </p>
+            <Link
+              to={`/tasks/${taskId}/upload/submissions`}
+              className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
+            >
+              {t("questionOverviewContinue")}
+              <ChevronRight aria-hidden="true" className="h-4 w-4" />
+            </Link>
+          </footer>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function QuestionMatrix({
+  rows,
+  taskId,
+  returnPath,
+  t,
+}: {
+  rows: QuestionPreparationRow[];
+  taskId: string;
+  returnPath: string;
+  t: (key: MessageKey) => string;
+}) {
+  return (
+    <div className="max-h-[calc(100vh-365px)] min-h-[280px] w-full overflow-auto overscroll-contain">
+      <table className="w-full min-w-[980px] border-collapse text-left text-[13px]">
+        <thead className="sticky top-0 z-10 bg-muted/95 text-[12px] font-semibold text-muted-foreground backdrop-blur-sm">
+          <tr className="border-b">
+            <th className="w-[110px] px-5 py-3">{t("questionOverviewColumnNumber")}</th>
+            <th className="w-[170px] px-3 py-3">{t("questionOverviewColumnReview")}</th>
+            <th className="w-[150px] px-3 py-3">{t("questionOverviewColumnType")}</th>
+            <th className="w-[170px] px-3 py-3">{t("questionOverviewColumnRubric")}</th>
+            <th className="w-[170px] px-3 py-3">{t("questionOverviewColumnAnswer")}</th>
+            <th className="w-[170px] px-3 py-3">{t("questionOverviewColumnTests")}</th>
+            <th className="w-[100px] px-5 py-3 text-right">{t("questionOverviewColumnAction")}</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {rows.map((row) => {
+            const basePath = `/tasks/${encodeURIComponent(taskId)}/questions/${encodeURIComponent(row.problem.q_id)}`;
+            return (
+              <tr key={row.problem.q_id} className="h-[54px] bg-card transition-colors hover:bg-muted/30">
+                <td className="px-5 py-2.5 font-semibold text-foreground">{row.label}</td>
+                <td className="px-3 py-2.5">
+                  <StatusLink
+                    to={withReturnContext(`${basePath}/content`, returnPath)}
+                    tone={row.reviewStatus === "confirmed" ? "ready" : "review"}
+                    label={t(
+                      row.reviewStatus === "confirmed"
+                        ? "questionOverviewStatusConfirmed"
+                        : row.reviewStatus === "edited"
+                          ? "questionOverviewStatusEdited"
+                          : "questionOverviewStatusNeedsReview",
+                    )}
+                  />
+                </td>
+                <td className="max-w-[180px] truncate px-3 py-2.5 text-muted-foreground" title={row.type || t("questionOverviewUnknownType")}>
+                  {row.type || t("questionOverviewUnknownType")}
+                </td>
+                <td className="px-3 py-2.5">
+                  <StatusLink
+                    to={withReturnContext(`${basePath}/rubric`, returnPath)}
+                    tone={row.hasRubric ? "ready" : "missing"}
+                    label={t(row.hasRubric ? "questionOverviewStatusReady" : "questionOverviewStatusMissing")}
+                  />
+                </td>
+                <td className="px-3 py-2.5">
+                  <StatusLink
+                    to={withReturnContext(`${basePath}/answer`, returnPath)}
+                    tone={row.hasAnswer ? "ready" : "missing"}
+                    label={t(row.hasAnswer ? "questionOverviewStatusReady" : "questionOverviewStatusMissing")}
+                  />
+                </td>
+                <td className="px-3 py-2.5">
+                  {row.isProgramming ? (
+                    <StatusLink
+                      to={withReturnContext(`${basePath}/tests`, returnPath)}
+                      tone={row.hasTests ? "ready" : "missing"}
+                      label={row.hasTests
+                        ? `${row.problem.test_cases?.length ?? 0}${t("questionOverviewTestsCountSuffix")}`
+                        : t("questionOverviewStatusMissing")}
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">{t("questionOverviewStatusNotApplicable")}</span>
+                  )}
+                </td>
+                <td className="px-5 py-2.5 text-right">
+                  <Link
+                    to={withReturnContext(`${basePath}/content`, returnPath)}
+                    className="inline-flex h-8 items-center rounded-[6px] px-2.5 text-xs font-semibold text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {t("questionOverviewActionReview")}
+                  </Link>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {rows.length === 0 ? (
+        <div className="flex min-h-[235px] items-center justify-center border-t px-5 text-center text-sm text-muted-foreground">
+          {t("questionOverviewNoMatches")}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StatusLink({
+  to,
+  tone,
+  label,
+}: {
+  to: string;
+  tone: "ready" | "missing" | "review";
+  label: string;
+}) {
+  return (
+    <Link
+      to={to}
+      className={cn(
+        "inline-flex min-h-7 min-w-[104px] items-center rounded-full px-3 text-xs font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-ring",
+        tone === "ready" && "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300",
+        tone === "missing" && "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-300",
+        tone === "review" && "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300",
+      )}
+    >
+      {label}
+    </Link>
+  );
+}
+
+function CoverageMetric({
+  label,
+  ready,
+  total,
+  emptyLabel,
+}: {
+  label: string;
+  ready: number;
+  total: number;
+  emptyLabel?: string;
+}) {
+  const percentage = total > 0 ? Math.round((ready / total) * 100) : null;
+  return (
+    <div className="min-w-0 border-b px-3 py-2 last:border-b-0 odd:border-r sm:border-b-0 sm:border-r sm:last:border-r-0">
+      <dt className="truncate text-[11px] font-medium leading-4 text-muted-foreground" title={label}>{label}</dt>
+      <dd className="mt-0.5 flex items-baseline gap-1.5">
+        <span className="text-base font-bold leading-5 text-foreground">{percentage === null ? "—" : `${percentage}%`}</span>
+        <span className="truncate text-[11px] text-muted-foreground">{percentage === null ? emptyLabel : `${ready}/${total}`}</span>
+      </dd>
+    </div>
+  );
+}
+
+function QuestionTableLoading() {
+  return (
+    <div className="min-h-[338px] animate-pulse" aria-busy="true">
+      <div className="h-10 border-b bg-muted/70" />
+      {[0, 1, 2, 3].map((row) => (
+        <div key={row} className="grid h-[54px] grid-cols-6 items-center gap-5 border-b px-5">
+          {Array.from({ length: 6 }, (_, column) => (
+            <span key={column} className="h-3 rounded bg-muted" />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function getCoverage(rows: QuestionPreparationRow[]) {
+  const programmingRows = rows.filter((row) => row.isProgramming);
+  return {
+    total: rows.length,
+    reviewed: rows.filter((row) => row.reviewStatus === "confirmed").length,
+    rubrics: rows.filter((row) => row.hasRubric).length,
+    answers: rows.filter((row) => row.hasAnswer).length,
+    programming: programmingRows.length,
+    tests: programmingRows.filter((row) => row.hasTests).length,
+  };
+}
+
+function getRuleDescription(rules: QuestionPreparationRule[], t: (key: MessageKey) => string): string {
+  if (rules.length === 0) return t("questionOverviewDeterministicHint");
+  return `${t("questionOverviewRulePrefix")}${rules.map((rule) => t(RULE_LABEL_KEYS[rule])).join(" · ")} · ${t("questionOverviewDeterministicHint")}`;
+}
+
+function normalizeSort(value: string | null): QuestionPreparationSort {
+  return value === "missing" || value === "type" ? value : "number";
+}
+
+function buildReturnPath(pathname: string, query: string, sort: QuestionPreparationSort): string {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set("q", query);
+  if (sort !== "number") params.set("sort", sort);
+  const serialized = params.toString();
+  return serialized ? `${pathname}?${serialized}` : pathname;
+}
+
+function withReturnContext(pathname: string, returnPath: string): string {
+  const params = new URLSearchParams({ from: returnPath });
+  return `${pathname}?${params.toString()}`;
+}

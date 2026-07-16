@@ -151,12 +151,24 @@ export function useUpdateProblem() {
       qId,
       stem,
       criterion,
+      review_status,
+      reference_answer,
+      test_cases,
     }: {
       taskId: string;
       qId: string;
       stem?: string;
       criterion?: string;
-    }) => tasksApi.updateProblem(taskId, qId, { stem, criterion }),
+      review_status?: "needs_review" | "edited" | "confirmed";
+      reference_answer?: string | null;
+      test_cases?: import("@/types").TestCase[] | null;
+    }) => tasksApi.updateProblem(taskId, qId, {
+      stem,
+      criterion,
+      review_status,
+      reference_answer,
+      test_cases,
+    }),
     onSuccess: (_data, variables) => {
       invalidateTask(queryClient, variables.taskId);
     },

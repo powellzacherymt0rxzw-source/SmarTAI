@@ -439,6 +439,80 @@ def test_manual_problem_and_answer_edits_are_blocked_during_active_workflow(clie
     assert get_task_store().get("T_busy_edit").problem_data["q1"]["stem"] == "old"
 
 
+def test_problem_review_status_follows_manual_edits_and_explicit_confirmation(client):
+    task = _task_with_problems("T_problem_review")
+    get_task_store().create(task)
+
+    edited = client.put(
+        "/tasks/T_problem_review/problems/q1",
+        headers=HEADERS,
+        json={"stem": "teacher edit"},
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["problem"]["review_status"] == "edited"
+    assert get_task_store().get("T_problem_review").workflow_revision == 1
+
+    confirmed = client.put(
+        "/tasks/T_problem_review/problems/q1",
+        headers=HEADERS,
+        json={"review_status": "confirmed"},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["problem"]["review_status"] == "confirmed"
+
+    edit_and_confirm = client.put(
+        "/tasks/T_problem_review/problems/q1",
+        headers=HEADERS,
+        json={"criterion": "teacher rubric", "review_status": "confirmed"},
+    )
+    assert edit_and_confirm.status_code == 200, edit_and_confirm.text
+    assert edit_and_confirm.json()["problem"]["review_status"] == "confirmed"
+
+    unconfirmed_edit = client.put(
+        "/tasks/T_problem_review/problems/q1",
+        headers=HEADERS,
+        json={"criterion": "revised rubric", "review_status": "needs_review"},
+    )
+    assert unconfirmed_edit.status_code == 200, unconfirmed_edit.text
+    assert unconfirmed_edit.json()["problem"]["review_status"] == "edited"
+
+    invalid = client.put(
+        "/tasks/T_problem_review/problems/q1",
+        headers=HEADERS,
+        json={"review_status": "reviewed"},
+    )
+    assert invalid.status_code == 422
+    stored = get_task_store().get("T_problem_review").problem_data["q1"]
+    assert stored["criterion"] == "revised rubric"
+    assert stored["review_status"] == "edited"
+
+
+def test_problem_preparation_fields_can_be_saved_per_question(client):
+    task = _task_with_problems("T_problem_material_edit")
+    get_task_store().create(task)
+
+    response = client.put(
+        "/tasks/T_problem_material_edit/problems/q1",
+        headers=HEADERS,
+        json={
+            "reference_answer": "Teacher answer",
+            "test_cases": [{
+                "input": "2",
+                "expected_output": "4",
+                "description": "square",
+                "source": "teacher",
+                "sandbox_feasible": True,
+            }],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    problem = response.json()["problem"]
+    assert problem["reference_answer"] == "Teacher answer"
+    assert problem["test_cases"][0]["expected_output"] == "4"
+    assert problem["review_status"] == "edited"
+
+
 def test_deleting_active_grade_cannot_resurrect_job_history(client, monkeypatch):
     task = _task_with_problems("T_delete_active_grade")
     task.status = "submissions_ready"

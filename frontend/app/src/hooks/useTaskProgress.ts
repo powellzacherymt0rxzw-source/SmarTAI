@@ -37,6 +37,14 @@ export function calculateProgressPercent(
     return 100;
   }
 
+  if (
+    typeof progress.total_steps === "number" &&
+    progress.total_steps > 0 &&
+    typeof progress.completed_steps === "number"
+  ) {
+    return Math.min(100, Math.round((progress.completed_steps / progress.total_steps) * 100));
+  }
+
   const totalUnits = getProgressTotalUnits(progress, status);
   if (totalUnits <= 0) {
     return 0;

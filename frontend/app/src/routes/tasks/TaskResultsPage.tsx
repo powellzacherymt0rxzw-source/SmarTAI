@@ -812,7 +812,7 @@ function StudentTable({ taskId, students }: { taskId: string; students: StudentS
 function QuestionSummaryRow({ taskId, question }: { taskId: string; question: QuestionSummary }) {
   return (
     <Link
-      to={`/tasks/${taskId}/questions/${question.id}`}
+      to={`/tasks/${taskId}/results/questions/${question.id}`}
       className="grid gap-3 rounded-lg border p-3 transition hover:bg-muted/60 lg:grid-cols-[minmax(0,1fr)_260px_auto]"
     >
       <div className="min-w-0">

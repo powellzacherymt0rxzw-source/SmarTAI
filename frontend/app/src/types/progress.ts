@@ -33,4 +33,8 @@ export interface JobProgress {
   active: ActiveUnit[];
   messages: ProgressEvent[];
   error_detail?: string | null;
+  started_at?: number | null;
+  current_step?: string | null;
+  total_steps?: number | null;
+  completed_steps?: number | null;
 }

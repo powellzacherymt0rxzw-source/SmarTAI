@@ -265,7 +265,7 @@ function StudentCorrectionCard({
             <Metric label="置信度" value={formatConfidence(correction.confidence)} />
           </div>
         </div>
-        <Link to={`/tasks/${taskId}/questions/${correction.q_id}?studentId=${encodeURIComponent(student.id)}`}>
+        <Link to={`/tasks/${taskId}/results/questions/${correction.q_id}?studentId=${encodeURIComponent(student.id)}`}>
           <Button type="button" variant="secondary">
             <FileText className="h-4 w-4" />
             该题全班分析

@@ -167,7 +167,7 @@ function QuestionContent({
               切换题目
               <select
                 value={question.id}
-                onChange={(event) => navigate(`/tasks/${taskId}/questions/${encodeURIComponent(event.target.value)}`)}
+                onChange={(event) => navigate(`/tasks/${taskId}/results/questions/${encodeURIComponent(event.target.value)}`)}
                 className="h-9 w-full rounded-md border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
               >
                 {questions.map((item) => (
@@ -178,7 +178,7 @@ function QuestionContent({
               </select>
             </label>
             {previousQuestion ? (
-              <Link to={`/tasks/${taskId}/questions/${previousQuestion.id}`} className="min-w-0">
+              <Link to={`/tasks/${taskId}/results/questions/${previousQuestion.id}`} className="min-w-0">
                 <Button type="button" variant="secondary" className="w-full justify-start text-left sm:w-auto">
                   <ArrowLeft className="h-4 w-4" />
                   <span className="min-w-0 truncate">上一题：{previousQuestion.label}</span>
@@ -191,7 +191,7 @@ function QuestionContent({
               </Button>
             )}
             {nextQuestion ? (
-              <Link to={`/tasks/${taskId}/questions/${nextQuestion.id}`} className="min-w-0">
+              <Link to={`/tasks/${taskId}/results/questions/${nextQuestion.id}`} className="min-w-0">
                 <Button type="button" variant="secondary" className="w-full justify-start text-left sm:w-auto">
                   <span className="min-w-0 truncate">下一题：{nextQuestion.label}</span>
                   <ArrowRight className="h-4 w-4" />

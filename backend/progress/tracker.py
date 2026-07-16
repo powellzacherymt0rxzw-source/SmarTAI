@@ -58,6 +58,37 @@ class ProgressReporter:
         async with self._lock:
             self._progress.completed_units += 1
 
+    async def set_stage_progress(
+        self,
+        current_step: str,
+        *,
+        total_steps: int,
+        completed_steps: int,
+        message: Optional[str] = None,
+    ) -> None:
+        """Atomically publish a workflow's factual stage progress.
+
+        ``completed_units`` remains dedicated to grading's student/question
+        pairs. Workflows such as problem recognition use these stage fields for
+        real milestones; callers must not substitute timers, page estimates, or
+        other synthetic progress.
+        """
+        if total_steps < 0:
+            raise ValueError("total_steps must be non-negative")
+        if completed_steps < 0 or completed_steps > total_steps:
+            raise ValueError("completed_steps must be between 0 and total_steps")
+        if not current_step:
+            raise ValueError("current_step must not be empty")
+
+        async with self._lock:
+            if self._progress.started_at is None:
+                self._progress.started_at = time.time()
+            self._progress.current_step = current_step
+            self._progress.total_steps = total_steps
+            self._progress.completed_steps = completed_steps
+        if message:
+            await self._emit(ProgressEvent(message=message))
+
     async def set_error(self, detail: str) -> None:
         async with self._lock:
             self._progress.phase = "error"

@@ -577,7 +577,7 @@ export function TaskUploadPage() {
           ) : null}
           <div className="grid gap-2 sm:flex sm:flex-wrap sm:justify-end">
             <Link
-              to={isProblems ? `/tasks/${safeTaskId}/upload/problems` : `/tasks/${safeTaskId}/problems/progress`}
+              to={isProblems ? `/tasks/${safeTaskId}/upload/problems` : `/tasks/${safeTaskId}/questions`}
               className="min-w-0"
             >
               <Button type="button" variant="secondary" className="w-full sm:w-auto">
