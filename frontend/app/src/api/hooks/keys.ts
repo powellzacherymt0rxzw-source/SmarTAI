@@ -40,6 +40,12 @@ export const materialImportKeys = {
   detail: (taskId: string, jobId: string) => ["material-imports", taskId, jobId] as const,
 };
 
+export const aiCompletionKeys = {
+  all: ["ai-completions"] as const,
+  preflight: (taskId: string) => ["ai-completions", taskId, "preflight"] as const,
+  detail: (taskId: string, jobId: string) => ["ai-completions", taskId, jobId] as const,
+};
+
 export const expertKeys = {
   all: ["experts"] as const,
   list: () => ["experts", "list"] as const,

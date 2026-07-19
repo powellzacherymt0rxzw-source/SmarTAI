@@ -75,6 +75,9 @@ class Correction(BaseModel):
 # ─── Problem & student answer models ──────────────────────────────────────────
 
 MaterialImportTarget = Literal["criterion", "reference_answer", "test_cases"]
+AICompletionTarget = Literal[
+    "criterion", "reference_answer", "solution_code", "test_cases",
+]
 
 def is_programming_question_type(value: Any) -> bool:
     """Recognize legacy English and current Chinese programming type labels."""
@@ -146,6 +149,18 @@ class MaterialFieldProvenance(BaseModel):
     updated_at: float = Field(default_factory=time.time)
 
 
+class AICompletionFieldProvenance(BaseModel):
+    """Durable audit metadata for one Q-09 generated preparation slot."""
+
+    job_id: str
+    candidate_id: str
+    source_kind: Literal["ai_generated"] = "ai_generated"
+    provider_id: str
+    review_status: Literal["pending", "edited", "confirmed"] = "pending"
+    generated_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+
 class ProblemInfo(BaseModel):
     q_id: str = Field(description="Unique question ID, starting from 'q1'")
     number: str = Field(description="Display question number, e.g. '1', '2.3', 'III.'")
@@ -155,8 +170,9 @@ class ProblemInfo(BaseModel):
     review_status: Literal["needs_review", "edited", "confirmed"] = Field(
         default="needs_review",
         description=(
-            "Teacher review state for the recognized problem. Newly recognized "
-            "problems require review until a teacher edits or confirms them."
+            "Teacher review state for the recognized question stem/content only. "
+            "Preparation slots such as rubric, answer, solution code, and tests "
+            "keep independent review state in their provenance records."
         ),
     )
     reference_answer: Optional[str] = Field(
@@ -164,6 +180,14 @@ class ProblemInfo(BaseModel):
         description="Teacher-supplied reference answer (calculation-style problems). "
                     "If None, CalculationSkill will ask the LLM to generate sympy code "
                     "and execute it in the sandbox to compute a reference value.",
+    )
+    solution_code: Optional[str] = Field(
+        default=None,
+        description=(
+            "Teacher-confirmed or AI-generated reference implementation for a "
+            "programming problem. It is preparation material only and is never "
+            "executed by the Q-09 generation workflow."
+        ),
     )
     test_cases: Optional[List[TestCase]] = Field(
         default=None,
@@ -176,6 +200,15 @@ class ProblemInfo(BaseModel):
         description=(
             "Per preparation slot provenance retained after a Q-08 plan expires. "
             "It is audit metadata and does not change grading behavior."
+        ),
+    )
+    ai_completion_provenance: Dict[
+        AICompletionTarget, AICompletionFieldProvenance
+    ] = Field(
+        default_factory=dict,
+        description=(
+            "Per-slot Q-09 AI generation provenance. Generated values remain "
+            "pending until a teacher explicitly edits or confirms them."
         ),
     )
 
@@ -501,6 +534,37 @@ class MaterialImportPlan(BaseModel):
     expires_at: float
 
 
+class AICompletionCandidate(BaseModel):
+    """One bounded Q-09 generation result, applied only if its slot is empty."""
+
+    candidate_id: str
+    target_id: str
+    q_id: str
+    target: AICompletionTarget
+    text_value: Optional[str] = Field(default=None, max_length=100_000)
+    test_cases: Optional[List[TestCase]] = Field(default=None, max_length=12)
+
+
+class AICompletionJob(BaseModel):
+    """Owner-scoped Q-09 job metadata retained briefly for progress recovery."""
+
+    job_id: str
+    task_id: str
+    owner_id: str
+    request_fingerprint: str
+    target_ids: List[str] = Field(default_factory=list, max_length=200)
+    test_case_count: int = Field(default=6, ge=1, le=12)
+    provider_id: str
+    status: Literal["running", "done", "error"] = "running"
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    applied_target_ids: List[str] = Field(default_factory=list)
+    skipped_target_ids: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    created_at: float = Field(default_factory=time.time)
+    completed_at: Optional[float] = None
+    expires_at: float
+
+
 TagColor = Literal["slate", "blue", "teal", "green", "amber", "rose", "violet"]
 
 
@@ -657,6 +721,17 @@ class Task(BaseModel):
     last_failed_material_import_fingerprint: Optional[str] = None
     material_import_retry_revision: Optional[int] = None
 
+    # Q-09 AI completion runs only after the teacher confirms an explicit
+    # missing-field scope. The worker may fill still-empty slots in one CAS;
+    # it never overwrites teacher/imported/confirmed material.
+    ai_completion_job_id: Optional[str] = None
+    pending_ai_completion_fingerprint: Optional[str] = None
+    ai_completion_fingerprint: Optional[str] = None
+    last_ai_completion_job_id: Optional[str] = None
+    ai_completion_error: Optional[str] = None
+    last_failed_ai_completion_fingerprint: Optional[str] = None
+    ai_completion_retry_revision: Optional[int] = None
+
     # ─── Task-scoped knowledge base (RAG MVP) ─────────────────────────────
     # Mirror metadata for documents uploaded via POST /tasks/{id}/kb. The
     # actual chunks + vectors live in backend.rag.store.InMemoryTaskRetriever
@@ -699,6 +774,9 @@ class Task(BaseModel):
             "material_import_job_id": self.material_import_job_id,
             "last_material_import_job_id": self.last_material_import_job_id,
             "material_import_error": self.material_import_error,
+            "ai_completion_job_id": self.ai_completion_job_id,
+            "last_ai_completion_job_id": self.last_ai_completion_job_id,
+            "ai_completion_error": self.ai_completion_error,
             "problem_count": len(self.problem_data),
             "student_count": len(self.student_data),
             "kb_docs": dict(self.kb_docs),

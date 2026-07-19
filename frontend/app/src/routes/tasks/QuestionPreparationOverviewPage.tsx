@@ -1,4 +1,4 @@
-import { ChevronRight, Search } from "lucide-react";
+import { ChevronRight, LoaderCircle, Search, Sparkles } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo } from "react";
 import { Link, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useTask } from "@/api/hooks/tasks";
@@ -14,10 +14,12 @@ import {
   type QuestionPreparationRule,
   type QuestionPreparationSort,
 } from "@/lib/questionPreparation";
+import type { AICompletionTarget, ProblemInfo } from "@/types";
 
 const RULE_LABEL_KEYS: Record<QuestionPreparationRule, MessageKey> = {
   missing_answer: "questionOverviewRuleMissingAnswer",
   missing_rubric: "questionOverviewRuleMissingRubric",
+  missing_code: "questionOverviewRuleMissingCode",
   programming: "questionOverviewRuleProgramming",
   proof: "questionOverviewRuleProof",
   keyword: "questionOverviewRuleKeyword",
@@ -29,7 +31,7 @@ export function QuestionPreparationOverviewPage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useI18n();
-  const taskQuery = useTask(taskId);
+  const taskQuery = useTask(taskId, { pollAICompletion: true });
   const query = searchParams.get("q") ?? "";
   const deferredQuery = useDeferredValue(query);
   const sort = normalizeSort(searchParams.get("sort"));
@@ -167,21 +169,53 @@ export function QuestionPreparationOverviewPage() {
             <p className="text-xs text-muted-foreground">
               {t("questionOverviewShowingPrefix")}{selection.rows.length}{t("questionOverviewShowingSeparator")}{rows.length}{t("questionOverviewShowingSuffix")}
             </p>
-            <div className="grid gap-2 sm:flex sm:items-center">
-              <Link
-                to={`/tasks/${taskId}/questions/import`}
-                className="inline-flex h-9 w-full items-center justify-center rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
-              >
-                {t("questionOverviewBulkImport")}
-              </Link>
-              <Link
-                to={`/tasks/${taskId}/upload/submissions`}
-                className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
-              >
-                {t("questionOverviewContinue")}
-                <ChevronRight aria-hidden="true" className="h-4 w-4" />
-              </Link>
-            </div>
+            {taskQuery.data?.ai_completion_job_id ? (
+              <div className="flex min-w-0 flex-col gap-2 rounded-[7px] border border-blue-100 bg-blue-50/60 px-3 py-2 sm:flex-row sm:items-center dark:border-blue-900 dark:bg-blue-950/20">
+                <span className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold text-primary">
+                  <LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                  <span className="truncate">{t("questionOverviewAIRunning")}</span>
+                </span>
+                <Link
+                  to={`/tasks/${taskId}/questions/ai-complete/progress/${encodeURIComponent(taskQuery.data.ai_completion_job_id)}`}
+                  className="inline-flex h-8 shrink-0 items-center justify-center rounded-[6px] bg-primary px-3 text-xs font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {t("questionOverviewReturnAIProgress")}
+                </Link>
+              </div>
+            ) : taskQuery.data?.ai_completion_error ? (
+              <div className="flex min-w-0 flex-col gap-2 rounded-[7px] border border-red-100 bg-red-50/60 px-3 py-2 sm:flex-row sm:items-center dark:border-red-900 dark:bg-red-950/20">
+                <span className="min-w-0 truncate text-xs font-semibold text-danger">{t("questionOverviewAIFailed")}</span>
+                <Link
+                  to={`/tasks/${taskId}/questions/ai-complete`}
+                  className="inline-flex h-8 shrink-0 items-center justify-center rounded-[6px] bg-primary px-3 text-xs font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {t("questionOverviewRetryAI")}
+                </Link>
+              </div>
+            ) : (
+              <div className="grid gap-2 sm:flex sm:items-center">
+                <Link
+                  to={`/tasks/${taskId}/questions/import`}
+                  className="inline-flex h-9 w-full items-center justify-center rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
+                >
+                  {t("questionOverviewBulkImport")}
+                </Link>
+                <Link
+                  to={`/tasks/${taskId}/questions/ai-complete`}
+                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
+                >
+                  <Sparkles aria-hidden="true" className="h-4 w-4" />
+                  {t("questionOverviewAIComplete")}
+                </Link>
+                <Link
+                  to={`/tasks/${taskId}/upload/submissions`}
+                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
+                >
+                  {t("questionOverviewContinue")}
+                  <ChevronRight aria-hidden="true" className="h-4 w-4" />
+                </Link>
+              </div>
+            )}
           </footer>
         ) : null}
       </section>
@@ -217,6 +251,9 @@ function QuestionMatrix({
         <tbody className="divide-y">
           {rows.map((row) => {
             const basePath = `/tasks/${encodeURIComponent(taskId)}/questions/${encodeURIComponent(row.problem.q_id)}`;
+            const rubricStatus = slotPresentation(row.problem, "criterion", row.hasRubric, t);
+            const answerStatus = slotPresentation(row.problem, "reference_answer", row.hasAnswer, t);
+            const programmingMaterials = programmingMaterialPresentation(row, t);
             return (
               <tr key={row.problem.q_id} className="h-[54px] bg-card transition-colors hover:bg-muted/30">
                 <td className="px-5 py-2.5 font-semibold text-foreground">{row.label}</td>
@@ -239,25 +276,23 @@ function QuestionMatrix({
                 <td className="px-3 py-2.5">
                   <StatusLink
                     to={withReturnContext(`${basePath}/rubric`, returnPath)}
-                    tone={row.hasRubric ? "ready" : "missing"}
-                    label={t(row.hasRubric ? "questionOverviewStatusReady" : "questionOverviewStatusMissing")}
+                    tone={rubricStatus.tone}
+                    label={rubricStatus.label}
                   />
                 </td>
                 <td className="px-3 py-2.5">
                   <StatusLink
                     to={withReturnContext(`${basePath}/answer`, returnPath)}
-                    tone={row.hasAnswer ? "ready" : "missing"}
-                    label={t(row.hasAnswer ? "questionOverviewStatusReady" : "questionOverviewStatusMissing")}
+                    tone={answerStatus.tone}
+                    label={answerStatus.label}
                   />
                 </td>
                 <td className="px-3 py-2.5">
                   {row.isProgramming ? (
                     <StatusLink
-                      to={withReturnContext(`${basePath}/tests`, returnPath)}
-                      tone={row.hasTests ? "ready" : "missing"}
-                      label={row.hasTests
-                        ? `${row.problem.test_cases?.length ?? 0}${t("questionOverviewTestsCountSuffix")}`
-                        : t("questionOverviewStatusMissing")}
+                      to={withReturnContext(`${basePath}/${programmingMaterials.section}`, returnPath)}
+                      tone={programmingMaterials.tone}
+                      label={programmingMaterials.label}
                     />
                   ) : (
                     <span className="text-xs text-muted-foreground">{t("questionOverviewStatusNotApplicable")}</span>
@@ -291,7 +326,7 @@ function StatusLink({
   label,
 }: {
   to: string;
-  tone: "ready" | "missing" | "review";
+  tone: "ready" | "missing" | "review" | "generated";
   label: string;
 }) {
   return (
@@ -300,13 +335,104 @@ function StatusLink({
       className={cn(
         "inline-flex min-h-7 min-w-[104px] items-center rounded-full px-3 text-xs font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-ring",
         tone === "ready" && "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300",
-        tone === "missing" && "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-300",
+        tone === "missing" && "bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-950/50 dark:text-red-300",
         tone === "review" && "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300",
+        tone === "generated" && "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-300",
       )}
     >
       {label}
     </Link>
   );
+}
+
+function slotPresentation(
+  problem: ProblemInfo,
+  target: AICompletionTarget,
+  hasValue: boolean,
+  t: (key: MessageKey) => string,
+  readyLabel = t("questionOverviewStatusReady"),
+): SlotPresentation {
+  const aiProvenance = problem.ai_completion_provenance?.[target];
+  if (aiProvenance?.review_status === "pending") {
+    return {
+      tone: "generated",
+      label: t("questionOverviewStatusAIPending"),
+      source: "ai",
+      reviewStatus: "pending",
+    };
+  }
+  if (aiProvenance?.review_status === "edited") {
+    return {
+      tone: "generated",
+      label: t("questionOverviewStatusAIEdited"),
+      source: "ai",
+      reviewStatus: "edited",
+    };
+  }
+  if (!aiProvenance) {
+    const materialProvenance = target === "solution_code"
+      ? undefined
+      : problem.material_provenance?.[target];
+    if (materialProvenance?.review_status === "pending") {
+      return {
+        tone: "generated",
+        label: t("questionOverviewStatusImportPending"),
+        source: "material",
+        reviewStatus: "pending",
+      };
+    }
+    if (materialProvenance?.review_status === "edited") {
+      return {
+        tone: "generated",
+        label: t("questionOverviewStatusImportEdited"),
+        source: "material",
+        reviewStatus: "edited",
+      };
+    }
+  }
+  return hasValue
+    ? { tone: "ready", label: readyLabel, source: "stored" }
+    : { tone: "missing", label: t("questionOverviewStatusMissing"), source: "stored" };
+}
+
+type SlotPresentation = {
+  tone: "ready" | "missing" | "generated";
+  label: string;
+  source: "ai" | "material" | "stored";
+  reviewStatus?: "pending" | "edited";
+};
+
+function programmingMaterialPresentation(
+  row: QuestionPreparationRow,
+  t: (key: MessageKey) => string,
+): { section: "code" | "tests"; tone: "ready" | "missing" | "generated"; label: string } {
+  const codeStatus = slotPresentation(row.problem, "solution_code", row.hasCode, t);
+  const testsStatus = slotPresentation(row.problem, "test_cases", row.hasTests, t);
+  if (codeStatus.tone === "generated") {
+    return {
+      section: "code",
+      ...codeStatus,
+      label: codeStatus.source === "ai" && codeStatus.reviewStatus === "pending"
+        ? t("questionOverviewStatusCodeAIPending")
+        : codeStatus.label,
+    };
+  }
+  if (testsStatus.tone === "generated") {
+    return {
+      section: "tests",
+      ...testsStatus,
+      label: testsStatus.source === "ai" && testsStatus.reviewStatus === "pending"
+        ? t("questionOverviewStatusTestsAIPending")
+        : testsStatus.label,
+    };
+  }
+  if (!row.hasCode) return { section: "code", ...codeStatus, label: t("questionOverviewStatusCodeMissing") };
+  if (!row.hasTests) return { section: "tests", ...testsStatus, label: t("questionOverviewStatusTestsMissing") };
+  return {
+    section: "tests",
+    tone: "ready",
+    label: `${t("questionOverviewStatusReady")} · ${row.problem.test_cases?.length ?? 0}${t("questionOverviewTestsCountSuffix")}`,
+  };
 }
 
 function CoverageMetric({

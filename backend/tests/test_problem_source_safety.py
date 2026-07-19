@@ -466,6 +466,7 @@ def test_problem_review_status_follows_manual_edits_and_explicit_confirmation(cl
         json={"criterion": "teacher rubric", "review_status": "confirmed"},
     )
     assert edit_and_confirm.status_code == 200, edit_and_confirm.text
+    # Slot confirmation does not alter the already-confirmed stem state.
     assert edit_and_confirm.json()["problem"]["review_status"] == "confirmed"
 
     unconfirmed_edit = client.put(
@@ -474,7 +475,7 @@ def test_problem_review_status_follows_manual_edits_and_explicit_confirmation(cl
         json={"criterion": "revised rubric", "review_status": "needs_review"},
     )
     assert unconfirmed_edit.status_code == 200, unconfirmed_edit.text
-    assert unconfirmed_edit.json()["problem"]["review_status"] == "edited"
+    assert unconfirmed_edit.json()["problem"]["review_status"] == "confirmed"
 
     invalid = client.put(
         "/tasks/T_problem_review/problems/q1",
@@ -484,7 +485,7 @@ def test_problem_review_status_follows_manual_edits_and_explicit_confirmation(cl
     assert invalid.status_code == 422
     stored = get_task_store().get("T_problem_review").problem_data["q1"]
     assert stored["criterion"] == "revised rubric"
-    assert stored["review_status"] == "edited"
+    assert stored["review_status"] == "confirmed"
 
 
 def test_problem_preparation_fields_can_be_saved_per_question(client):
@@ -510,7 +511,7 @@ def test_problem_preparation_fields_can_be_saved_per_question(client):
     problem = response.json()["problem"]
     assert problem["reference_answer"] == "Teacher answer"
     assert problem["test_cases"][0]["expected_output"] == "4"
-    assert problem["review_status"] == "edited"
+    assert problem["review_status"] == "needs_review"
 
 
 def test_deleting_active_grade_cannot_resurrect_job_history(client, monkeypatch):

@@ -14,6 +14,9 @@ from typing import Any, Dict, List, Optional
 from threading import RLock
 
 from backend.models import (
+    AICompletionCandidate,
+    AICompletionFieldProvenance,
+    AICompletionJob,
     CourseMaterial,
     GradingJob,
     MaterialImportCandidate,
@@ -27,6 +30,22 @@ from backend.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _slot_has_value(problem: Dict[str, Any], target: str) -> bool:
+    if target == "test_cases":
+        return bool(problem.get(target))
+    return bool(str(problem.get(target) or "").strip())
+
+
+def _slot_is_confirmed(problem: Dict[str, Any], target: str) -> bool:
+    for key in ("ai_completion_provenance", "material_provenance"):
+        provenance = problem.get(key)
+        if isinstance(provenance, dict):
+            value = provenance.get(target)
+            if isinstance(value, dict) and value.get("review_status") == "confirmed":
+                return True
+    return False
 
 
 # ─── Problem store ────────────────────────────────────────────────────────────
@@ -301,6 +320,7 @@ class TaskStore:
             or task.reference_parse_job_id
             or task.test_cases_parse_job_id
             or task.material_import_job_id
+            or task.ai_completion_job_id
         ):
             return "workflow_busy"
         if cls._has_problem_replacement_artifacts(task) and not replace_confirmed:
@@ -428,6 +448,13 @@ class TaskStore:
             task.material_import_error = None
             task.last_failed_material_import_fingerprint = None
             task.material_import_retry_revision = None
+            task.ai_completion_job_id = None
+            task.pending_ai_completion_fingerprint = None
+            task.ai_completion_fingerprint = None
+            task.last_ai_completion_job_id = None
+            task.ai_completion_error = None
+            task.last_failed_ai_completion_fingerprint = None
+            task.ai_completion_retry_revision = None
             task.status = "problems_ready"
             task.error = None
             task.last_failed_job_id = None
@@ -487,6 +514,7 @@ class TaskStore:
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
                 or task.material_import_job_id
+                or task.ai_completion_job_id
             ):
                 return "workflow_busy", task
             if task.status not in {"problems_ready", "submissions_ready", "graded", "error"}:
@@ -583,6 +611,7 @@ class TaskStore:
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
                 or task.material_import_job_id
+                or task.ai_completion_job_id
             ):
                 return "workflow_busy", task
             if not task.problem_data:
@@ -649,6 +678,7 @@ class TaskStore:
                 task.status in {"extracting_problems", "parsing_submissions", "grading"}
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
+                or task.ai_completion_job_id
             ):
                 return "workflow_busy", task
             if task.status != "problems_ready" or not task.problem_data:
@@ -765,6 +795,7 @@ class TaskStore:
                 or task.material_import_job_id
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
+                or task.ai_completion_job_id
             ):
                 return "workflow_busy", task, {}
             if (
@@ -810,7 +841,6 @@ class TaskStore:
                     continue
                 patched = dict(current)
                 patched[candidate.target] = value
-                patched["review_status"] = "edited"
                 provenance = dict(patched.get("material_provenance") or {})
                 provenance[candidate.target] = MaterialFieldProvenance(
                     import_job_id=job_id,
@@ -849,6 +879,235 @@ class TaskStore:
                 "skipped_count": len(skipped),
             }
 
+    def begin_ai_completion(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        job_id: str,
+        request_fingerprint: str,
+    ) -> tuple[str, Optional[Task]]:
+        """Atomically reserve one Q-09 generation slot after scope confirmation."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return "not_found", None
+            if task.ai_completion_job_id:
+                if task.pending_ai_completion_fingerprint == request_fingerprint:
+                    return "already_running", task
+                return "different_ai_completion_running", task
+            if (
+                task.ai_completion_fingerprint == request_fingerprint
+                and task.last_ai_completion_job_id
+            ):
+                return "already_done", task
+            if task.workflow_revision != expected_revision:
+                return "stale_revision", task
+            if (
+                task.status in {"extracting_problems", "parsing_submissions", "grading"}
+                or task.reference_parse_job_id
+                or task.test_cases_parse_job_id
+                or task.material_import_job_id
+            ):
+                return "workflow_busy", task
+            if task.status != "problems_ready" or not task.problem_data:
+                return "invalid_state", task
+            task.ai_completion_job_id = job_id
+            task.pending_ai_completion_fingerprint = request_fingerprint
+            task.ai_completion_error = None
+            task.last_failed_job_id = None
+            task.last_failed_ai_completion_fingerprint = None
+            task.ai_completion_retry_revision = None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return "started", task
+
+    def complete_ai_completion(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        job_id: str,
+        request_fingerprint: str,
+        requested_target_ids: List[str],
+        candidates: List[AICompletionCandidate],
+        provider_id: str,
+    ) -> tuple[str, Optional[Task], Dict[str, Any]]:
+        """Apply generated values in one lock-held CAS without overwriting."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return "not_found", None, {}
+            if task.workflow_revision != expected_revision:
+                return "stale_revision", task, {}
+            if (
+                task.status != "problems_ready"
+                or task.ai_completion_job_id != job_id
+                or task.pending_ai_completion_fingerprint != request_fingerprint
+                or task.material_import_job_id
+                or task.reference_parse_job_id
+                or task.test_cases_parse_job_id
+            ):
+                return "workflow_busy", task, {}
+
+            requested = list(dict.fromkeys(requested_target_ids))
+            candidate_by_target = {
+                candidate.target_id: candidate
+                for candidate in candidates
+                if candidate.target_id in requested
+            }
+            new_problem_data = dict(task.problem_data)
+            applied: List[str] = []
+            skipped: List[str] = []
+            invalid: List[str] = []
+            applied_by_target: Dict[str, int] = {
+                "criterion": 0,
+                "reference_answer": 0,
+                "solution_code": 0,
+                "test_cases": 0,
+            }
+
+            for target_id in requested:
+                candidate = candidate_by_target.get(target_id)
+                if candidate is None:
+                    invalid.append(target_id)
+                    skipped.append(target_id)
+                    continue
+                if candidate.target_id != f"{candidate.q_id}:{candidate.target}":
+                    invalid.append(target_id)
+                    skipped.append(target_id)
+                    continue
+                current = new_problem_data.get(candidate.q_id)
+                if not isinstance(current, dict):
+                    invalid.append(target_id)
+                    skipped.append(target_id)
+                    continue
+                programming = is_programming_question_type(current.get("type"))
+                if candidate.target in {"solution_code", "test_cases"} and not programming:
+                    invalid.append(target_id)
+                    skipped.append(target_id)
+                    continue
+                if _slot_has_value(current, candidate.target) or _slot_is_confirmed(
+                    current, candidate.target
+                ):
+                    skipped.append(target_id)
+                    continue
+
+                if candidate.target == "test_cases":
+                    cases = [
+                        {
+                            **case.model_dump(),
+                            "source": "llm_generated",
+                        }
+                        for case in (candidate.test_cases or [])[:12]
+                    ]
+                    if not cases:
+                        invalid.append(target_id)
+                        skipped.append(target_id)
+                        continue
+                    value: Any = cases
+                else:
+                    value = str(candidate.text_value or "").strip()
+                    if not value:
+                        invalid.append(target_id)
+                        skipped.append(target_id)
+                        continue
+
+                patched = dict(current)
+                patched[candidate.target] = value
+                provenance = dict(patched.get("ai_completion_provenance") or {})
+                provenance[candidate.target] = AICompletionFieldProvenance(
+                    job_id=job_id,
+                    candidate_id=candidate.candidate_id,
+                    provider_id=provider_id,
+                    review_status="pending",
+                ).model_dump()
+                patched["ai_completion_provenance"] = provenance
+                new_problem_data[candidate.q_id] = patched
+                applied.append(target_id)
+                applied_by_target[candidate.target] += 1
+
+            task.problem_data = new_problem_data
+            task.ai_completion_job_id = None
+            task.pending_ai_completion_fingerprint = None
+            task.ai_completion_fingerprint = request_fingerprint
+            task.last_ai_completion_job_id = job_id
+            task.ai_completion_error = None
+            task.last_failed_job_id = None
+            task.last_failed_ai_completion_fingerprint = None
+            task.ai_completion_retry_revision = None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return "done", task, {
+                "requested_count": len(requested),
+                "generated_count": len(candidate_by_target),
+                "applied_count": len(applied),
+                "skipped_count": len(skipped),
+                "invalid_count": len(invalid),
+                "by_target": applied_by_target,
+                "applied_target_ids": applied,
+                "skipped_target_ids": skipped,
+            }
+
+    def fail_ai_completion(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+        error: str,
+    ) -> Optional[Task]:
+        """Release a failed Q-09 job while preserving every question field."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.ai_completion_job_id != job_id:
+                return None
+            task.ai_completion_job_id = None
+            task.last_failed_ai_completion_fingerprint = (
+                task.pending_ai_completion_fingerprint
+            )
+            task.pending_ai_completion_fingerprint = None
+            task.last_ai_completion_job_id = job_id
+            task.ai_completion_error = error
+            task.last_failed_job_id = job_id
+            task.workflow_revision += 1
+            task.ai_completion_retry_revision = task.workflow_revision
+            task.updated_at = time.time()
+            return task
+
+    def expire_ai_completion_job(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+        request_fingerprint: str,
+    ) -> Optional[Task]:
+        """Release idempotency pointers after a terminal Q-09 job expires."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if (
+                task is None
+                or task.ai_completion_job_id is not None
+                or task.last_ai_completion_job_id != job_id
+                or (
+                    task.pending_ai_completion_fingerprint != request_fingerprint
+                    and task.ai_completion_fingerprint != request_fingerprint
+                    and task.last_failed_ai_completion_fingerprint != request_fingerprint
+                )
+            ):
+                return task
+            task.pending_ai_completion_fingerprint = None
+            task.ai_completion_fingerprint = None
+            task.last_failed_ai_completion_fingerprint = request_fingerprint
+            task.ai_completion_error = "ai_completion_job_expired"
+            task.workflow_revision += 1
+            task.ai_completion_retry_revision = task.workflow_revision
+            task.updated_at = time.time()
+            return task
+
     def begin_grading(
         self,
         task_id: str,
@@ -871,6 +1130,7 @@ class TaskStore:
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
                 or task.material_import_job_id
+                or task.ai_completion_job_id
             ):
                 return "workflow_busy", task
             if task.status not in {"submissions_ready", "graded", "error"}:
@@ -934,6 +1194,7 @@ class TaskStore:
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
                 or task.material_import_job_id
+                or task.ai_completion_job_id
             ):
                 return None
             for key, value in fields.items():
@@ -1322,9 +1583,129 @@ class MaterialImportStore:
                 self._plans.pop(job_id, None)
 
 
+class AICompletionStore:
+    """Bounded owner-scoped storage for recoverable Q-09 job summaries."""
+
+    MAX_JOBS = 1000
+    MAX_JOBS_PER_OWNER = 20
+    MAX_RESIDENT_BYTES = 16 * 1024 * 1024
+    MAX_RESIDENT_BYTES_PER_OWNER = 2 * 1024 * 1024
+    TERMINAL_TTL = 2 * 60 * 60
+
+    def __init__(self) -> None:
+        self._jobs: OrderedDict[str, AICompletionJob] = OrderedDict()
+        self._lock = RLock()
+
+    @staticmethod
+    def _job_bytes(job: AICompletionJob) -> int:
+        return len(job.model_dump_json().encode("utf-8"))
+
+    @classmethod
+    def _reserved_job_bytes(cls, job: AICompletionJob) -> int:
+        # A terminal row adds one applied-or-skipped copy of every requested
+        # target ID plus a small fixed summary. Reserve that bounded growth at
+        # creation so completion can never fail after TaskStore has committed.
+        terminal_growth = sum(
+            len(target_id.encode("utf-8")) for target_id in job.target_ids
+        ) + 4096
+        return max(cls._job_bytes(job), cls._job_bytes(job) + terminal_growth)
+
+    def create(self, job: AICompletionJob) -> AICompletionJob:
+        with self._lock:
+            self._prune_expired()
+            owner_jobs = [
+                item for item in self._jobs.values() if item.owner_id == job.owner_id
+            ]
+            if len(owner_jobs) >= self.MAX_JOBS_PER_OWNER:
+                raise ResourceQuotaError("ai_completion_owner_count_limit", 429)
+            if len(self._jobs) >= self.MAX_JOBS:
+                raise ResourceQuotaError("ai_completion_global_count_limit", 429)
+            job_size = self._reserved_job_bytes(job)
+            owner_bytes = sum(self._reserved_job_bytes(item) for item in owner_jobs)
+            total_bytes = sum(
+                self._reserved_job_bytes(item) for item in self._jobs.values()
+            )
+            if owner_bytes + job_size > self.MAX_RESIDENT_BYTES_PER_OWNER:
+                raise ResourceQuotaError("ai_completion_owner_bytes_limit", 413)
+            if total_bytes + job_size > self.MAX_RESIDENT_BYTES:
+                raise ResourceQuotaError("ai_completion_global_bytes_limit", 413)
+            self._jobs[job.job_id] = job
+            return job.model_copy(deep=True)
+
+    def get_for_owner_task(
+        self,
+        job_id: str,
+        *,
+        owner_id: str,
+        task_id: str,
+    ) -> Optional[AICompletionJob]:
+        with self._lock:
+            self._prune_expired()
+            job = self._jobs.get(job_id)
+            if job is None or job.owner_id != owner_id or job.task_id != task_id:
+                return None
+            return job.model_copy(deep=True)
+
+    def set_done(
+        self,
+        job_id: str,
+        *,
+        summary: Dict[str, Any],
+    ) -> Optional[AICompletionJob]:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status != "running":
+                return None
+            candidate = job.model_copy(deep=True)
+            candidate.status = "done"
+            candidate.summary = {
+                key: value for key, value in summary.items()
+                if key not in {"applied_target_ids", "skipped_target_ids"}
+            }
+            candidate.applied_target_ids = list(summary.get("applied_target_ids") or [])
+            candidate.skipped_target_ids = list(summary.get("skipped_target_ids") or [])
+            candidate.completed_at = time.time()
+            candidate.expires_at = time.time() + self.TERMINAL_TTL
+            # create() reserved the maximum bounded terminal growth.
+            self._jobs[job_id] = candidate
+            return candidate.model_copy(deep=True)
+
+    def set_error(self, job_id: str, error: str) -> Optional[AICompletionJob]:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            job.status = "error"
+            job.error = error
+            job.completed_at = time.time()
+            job.expires_at = time.time() + self.TERMINAL_TTL
+            return job.model_copy(deep=True)
+
+    def delete(self, job_id: str) -> None:
+        with self._lock:
+            self._jobs.pop(job_id, None)
+
+    def delete_for_task(self, task_id: str) -> None:
+        with self._lock:
+            for job_id, job in list(self._jobs.items()):
+                if job.task_id == task_id:
+                    self._jobs.pop(job_id, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._jobs.clear()
+
+    def _prune_expired(self) -> None:
+        now = time.time()
+        for job_id, job in list(self._jobs.items()):
+            if job.status != "running" and job.expires_at <= now:
+                self._jobs.pop(job_id, None)
+
+
 _course_material_store = CourseMaterialStore()
 _problem_source_draft_store = ProblemSourceDraftStore()
 _material_import_store = MaterialImportStore()
+_ai_completion_store = AICompletionStore()
 
 
 def get_course_material_store() -> CourseMaterialStore:
@@ -1337,6 +1718,10 @@ def get_problem_source_draft_store() -> ProblemSourceDraftStore:
 
 def get_material_import_store() -> MaterialImportStore:
     return _material_import_store
+
+
+def get_ai_completion_store() -> AICompletionStore:
+    return _ai_completion_store
 
 
 # ─── Tag store (owner-scoped task labels) ────────────────────────────────────

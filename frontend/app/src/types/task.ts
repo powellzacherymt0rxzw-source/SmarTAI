@@ -1,5 +1,6 @@
 import type { KBDoc } from "./kb";
 import type { JobProgress } from "./progress";
+import type { AICompletionTarget } from "./aiCompletions";
 
 export type TaskStatus =
   | "draft"
@@ -30,7 +31,36 @@ export interface ProblemInfo {
   criterion: string;
   review_status?: "needs_review" | "edited" | "confirmed";
   reference_answer?: string | null;
+  solution_code?: string | null;
   test_cases?: TestCase[] | null;
+  material_provenance?: Partial<Record<"criterion" | "reference_answer" | "test_cases", MaterialFieldProvenance>>;
+  ai_completion_provenance?: Partial<Record<AICompletionTarget, AICompletionProvenance>>;
+}
+
+export interface MaterialFieldProvenance {
+  import_job_id: string;
+  candidate_id: string;
+  source_kind: "upload" | "library";
+  source_filename: string;
+  library_material_id?: string | null;
+  confidence: number;
+  match_status: "exact" | "possible";
+  source_excerpt: string;
+  source_location: string;
+  reason: string;
+  review_status: "pending" | "edited" | "confirmed";
+  imported_at: number;
+  updated_at: number;
+}
+
+export interface AICompletionProvenance {
+  job_id: string;
+  candidate_id: string;
+  source_kind: "ai_generated";
+  provider_id: string;
+  review_status: "pending" | "edited" | "confirmed";
+  generated_at: number;
+  updated_at: number;
 }
 
 export interface StudentAnswerInfo {
@@ -111,6 +141,9 @@ export interface TaskLite {
   test_cases_file_name?: string | null;
   reference_parse_job_id?: string | null;
   test_cases_parse_job_id?: string | null;
+  ai_completion_job_id?: string | null;
+  last_ai_completion_job_id?: string | null;
+  ai_completion_error?: string | null;
   problem_count: number;
   student_count: number;
   kb_docs: Record<string, KBDoc>;
@@ -128,6 +161,7 @@ export interface Task extends TaskLite {
 export interface TaskStateSnapshot extends TaskLite {
   progress?: JobProgress | null;
   active_job_id?: string | null;
+  active_operation?: string | null;
 }
 
 export type TaskListResponse = Record<string, TaskLite>;

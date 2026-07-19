@@ -4,6 +4,7 @@ export type QuestionPreparationSort = "number" | "missing" | "type";
 export type QuestionPreparationRule =
   | "missing_answer"
   | "missing_rubric"
+  | "missing_code"
   | "programming"
   | "proof"
   | "keyword"
@@ -16,6 +17,7 @@ export interface QuestionPreparationRow {
   reviewStatus: "confirmed" | "edited" | "needs_review";
   hasRubric: boolean;
   hasAnswer: boolean;
+  hasCode: boolean;
   isProgramming: boolean;
   hasTests: boolean;
   missingCount: number;
@@ -42,6 +44,10 @@ const QUERY_RULES: Array<{
     pattern: /缺(?:少|失)?评分标准|没有评分标准|无评分标准|评分标准缺失|missing\s+(?:rubric|criterion)/giu,
   },
   {
+    kind: "missing_code",
+    pattern: /缺(?:少|失)?(?:示例|参考|正确)?代码|没有(?:示例|参考|正确)?代码|无(?:示例|参考|正确)?代码|missing\s+(?:solution|reference)?\s*code/giu,
+  },
+  {
     kind: "programming",
     pattern: /编程题?|程序题?|代码题?|programming|coding/giu,
   },
@@ -61,6 +67,7 @@ export function buildQuestionPreparationRows(problems: ProblemInfo[]): QuestionP
   return problems.map((problem) => {
     const hasRubric = hasText(problem.criterion);
     const hasAnswer = hasText(problem.reference_answer);
+    const hasCode = hasText(problem.solution_code);
     const isProgramming = isProgrammingProblem(problem);
     const hasTests = (problem.test_cases?.length ?? 0) > 0;
     const explicitReviewStatus = (problem as ProblemInfo & { review_status?: unknown }).review_status;
@@ -73,6 +80,7 @@ export function buildQuestionPreparationRows(problems: ProblemInfo[]): QuestionP
       (reviewStatus === "confirmed" ? 0 : 1) +
       (hasRubric ? 0 : 1) +
       (hasAnswer ? 0 : 1) +
+      (isProgramming && !hasCode ? 1 : 0) +
       (isProgramming && !hasTests ? 1 : 0);
 
     return {
@@ -82,6 +90,7 @@ export function buildQuestionPreparationRows(problems: ProblemInfo[]): QuestionP
       reviewStatus,
       hasRubric,
       hasAnswer,
+      hasCode,
       isProgramming,
       hasTests,
       missingCount,
@@ -120,6 +129,7 @@ export function selectQuestionPreparationRows(
   const filtered = rows.filter((row) => {
     if (rules.includes("missing_answer") && row.hasAnswer) return false;
     if (rules.includes("missing_rubric") && row.hasRubric) return false;
+    if (rules.includes("missing_code") && (!row.isProgramming || row.hasCode)) return false;
     if (rules.includes("programming") && !row.isProgramming) return false;
     if (rules.includes("proof") && !isProofProblem(row.problem)) return false;
     if (!keyword) return true;
@@ -130,6 +140,7 @@ export function selectQuestionPreparationRows(
       row.problem.stem,
       row.problem.criterion,
       row.problem.reference_answer,
+      row.problem.solution_code,
     ]
       .filter(Boolean)
       .join(" ")

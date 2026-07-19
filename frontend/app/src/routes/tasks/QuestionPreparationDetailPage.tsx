@@ -10,6 +10,7 @@ import {
   Plus,
   Save,
   Search,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { Link, Navigate, useBeforeUnload, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -21,21 +22,23 @@ import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { useI18n } from "@/i18n/I18nProvider";
 import { cn } from "@/lib/cn";
 import { isProgrammingProblem } from "@/lib/questionPreparation";
-import type { ProblemInfo, TestCase } from "@/types";
+import type { AICompletionProvenance, AICompletionTarget, ProblemInfo, TestCase } from "@/types";
 
-const SECTIONS = ["content", "rubric", "answer", "tests"] as const;
+const SECTIONS = ["content", "rubric", "answer", "code", "tests"] as const;
 type PreparationSection = (typeof SECTIONS)[number];
 
 const SECTION_META: Record<PreparationSection, { title: string; description: string }> = {
   content: { title: "题干校对", description: "只处理题干内容；其他资料分别在对应页面完成。" },
   rubric: { title: "评分标准", description: "逐题校对评分依据，避免与标答或测试样例混在同一长页。" },
   answer: { title: "标答", description: "逐题查看或补充参考答案；批量资料导入将在独立流程中完成。" },
+  code: { title: "示例正确代码", description: "只为编程题维护可运行的参考实现，并单独确认 AI 生成来源。" },
   tests: { title: "测试样例", description: "只为编程题维护可执行的输入、预期输出与说明。" },
 };
 const SECTION_META_EN: Record<PreparationSection, { title: string; description: string }> = {
   content: { title: "Problem Stem", description: "Review only the stem here. Each other material has its own focused page." },
   rubric: { title: "Grading Rubric", description: "Review grading criteria without mixing answers or test cases into the same long page." },
   answer: { title: "Reference Answer", description: "Review or add one answer at a time. Bulk material import remains a separate flow." },
+  code: { title: "Reference Solution Code", description: "Maintain a runnable reference implementation for programming problems and confirm AI provenance separately." },
   tests: { title: "Test Cases", description: "Maintain executable inputs, expected outputs, and notes for programming problems only." },
 };
 
@@ -114,12 +117,21 @@ export function QuestionPreparationDetailPage() {
           <p className="mt-1 text-sm leading-6 text-muted-foreground">{sectionMeta.description}</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-3">
-          {section !== "content" ? (
+          {section !== "content" && section !== "code" ? (
             <Link
               to={`/tasks/${taskId}/questions/import?targets=${section === "rubric" ? "rubric" : section === "answer" ? "answer" : "tests"}`}
               className="inline-flex h-8 items-center rounded-[7px] border bg-card px-3 text-xs font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
             >
               {tx(locale, "批量导入此类资料", "Bulk Import This Material")}
+            </Link>
+          ) : null}
+          {current && isSectionMissing(current, section) && sectionTarget(section) ? (
+            <Link
+              to={`/tasks/${taskId}/questions/ai-complete?q_id=${encodeURIComponent(current.q_id)}&target=${sectionTarget(section)}`}
+              className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-primary px-3 text-xs font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
+              {tx(locale, "AI 补全此项", "AI Complete This Item")}
             </Link>
           ) : null}
           <span className="text-xs text-muted-foreground">{taskQuery.data?.name ?? ""}</span>
@@ -273,6 +285,7 @@ function SingleQuestionView({
   const [stem, setStem] = useState(problem.stem ?? "");
   const [criterion, setCriterion] = useState(problem.criterion ?? "");
   const [referenceAnswer, setReferenceAnswer] = useState(problem.reference_answer ?? "");
+  const [solutionCode, setSolutionCode] = useState(problem.solution_code ?? "");
   const [testCases, setTestCases] = useState<TestCase[]>(problem.test_cases ?? []);
   const [saved, setSaved] = useState(false);
   const stayButtonRef = useRef<HTMLButtonElement>(null);
@@ -282,13 +295,26 @@ function SingleQuestionView({
     setStem(problem.stem ?? "");
     setCriterion(problem.criterion ?? "");
     setReferenceAnswer(problem.reference_answer ?? "");
+    setSolutionCode(problem.solution_code ?? "");
     setTestCases(problem.test_cases ?? []);
     if (previousQuestionIdRef.current !== problem.q_id) setSaved(false);
     previousQuestionIdRef.current = problem.q_id;
   }, [problem]);
 
-  const currentValue = section === "content" ? stem : section === "rubric" ? criterion : referenceAnswer;
-  const originalValue = section === "content" ? problem.stem : section === "rubric" ? problem.criterion : problem.reference_answer ?? "";
+  const currentValue = section === "content"
+    ? stem
+    : section === "rubric"
+      ? criterion
+      : section === "answer"
+        ? referenceAnswer
+        : solutionCode;
+  const originalValue = section === "content"
+    ? problem.stem
+    : section === "rubric"
+      ? problem.criterion
+      : section === "answer"
+        ? problem.reference_answer ?? ""
+        : problem.solution_code ?? "";
   const dirty = section === "tests"
     ? JSON.stringify(testCases) !== JSON.stringify(problem.test_cases ?? [])
     : currentValue !== originalValue;
@@ -319,7 +345,9 @@ function SingleQuestionView({
         ? { criterion }
         : section === "answer"
           ? { reference_answer: referenceAnswer }
-          : { test_cases: testCases };
+          : section === "code"
+            ? { solution_code: solutionCode }
+            : { test_cases: testCases };
     try {
       await updateProblem.mutateAsync({
         taskId,
@@ -334,7 +362,10 @@ function SingleQuestionView({
   };
 
   const isProgramming = isProgrammingProblem(problem);
-  const canEdit = !readOnly && (section !== "tests" || isProgramming);
+  const canEdit = !readOnly && (!["code", "tests"].includes(section) || isProgramming);
+  const provenanceTarget = sectionTarget(section);
+  const provenance = provenanceTarget ? problem.ai_completion_provenance?.[provenanceTarget] : undefined;
+  const sectionConfirmed = sectionReviewStatus(problem, section) === "confirmed";
 
   return (
     <section className="mt-5 rounded-[10px] border bg-card p-5 sm:p-7">
@@ -345,7 +376,7 @@ function SingleQuestionView({
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-muted-foreground dark:bg-slate-800">
               {problem.type || tx(locale, "未分类", "Uncategorized")}
             </span>
-            <ReviewBadge status={problem.review_status} locale={locale} />
+            <SectionReviewBadge problem={problem} section={section} locale={locale} />
           </div>
           <p className="mt-1 text-xs text-muted-foreground">{tx(locale, `筛选结果中的第 ${position} / ${total} 题`, `${position} of ${total} filtered problems`)}</p>
         </div>
@@ -361,9 +392,10 @@ function SingleQuestionView({
             {tx(locale, "当前任务已进入后续处理阶段，本页只读；返回题目准备阶段后才能修改。", "This task has entered a later processing stage, so this page is read-only.")}
           </p>
         ) : null}
-        {section === "tests" && !isProgramming ? (
+        {provenance ? <AIProvenanceNotice provenance={provenance} locale={locale} /> : null}
+        {["code", "tests"].includes(section) && !isProgramming ? (
           <div className="rounded-lg border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">
-            {tx(locale, "这不是编程题，无需配置测试样例。", "This is not a programming problem, so test cases are not required.")}
+            {tx(locale, "这不是编程题，无需配置示例代码或测试样例。", "This is not a programming problem, so solution code and test cases are not required.")}
           </div>
         ) : section === "tests" ? (
           <TestCaseEditor
@@ -381,14 +413,17 @@ function SingleQuestionView({
                 setSaved(false);
                 if (section === "content") setStem(event.target.value);
                 else if (section === "rubric") setCriterion(event.target.value);
-                else setReferenceAnswer(event.target.value);
+                else if (section === "answer") setReferenceAnswer(event.target.value);
+                else setSolutionCode(event.target.value);
               }}
               rows={section === "content" ? 10 : 8}
               disabled={readOnly || updateProblem.isPending}
               placeholder={section === "answer"
                 ? tx(locale, "输入参考答案；如需批量导入，请在后续独立导入页处理。", "Enter the reference answer. Bulk import is handled in a separate flow.")
-                : tx(locale, "输入内容", "Enter content")}
-              className="min-h-[210px] w-full resize-y rounded-lg border bg-background px-4 py-3 text-sm font-normal leading-6 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                : section === "code"
+                  ? tx(locale, "输入可运行的示例正确代码。", "Enter runnable reference solution code.")
+                  : tx(locale, "输入内容", "Enter content")}
+              className={cn("min-h-[210px] w-full resize-y rounded-lg border bg-background px-4 py-3 text-sm font-normal leading-6 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15", section === "code" && "font-mono text-xs")}
             />
           </label>
         )}
@@ -402,7 +437,7 @@ function SingleQuestionView({
         <Button
           type="button"
           variant="secondary"
-          disabled={updateProblem.isPending || (!dirty && problem.review_status === "confirmed")}
+          disabled={updateProblem.isPending || (!dirty && sectionConfirmed)}
           onClick={() => void save(true)}
         >
           {updateProblem.isPending ? <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Check aria-hidden="true" className="h-4 w-4" />}
@@ -460,7 +495,7 @@ function AllQuestionsView({
               <span className="font-semibold">{problemLabel(problem, locale)}</span>
               <span className="text-xs text-muted-foreground">{problem.type || tx(locale, "未分类", "Uncategorized")}</span>
             </div>
-            <ReviewBadge status={problem.review_status} locale={locale} />
+            <SectionReviewBadge problem={problem} section={section} locale={locale} />
           </div>
           <div className="mt-3 rounded-md bg-slate-50 px-4 py-3 dark:bg-slate-900/30">
             <SectionPreview problem={problem} section={section} locale={locale} />
@@ -476,7 +511,13 @@ function SectionPreview({ problem, section, locale }: { problem: ProblemInfo; se
     const count = problem.test_cases?.length ?? 0;
     return <p className="text-sm text-muted-foreground">{count > 0 ? tx(locale, `${count} 个测试样例`, `${count} test case(s)`) : tx(locale, "缺少测试样例", "Missing test cases")}</p>;
   }
-  const value = section === "content" ? problem.stem : section === "rubric" ? problem.criterion : problem.reference_answer;
+  const value = section === "content"
+    ? problem.stem
+    : section === "rubric"
+      ? problem.criterion
+      : section === "answer"
+        ? problem.reference_answer
+        : problem.solution_code;
   return value ? <MarkdownMath className="line-clamp-4">{value}</MarkdownMath> : <p className="text-sm text-warning">{tx(locale, "缺失", "Missing")}</p>;
 }
 
@@ -562,6 +603,62 @@ function QuestionArrow({ taskId, section, target, direction, searchParams, local
   );
 }
 
+function AIProvenanceNotice({ provenance, locale }: { provenance: AICompletionProvenance; locale: string }) {
+  const status = provenance.review_status;
+  const statusLabel = status === "confirmed"
+    ? tx(locale, "AI 生成，已确认", "AI Generated, Confirmed")
+    : status === "edited"
+      ? tx(locale, "AI 生成，已修改待确认", "AI Generated, Edited")
+      : tx(locale, "AI 生成，待确认", "AI Generated, Needs Confirmation");
+  return (
+    <div className="mb-4 flex min-w-0 flex-col gap-2 rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 items-center gap-2">
+        <Sparkles aria-hidden="true" className="h-4 w-4 shrink-0 text-amber-600" />
+        <span className="text-xs font-semibold text-amber-800 dark:text-amber-200">{statusLabel}</span>
+      </div>
+      {provenance.provider_id ? <span className="truncate text-[11px] text-muted-foreground" title={provenance.provider_id}>{provenance.provider_id}</span> : null}
+    </div>
+  );
+}
+
+function SectionReviewBadge({ problem, section, locale }: { problem: ProblemInfo; section: PreparationSection; locale: string }) {
+  if (section === "content") return <ReviewBadge status={problem.review_status} locale={locale} />;
+  const target = sectionTarget(section);
+  if (!target) return null;
+  if (problem.ai_completion_provenance?.[target]) {
+    return <SlotAIReviewBadge problem={problem} section={section} locale={locale} />;
+  }
+  const material = materialSlotProvenance(problem, target);
+  if (!material) return null;
+  const label = material.review_status === "confirmed"
+    ? tx(locale, "导入资料已确认", "Imported, Confirmed")
+    : material.review_status === "edited"
+      ? tx(locale, "导入资料已修改", "Imported, Edited")
+      : tx(locale, "导入资料待确认", "Imported, Review");
+  return (
+    <span className={cn(
+      "rounded-full px-2.5 py-1 text-xs font-medium",
+      material.review_status === "confirmed"
+        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+        : "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300",
+    )}>
+      {label}
+    </span>
+  );
+}
+
+function SlotAIReviewBadge({ problem, section, locale }: { problem: ProblemInfo; section: PreparationSection; locale: string }) {
+  const target = sectionTarget(section);
+  const provenance = target ? problem.ai_completion_provenance?.[target] : undefined;
+  if (!provenance) return null;
+  const label = provenance.review_status === "confirmed"
+    ? tx(locale, "AI 已确认", "AI Confirmed")
+    : provenance.review_status === "edited"
+      ? tx(locale, "AI 已修改", "AI Edited")
+      : tx(locale, "AI 待确认", "AI Review");
+  return <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium", provenance.review_status === "confirmed" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300")}>{label}</span>;
+}
+
 function ReviewBadge({ status, locale }: { status?: ProblemInfo["review_status"]; locale: string }) {
   if (status === "confirmed") return <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">{tx(locale, "已确认", "Confirmed")}</span>;
   if (status === "edited") return <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">{tx(locale, "已修改待确认", "Edited, Needs Confirmation")}</span>;
@@ -574,6 +671,35 @@ function LoadingPanel() {
 
 function isPreparationSection(value?: string): value is PreparationSection {
   return Boolean(value && SECTIONS.includes(value as PreparationSection));
+}
+
+function sectionTarget(section: PreparationSection): AICompletionTarget | null {
+  if (section === "rubric") return "criterion";
+  if (section === "answer") return "reference_answer";
+  if (section === "code") return "solution_code";
+  if (section === "tests") return "test_cases";
+  return null;
+}
+
+function materialSlotProvenance(problem: ProblemInfo, target: AICompletionTarget) {
+  if (target === "solution_code") return undefined;
+  return problem.material_provenance?.[target];
+}
+
+function sectionReviewStatus(problem: ProblemInfo, section: PreparationSection) {
+  if (section === "content") return problem.review_status;
+  const target = sectionTarget(section);
+  if (!target) return undefined;
+  return problem.ai_completion_provenance?.[target]?.review_status
+    ?? materialSlotProvenance(problem, target)?.review_status;
+}
+
+function isSectionMissing(problem: ProblemInfo, section: PreparationSection): boolean {
+  if (section === "rubric") return !problem.criterion?.trim();
+  if (section === "answer") return !problem.reference_answer?.trim();
+  if (section === "code") return isProgrammingProblem(problem) && !problem.solution_code?.trim();
+  if (section === "tests") return isProgrammingProblem(problem) && (problem.test_cases?.length ?? 0) === 0;
+  return false;
 }
 
 function buildSectionHref(taskId: string, questionId: string, section: PreparationSection, params: URLSearchParams): string {
@@ -598,10 +724,11 @@ function filterProblems(problems: ProblemInfo[], rawQuery: string): ProblemInfo[
   return problems.filter((problem) => tokens.every((token) => {
     if (["缺标答", "missing-answer", "no-answer"].includes(token)) return !problem.reference_answer?.trim();
     if (["缺评分", "缺标准", "missing-rubric"].includes(token)) return !problem.criterion?.trim();
+    if (["缺代码", "缺示例代码", "missing-code"].includes(token)) return isProgrammingProblem(problem) && !problem.solution_code?.trim();
     if (["编程题", "编程", "programming"].includes(token)) return isProgrammingProblem(problem);
     if (["已确认", "confirmed"].includes(token)) return problem.review_status === "confirmed";
     if (["待确认", "needs-review"].includes(token)) return problem.review_status !== "confirmed";
-    const haystack = [problem.number, problem.q_id, problem.type, problem.stem, problem.criterion, problem.reference_answer ?? ""].join(" ").toLocaleLowerCase();
+    const haystack = [problem.number, problem.q_id, problem.type, problem.stem, problem.criterion, problem.reference_answer ?? "", problem.solution_code ?? ""].join(" ").toLocaleLowerCase();
     return haystack.includes(token);
   }));
 }

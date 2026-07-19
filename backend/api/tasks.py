@@ -43,6 +43,9 @@ from pydantic import BaseModel, Field
 
 from backend.auth import require_teacher
 from backend.models import (
+    AICompletionCandidate,
+    AICompletionJob,
+    AICompletionTarget,
     CourseMaterial,
     GradingJob,
     MaterialImportCandidate,
@@ -56,10 +59,10 @@ from backend.models import (
     is_programming_question_type,
 )
 from backend.state import (
-    CourseMaterialStore, JobStore, MaterialImportStore, ProblemSourceDraftStore, ResourceQuotaError,
+    AICompletionStore, CourseMaterialStore, JobStore, MaterialImportStore, ProblemSourceDraftStore, ResourceQuotaError,
     TagStore, TaskStore,
     get_course_material_store, get_course_store, get_job_store,
-    get_material_import_store, get_problem_source_draft_store, get_tag_store, get_task_store,
+    get_ai_completion_store, get_material_import_store, get_problem_source_draft_store, get_tag_store, get_task_store,
 )
 from backend.llm.registry import ExpertRegistry, ExpertRegistryView, get_expert_registry
 from backend.agents.ingest_agent import (
@@ -68,6 +71,7 @@ from backend.agents.ingest_agent import (
     parse_reference_to_per_question,
     parse_test_cases_to_per_question,
     parse_material_import_to_candidates,
+    generate_missing_question_materials,
 )
 from backend.agents.grading_agent import grade_batch
 from backend.tools.file_processing import (
@@ -133,6 +137,7 @@ class UpdateProblemRequest(BaseModel):
     stem: Optional[str] = None
     criterion: Optional[str] = None
     reference_answer: Optional[str] = None
+    solution_code: Optional[str] = None
     test_cases: Optional[List[TestCase]] = None
     review_status: Optional[Literal["needs_review", "edited", "confirmed"]] = None
 
@@ -145,6 +150,12 @@ class ApplyMaterialImportRequest(BaseModel):
     accepted_candidate_ids: List[str] = Field(default_factory=list, max_length=200)
     overwrite_candidate_ids: List[str] = Field(default_factory=list, max_length=200)
     expected_workflow_revision: int = Field(ge=0)
+
+
+class ConfirmAICompletionRequest(BaseModel):
+    target_ids: List[str] = Field(min_length=1, max_length=200)
+    expected_workflow_revision: int = Field(ge=0)
+    test_case_count: int = Field(default=6, ge=1, le=12)
 
 
 class UpdateStudentAnswerRequest(BaseModel):
@@ -197,6 +208,7 @@ def _task_workflow_is_busy(task: Task) -> bool:
         or task.reference_parse_job_id
         or task.test_cases_parse_job_id
         or task.material_import_job_id
+        or task.ai_completion_job_id
     )
 
 
@@ -223,6 +235,10 @@ _PROBLEM_SOURCE_DRAFT_TTL_SECONDS = 2 * 60 * 60
 _MATERIAL_IMPORT_TTL_SECONDS = 2 * 60 * 60
 _MATERIAL_IMPORT_MAX_FIELD_CHARACTERS = 100_000
 _MATERIAL_IMPORT_MAX_TEST_CASE_CHARACTERS = 200_000
+_AI_COMPLETION_TTL_SECONDS = 2 * 60 * 60
+_AI_COMPLETION_MAX_TEXT_CHARACTERS = 100_000
+_AI_COMPLETION_MAX_TEST_CASE_CHARACTERS = 200_000
+_AI_COMPLETION_MAX_GENERATED_BYTES = 2 * 1024 * 1024
 _PROBLEM_SOURCE_EXTENSIONS = {".pdf", ".txt", ".md"}
 _PROBLEM_SOURCE_MAX_CHARACTERS = 400_000
 _PROBLEM_SOURCE_MAX_ESTIMATED_TOKENS = 120_000
@@ -1012,6 +1028,7 @@ def delete_task(
     job_store: JobStore = Depends(get_job_store),
     source_draft_store: ProblemSourceDraftStore = Depends(get_problem_source_draft_store),
     import_store: MaterialImportStore = Depends(get_material_import_store),
+    ai_completion_store: AICompletionStore = Depends(get_ai_completion_store),
 ):
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
@@ -1025,6 +1042,8 @@ def delete_task(
         t.test_cases_parse_job_id,
         t.material_import_job_id,
         t.last_material_import_job_id,
+        t.ai_completion_job_id,
+        t.last_ai_completion_job_id,
         t.last_failed_job_id,
     }:
         if job_id:
@@ -1038,6 +1057,7 @@ def delete_task(
         retriever.remove_task(task_id)
     source_draft_store.delete_for_task(task_id)
     import_store.delete_for_task(task_id)
+    ai_completion_store.delete_for_task(task_id)
     task_store.delete(task_id)
     return {"status": "success"}
 
@@ -1974,6 +1994,529 @@ def apply_material_import(
     }
 
 
+# ─── Q-09 AI completion (confirm missing scope, then atomic missing-only write) ─
+
+_AI_COMPLETION_LABELS: Dict[AICompletionTarget, str] = {
+    "criterion": "评分标准",
+    "reference_answer": "标答",
+    "solution_code": "示例正确代码",
+    "test_cases": "结构化测试样例",
+}
+
+
+def _ai_completion_slot_confirmed(problem: Dict[str, Any], target: str) -> bool:
+    for provenance_key in ("ai_completion_provenance", "material_provenance"):
+        provenance = problem.get(provenance_key)
+        if not isinstance(provenance, dict):
+            continue
+        value = provenance.get(target)
+        if isinstance(value, dict) and value.get("review_status") == "confirmed":
+            return True
+    return False
+
+
+def _ai_completion_slot_missing(problem: Dict[str, Any], target: str) -> bool:
+    if _ai_completion_slot_confirmed(problem, target):
+        return False
+    if target == "test_cases":
+        return not bool(problem.get(target))
+    return not bool(str(problem.get(target) or "").strip())
+
+
+def _list_ai_completion_targets(task: Task) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    for q_id, raw_problem in task.problem_data.items():
+        if not isinstance(raw_problem, dict):
+            continue
+        normalized_q_id = str(raw_problem.get("q_id") or q_id)
+        if len(normalized_q_id) > 120 or ":" in normalized_q_id:
+            continue
+        targets: List[AICompletionTarget] = ["criterion", "reference_answer"]
+        if is_programming_question_type(raw_problem.get("type")):
+            targets.extend(["solution_code", "test_cases"])
+        for target in targets:
+            if not _ai_completion_slot_missing(raw_problem, target):
+                continue
+            rows.append({
+                "target_id": f"{normalized_q_id}:{target}",
+                "q_id": normalized_q_id,
+                "question_number": str(
+                    raw_problem.get("number") or normalized_q_id
+                )[:160],
+                "question_type": str(raw_problem.get("type") or "")[:160],
+                "target": target,
+                "label": _AI_COMPLETION_LABELS[target],
+            })
+    return rows[:200]
+
+
+def _ai_completion_fingerprint(
+    *,
+    task_id: str,
+    base_workflow_revision: int,
+    target_ids: List[str],
+    test_case_count: int,
+) -> str:
+    payload = {
+        "task_id": task_id,
+        "base_workflow_revision": base_workflow_revision,
+        "target_ids": sorted(set(target_ids)),
+        "test_case_count": test_case_count,
+        "overwrite_policy": "missing_only",
+        "generation_contract": "q09-v1",
+    }
+    return hashlib.sha256(json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _ai_completion_job_response(
+    job: AICompletionJob,
+    task: Task,
+    progress: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    empty_summary = {
+        "requested_count": len(job.target_ids),
+        "generated_count": 0,
+        "applied_count": 0,
+        "skipped_count": 0,
+        "invalid_count": 0,
+        "by_target": {
+            "criterion": 0,
+            "reference_answer": 0,
+            "solution_code": 0,
+            "test_cases": 0,
+        },
+    }
+    return {
+        "job_id": job.job_id,
+        "task_id": job.task_id,
+        "status": job.status,
+        "overwrite_policy": "missing_only",
+        "target_ids": list(job.target_ids),
+        "summary": {**empty_summary, **dict(job.summary)},
+        "applied_target_ids": list(job.applied_target_ids),
+        "skipped_target_ids": list(job.skipped_target_ids),
+        "error": job.error,
+        "progress": progress,
+        "workflow_revision": task.workflow_revision,
+        "created_at": job.created_at,
+        "completed_at": job.completed_at,
+        "expires_at": job.expires_at,
+        "storage": "memory",
+    }
+
+
+@router.get("/{task_id}/ai-completions/preflight")
+def preflight_ai_completion(
+    task_id: str,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+):
+    """List the exact missing Q-09 scope without selecting or calling a model."""
+
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    if task.status != "problems_ready" or not task.problem_data:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "ai_completion_requires_problems_ready"},
+        )
+    missing = _list_ai_completion_targets(task)
+    by_target = {
+        target: sum(1 for item in missing if item["target"] == target)
+        for target in _AI_COMPLETION_LABELS
+    }
+    return {
+        "status": "ready",
+        "task_id": task.task_id,
+        "overwrite_policy": "missing_only",
+        "missing_targets": missing,
+        "summary": {
+            "question_count": len(task.problem_data),
+            "missing_count": len(missing),
+            "by_target": by_target,
+        },
+        "workflow_revision": task.workflow_revision,
+        "provider_call_performed": False,
+        "storage": "memory",
+    }
+
+
+def _normalize_ai_completion_candidates(
+    raw_candidates: List[Any],
+    *,
+    job_id: str,
+    selected_targets: Dict[str, Dict[str, str]],
+    test_case_count: int,
+) -> List[AICompletionCandidate]:
+    normalized: Dict[str, AICompletionCandidate] = {}
+    generated_bytes = 0
+    for raw_candidate in raw_candidates[:200]:
+        raw = (
+            raw_candidate.model_dump()
+            if hasattr(raw_candidate, "model_dump")
+            else dict(raw_candidate)
+            if isinstance(raw_candidate, dict)
+            else {}
+        )
+        target_id = str(raw.get("target_id") or "")
+        selected = selected_targets.get(target_id)
+        if selected is None or target_id in normalized:
+            continue
+        q_id = str(raw.get("q_id") or "")
+        target = str(raw.get("target") or "")
+        if q_id != selected["q_id"] or target != selected["target"]:
+            continue
+        text_value: Optional[str] = None
+        test_cases: Optional[List[TestCase]] = None
+        if target == "test_cases":
+            try:
+                test_cases = [
+                    TestCase.model_validate({
+                        **case,
+                        "source": "llm_generated",
+                    })
+                    for case in list(raw.get("test_cases") or [])[:test_case_count]
+                    if isinstance(case, dict)
+                ]
+            except (TypeError, ValueError):
+                continue
+            serialized = sum(
+                len(case.model_dump_json().encode("utf-8")) for case in test_cases
+            )
+            if not test_cases or serialized > _AI_COMPLETION_MAX_TEST_CASE_CHARACTERS:
+                continue
+            candidate_bytes = serialized
+        else:
+            text_value = str(raw.get("text_value") or "").strip()
+            if not text_value or len(text_value) > _AI_COMPLETION_MAX_TEXT_CHARACTERS:
+                continue
+            candidate_bytes = len(text_value.encode("utf-8"))
+        if generated_bytes + candidate_bytes > _AI_COMPLETION_MAX_GENERATED_BYTES:
+            continue
+        candidate_digest = hashlib.sha256(
+            f"{job_id}:{target_id}".encode("utf-8")
+        ).hexdigest()[:20]
+        normalized[target_id] = AICompletionCandidate(
+            candidate_id=f"aic_{candidate_digest}",
+            target_id=target_id,
+            q_id=q_id,
+            target=target,  # type: ignore[arg-type]
+            text_value=text_value,
+            test_cases=test_cases,
+        )
+        generated_bytes += candidate_bytes
+    return list(normalized.values())
+
+
+async def _run_ai_completion(
+    *,
+    task_id: str,
+    owner_id: str,
+    problems_data: Dict[str, Dict[str, Any]],
+    selected_targets: List[Dict[str, str]],
+    test_case_count: int,
+    provider: Any,
+    provider_id: str,
+    job_id: str,
+    request_fingerprint: str,
+    expected_revision: int,
+    task_store: TaskStore,
+    completion_store: AICompletionStore,
+) -> None:
+    reporter = get_or_create_reporter(job_id, total_questions=len(problems_data))
+    target_ids = [item["target_id"] for item in selected_targets]
+    try:
+        await reporter.set_stage_progress(
+            "scope_confirmed",
+            total_steps=3,
+            completed_steps=0,
+            message=f"Teacher confirmed {len(target_ids)} missing material fields",
+        )
+        raw_candidates = await generate_missing_question_materials(
+            problems_data=problems_data,
+            requested_targets=selected_targets,
+            test_case_count=test_case_count,
+            provider=provider,
+            reporter=reporter,
+        )
+        candidates = _normalize_ai_completion_candidates(
+            list(raw_candidates),
+            job_id=job_id,
+            selected_targets={item["target_id"]: item for item in selected_targets},
+            test_case_count=test_case_count,
+        )
+        await reporter.set_stage_progress(
+            "applying_missing_materials",
+            total_steps=3,
+            completed_steps=3,
+            message="Applying only fields that are still missing",
+        )
+        outcome, committed, summary = task_store.complete_ai_completion(
+            task_id,
+            expected_revision=expected_revision,
+            job_id=job_id,
+            request_fingerprint=request_fingerprint,
+            requested_target_ids=target_ids,
+            candidates=candidates,
+            provider_id=provider_id,
+        )
+        if outcome != "done" or committed is None or committed.owner_id != owner_id:
+            completion_store.set_error(job_id, "ai_completion_superseded")
+            task_store.fail_ai_completion(
+                task_id,
+                job_id=job_id,
+                error="ai_completion_superseded",
+            )
+            await reporter.set_error(
+                "The task changed before generated materials could be stored. Review and retry."
+            )
+            return
+        completion_store.set_done(job_id, summary=summary)
+        await reporter.set_phase("done")
+    except Exception as exc:
+        logger.error(
+            "[task:%s] AI completion failed; exception_type=%s",
+            task_id,
+            type(exc).__name__,
+        )
+        completion_store.set_error(job_id, "ai_completion_failed")
+        failed_task = task_store.fail_ai_completion(
+            task_id,
+            job_id=job_id,
+            error="ai_completion_failed",
+        )
+        if failed_task is None:
+            remove_reporter(job_id)
+        else:
+            await reporter.set_error(
+                "AI material generation failed. Check the model configuration and retry."
+            )
+
+
+@router.post("/{task_id}/ai-completions/confirm")
+async def confirm_ai_completion(
+    task_id: str,
+    req: ConfirmAICompletionRequest,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    completion_store: AICompletionStore = Depends(get_ai_completion_store),
+    registry: ExpertRegistry = Depends(get_expert_registry),
+):
+    """Start Q-09 only after the teacher confirms the explicit missing scope."""
+
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    _require_task_llm_principal(task, current)
+    target_ids = list(dict.fromkeys(value.strip() for value in req.target_ids if value.strip()))
+    if not target_ids:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "ai_completion_targets_required"},
+        )
+    if any(len(target_id) > 180 for target_id in target_ids):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "unknown_ai_completion_target"},
+        )
+    fingerprint = _ai_completion_fingerprint(
+        task_id=task.task_id,
+        base_workflow_revision=req.expected_workflow_revision,
+        target_ids=target_ids,
+        test_case_count=req.test_case_count,
+    )
+
+    if task.ai_completion_job_id:
+        return {
+            "status": "already_running",
+            "job_id": task.ai_completion_job_id,
+            "task_id": task.task_id,
+            "request_fingerprint": fingerprint,
+            "workflow_revision": task.workflow_revision,
+            **(
+                {"code": "different_scope_running"}
+                if task.pending_ai_completion_fingerprint != fingerprint
+                else {}
+            ),
+        }
+    if task.ai_completion_fingerprint == fingerprint and task.last_ai_completion_job_id:
+        existing = completion_store.get_for_owner_task(
+            task.last_ai_completion_job_id,
+            owner_id=task.owner_id,
+            task_id=task.task_id,
+        )
+        if existing is not None:
+            return {
+                "status": "already_done",
+                "job_id": existing.job_id,
+                "task_id": task.task_id,
+                "request_fingerprint": fingerprint,
+                "workflow_revision": task.workflow_revision,
+            }
+        task = task_store.expire_ai_completion_job(
+            task_id,
+            job_id=task.last_ai_completion_job_id,
+            request_fingerprint=fingerprint,
+        ) or task
+
+    if task.status != "problems_ready" or not task.problem_data:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "ai_completion_requires_problems_ready"},
+        )
+    available = {
+        item["target_id"]: item for item in _list_ai_completion_targets(task)
+    }
+    if any(target_id not in available for target_id in target_ids):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "unknown_ai_completion_target"},
+        )
+    provider = registry.for_owner(current.id).pick_default()
+    if provider is None:
+        raise HTTPException(503, detail="No LLM provider configured. Add an API key first.")
+
+    job_id = str(uuid.uuid4())
+    now = time.time()
+    job = AICompletionJob(
+        job_id=job_id,
+        task_id=task.task_id,
+        owner_id=task.owner_id,
+        request_fingerprint=fingerprint,
+        target_ids=target_ids,
+        test_case_count=req.test_case_count,
+        provider_id=provider.provider_id,
+        status="running",
+        created_at=now,
+        expires_at=now + _AI_COMPLETION_TTL_SECONDS,
+    )
+    try:
+        completion_store.create(job)
+    except ResourceQuotaError as exc:
+        raise HTTPException(exc.status_code, detail={"code": exc.code}) from exc
+
+    expected_revision = req.expected_workflow_revision
+    if (
+        task.last_failed_ai_completion_fingerprint == fingerprint
+        and task.ai_completion_retry_revision == task.workflow_revision
+    ):
+        expected_revision = task.workflow_revision
+    outcome, current_task = task_store.begin_ai_completion(
+        task_id,
+        expected_revision=expected_revision,
+        job_id=job_id,
+        request_fingerprint=fingerprint,
+    )
+    if outcome != "started":
+        completion_store.delete(job_id)
+        if current_task is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+        if outcome in {
+            "already_running", "different_ai_completion_running", "already_done",
+        }:
+            existing_job_id = (
+                current_task.ai_completion_job_id
+                if outcome in {"already_running", "different_ai_completion_running"}
+                else current_task.last_ai_completion_job_id
+            )
+            return {
+                "status": (
+                    "already_running"
+                    if outcome == "different_ai_completion_running"
+                    else outcome
+                ),
+                "job_id": existing_job_id,
+                "task_id": current_task.task_id,
+                "request_fingerprint": fingerprint,
+                "workflow_revision": current_task.workflow_revision,
+                **(
+                    {"code": "different_scope_running"}
+                    if outcome == "different_ai_completion_running"
+                    else {}
+                ),
+            }
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": outcome,
+                "workflow_revision": current_task.workflow_revision,
+            },
+        )
+
+    selected_targets = [available[target_id] for target_id in target_ids]
+    problem_snapshot = json.loads(json.dumps(task.problem_data, ensure_ascii=False))
+    started_revision = current_task.workflow_revision if current_task else task.workflow_revision
+    asyncio.create_task(_run_ai_completion(
+        task_id=task.task_id,
+        owner_id=task.owner_id,
+        problems_data=problem_snapshot,
+        selected_targets=selected_targets,
+        test_case_count=req.test_case_count,
+        provider=provider,
+        provider_id=provider.provider_id,
+        job_id=job_id,
+        request_fingerprint=fingerprint,
+        expected_revision=started_revision,
+        task_store=task_store,
+        completion_store=completion_store,
+    ))
+    return {
+        "status": "started",
+        "job_id": job_id,
+        "task_id": task.task_id,
+        "request_fingerprint": fingerprint,
+        "workflow_revision": started_revision,
+    }
+
+
+@router.get("/{task_id}/ai-completions/{job_id}")
+async def get_ai_completion(
+    task_id: str,
+    job_id: str,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    completion_store: AICompletionStore = Depends(get_ai_completion_store),
+):
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    job = completion_store.get_for_owner_task(
+        job_id,
+        owner_id=task.owner_id,
+        task_id=task.task_id,
+    )
+    if job is None:
+        fingerprint = None
+        if task.last_ai_completion_job_id == job_id:
+            fingerprint = (
+                task.pending_ai_completion_fingerprint
+                or task.ai_completion_fingerprint
+                or task.last_failed_ai_completion_fingerprint
+            )
+        if fingerprint:
+            task_store.expire_ai_completion_job(
+                task_id,
+                job_id=job_id,
+                request_fingerprint=fingerprint,
+            )
+            raise HTTPException(
+                status.HTTP_410_GONE,
+                detail={"code": "ai_completion_job_expired"},
+            )
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "ai_completion_job_not_found"},
+        )
+    progress = None
+    reporter = get_reporter(job_id)
+    if reporter is not None:
+        progress = (await reporter.snapshot()).model_dump()
+    return _ai_completion_job_response(job, task, progress)
+
+
 # ─── Extract problems (with idempotency) ─────────────────────────────────────
 
 async def _run_extract(
@@ -2064,6 +2607,8 @@ async def task_extract_problems(
             t.test_cases_parse_job_id,
             t.material_import_job_id,
             t.last_material_import_job_id,
+            t.ai_completion_job_id,
+            t.last_ai_completion_job_id,
             t.last_failed_job_id,
         }
         if prior_job_id
@@ -2867,6 +3412,8 @@ async def task_state(
         active_job_id = t.last_failed_job_id
     elif t.material_import_job_id:
         active_job_id = t.material_import_job_id
+    elif t.ai_completion_job_id:
+        active_job_id = t.ai_completion_job_id
 
     progress = None
     if active_job_id:
@@ -2877,7 +3424,11 @@ async def task_state(
 
     out["progress"] = progress
     out["active_job_id"] = active_job_id
-    out["active_operation"] = "material_import" if t.material_import_job_id else None
+    out["active_operation"] = (
+        "material_import" if t.material_import_job_id
+        else "ai_completion" if t.ai_completion_job_id
+        else None
+    )
     return out
 
 
@@ -2911,7 +3462,7 @@ def update_problem(
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
 ):
-    """Update a single problem's stem, criterion, and/or review status.
+    """Update one stem/content state and/or independently reviewed material slots.
 
     Allowed in any post-extract status (problems_ready through graded). The
     new text is stored verbatim — math delimiters / markdown are preserved
@@ -2936,18 +3487,21 @@ def update_problem(
 
     # Patch in-place; updates Task.updated_at via TaskStore
     new_problem = dict(t.problem_data[q_id])
-    content_edited = (
-        ("stem" in req.model_fields_set and req.stem is not None)
-        or ("criterion" in req.model_fields_set and req.criterion is not None)
-        or "reference_answer" in req.model_fields_set
-        or "test_cases" in req.model_fields_set
-    )
+    new_problem.setdefault("review_status", "needs_review")
+    stem_edited = "stem" in req.model_fields_set and req.stem is not None
+    material_fields = {
+        target
+        for target in ("criterion", "reference_answer", "solution_code", "test_cases")
+        if target in req.model_fields_set
+    }
     if req.stem is not None:
         new_problem["stem"] = req.stem
     if req.criterion is not None:
         new_problem["criterion"] = req.criterion
     if "reference_answer" in req.model_fields_set:
         new_problem["reference_answer"] = req.reference_answer
+    if "solution_code" in req.model_fields_set:
+        new_problem["solution_code"] = req.solution_code
     if "test_cases" in req.model_fields_set:
         new_problem["test_cases"] = (
             [case.model_dump() for case in req.test_cases]
@@ -2955,6 +3509,9 @@ def update_problem(
             else None
         )
     material_provenance = dict(new_problem.get("material_provenance") or {})
+    ai_completion_provenance = dict(
+        new_problem.get("ai_completion_provenance") or {}
+    )
     for target in ("criterion", "reference_answer", "test_cases"):
         if target not in req.model_fields_set:
             continue
@@ -2965,8 +3522,17 @@ def update_problem(
                 "review_status": "edited",
                 "updated_at": time.time(),
             }
+    for target in ("criterion", "reference_answer", "solution_code", "test_cases"):
+        if target not in req.model_fields_set:
+            continue
+        current_provenance = ai_completion_provenance.get(target)
+        if isinstance(current_provenance, dict):
+            ai_completion_provenance[target] = {
+                **current_provenance,
+                "review_status": "edited",
+                "updated_at": time.time(),
+            }
     if req.review_status == "confirmed":
-        new_problem["review_status"] = "confirmed"
         for target in ("criterion", "reference_answer", "test_cases"):
             if target not in req.model_fields_set:
                 continue
@@ -2977,15 +3543,30 @@ def update_problem(
                     "review_status": "confirmed",
                     "updated_at": time.time(),
                 }
-    elif content_edited:
-        # Recognition content changed manually, so it is no longer untouched
-        # even when a caller also asks to move it back to needs_review. Only an
-        # explicit confirmation may confirm a content edit in the same CAS.
-        new_problem["review_status"] = "edited"
-    elif req.review_status is not None:
+        for target in ("criterion", "reference_answer", "solution_code", "test_cases"):
+            if target not in req.model_fields_set:
+                continue
+            provenance = ai_completion_provenance.get(target)
+            if isinstance(provenance, dict):
+                ai_completion_provenance[target] = {
+                    **provenance,
+                    "review_status": "confirmed",
+                    "updated_at": time.time(),
+                }
+
+    # ProblemInfo.review_status belongs only to recognized stem/content.
+    # A slot-only request uses review_status to confirm the included provenance
+    # records and must never confirm or edit the stem as a side effect.
+    if stem_edited:
+        new_problem["review_status"] = (
+            "confirmed" if req.review_status == "confirmed" else "edited"
+        )
+    elif not material_fields and req.review_status is not None:
         new_problem["review_status"] = req.review_status
     if material_provenance:
         new_problem["material_provenance"] = material_provenance
+    if ai_completion_provenance:
+        new_problem["ai_completion_provenance"] = ai_completion_provenance
 
     new_problems = dict(t.problem_data)
     new_problems[q_id] = new_problem

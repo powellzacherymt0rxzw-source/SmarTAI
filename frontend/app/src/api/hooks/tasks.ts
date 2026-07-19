@@ -39,11 +39,14 @@ export function useTaskHistory(query: TaskHistoryQuery) {
   });
 }
 
-export function useTask(taskId?: string) {
+export function useTask(taskId?: string, options: { pollAICompletion?: boolean } = {}) {
   return useQuery({
     queryKey: taskKeys.detail(taskId ?? ""),
     queryFn: () => tasksApi.getTask(taskId as string),
     enabled: Boolean(taskId),
+    refetchInterval: options.pollAICompletion
+      ? (query) => query.state.data?.ai_completion_job_id ? 1_500 : false
+      : false,
   });
 }
 
@@ -146,29 +149,16 @@ export function useUpdateProblem() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      taskId,
-      qId,
-      stem,
-      criterion,
-      review_status,
-      reference_answer,
-      test_cases,
-    }: {
+    mutationFn: ({ taskId, qId, ...patch }: {
       taskId: string;
       qId: string;
       stem?: string;
       criterion?: string;
       review_status?: "needs_review" | "edited" | "confirmed";
       reference_answer?: string | null;
+      solution_code?: string | null;
       test_cases?: import("@/types").TestCase[] | null;
-    }) => tasksApi.updateProblem(taskId, qId, {
-      stem,
-      criterion,
-      review_status,
-      reference_answer,
-      test_cases,
-    }),
+    }) => tasksApi.updateProblem(taskId, qId, patch),
     onSuccess: (_data, variables) => {
       invalidateTask(queryClient, variables.taskId);
     },

@@ -536,8 +536,9 @@ def test_apply_missing_only_and_rejects_nonprogramming_test_cases(client, monkey
     assert not stored["q1"].get("test_cases")
     assert stored["q2"]["reference_answer"] == "Teacher answer stays"
     assert stored["q2"]["test_cases"][0]["expected_output"] == "4"
-    assert stored["q1"]["review_status"] == "edited"
-    assert stored["q2"]["review_status"] == "edited"
+    # Importing preparation slots must not alter independent stem/content review.
+    assert stored["q1"]["review_status"] == "confirmed"
+    assert stored["q2"]["review_status"] == "confirmed"
     answer_candidate = next(
         item for item in plan["candidates"]
         if item["q_id"] == "q1" and item["target"] == "reference_answer"
@@ -719,3 +720,4 @@ def test_confirming_one_slot_does_not_confirm_other_imported_slots(client):
     provenance = confirmed.json()["problem"]["material_provenance"]
     assert provenance["reference_answer"]["review_status"] == "confirmed"
     assert provenance["criterion"]["review_status"] == "pending"
+    assert confirmed.json()["problem"]["review_status"] == "confirmed"

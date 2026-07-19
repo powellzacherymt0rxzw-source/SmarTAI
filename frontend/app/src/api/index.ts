@@ -1,4 +1,5 @@
 export * as analyticsApi from "./analytics";
+export * as aiCompletionsApi from "./aiCompletions";
 export * as authApi from "./auth";
 export * as coursesApi from "./courses";
 export * from "./client";

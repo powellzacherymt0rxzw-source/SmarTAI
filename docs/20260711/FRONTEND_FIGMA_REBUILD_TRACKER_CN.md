@@ -8,7 +8,7 @@
 >
 > R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 >
-> 当前阶段：Q-01 Add Problems/Figma 04 已完成提交 `58ddb91`；Q-02/Figma 05 与 Q-03/Figma 06 已按用户 2026-07-16 的矩阵优先纠正完成实现、真实保存契约、桌面/移动 PNG 与自动交互验收，等待用户视觉确认。详细记录见 `docs/20260716/Q02_Q03_QUESTION_PREPARATION_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
+> 当前阶段：Q-08 已以提交 `f6cc23f` 推送；Q-09 AI 补全缺失资料已完成代码、契约、构建和本地桌面/移动浏览器验收，等待用户视觉确认后归档。详细记录见 `docs/20260719/Q09_AI_COMPLETE_MISSING_MATERIALS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 
 ---
 
@@ -377,11 +377,11 @@
 - [~] Q03 题目准备总览只做覆盖率、筛选、排序和分流。工程完成：2026-07-16；标题/七步后立即进入覆盖率工具栏和矩阵，桌面首屏显示 8 行，移动端页面无横向溢出；组合筛选与 URL/返回状态已验证，等待用户视觉确认。
 - [~] Q04 题干校对独立 route。工程完成边界：独立短页、单题/全部当前维度、筛选、上一/下一题、真实保存、未保存离开保护已接入；来源/版本字段随后续阶段实现。
 - [~] Q05 评分标准独立 route。工程完成边界同 Q04；编辑后真实进入 `edited`，明确确认进入 `confirmed`。
-- [~] Q06 标答独立 route。工程完成边界：可真实逐题保存和确认；Q08 已于 2026-07-16 接入带 `answer` 目标的真实入口，Q09 AI 补全仍未实现、不放死链接。
+- [~] Q06 标答独立 route。工程完成边界：可真实逐题保存和确认；Q08 与 Q09 均已接入带 `answer` 目标的真实入口，AI 结果逐槽待确认。
 - [~] Q07 测试样例与脚本独立 route。工程完成边界：编程题可结构化编辑并真实保存，非编程题显示不适用；正式脚本/来源字段仍待后端模型。
 - [~] Q08 批量导入资料保留已按题整理/从原文提取，术语统一为资料。工程完成：2026-07-16；Figma 08 单卡选择页、独立事实进度页、独立候选复核矩阵以及 `preflight -> plan -> review -> CAS apply` 真实闭环完成。默认 `missing_only`，仅 `exact` 且不覆盖现有内容的候选默认选中；`possible` 与覆盖冲突必须教师主动确认。后端全量 `160 passed, 1 skipped`，前端 lint/typecheck/build 通过；受当前 Codex 本机授权/使用额度限制，本轮未取得新的浏览器 PNG，等待用户视觉确认。
-- [ ] Q09 AI 补全缺失资料独立 route 与进度状态。
-- [~] Q-FLOW 真实验证上传/选择来源 -> 模式 -> 识别进度 -> 总览 -> 精确子页 -> 返回总览。进展：2026-07-16；Q02/Q03 状态门禁、精确子页、标答保存并确认、返回矩阵覆盖率更新已由 Playwright 验证；Q08 的零模型预检、owner/BYOK 计划生成、事实进度、`exact/possible`、默认不覆盖、显式覆盖、失败重试、过期恢复、逐槽 provenance 与 CAS 应用已由 10 个契约测试覆盖。Q08 本轮未取得浏览器 PNG，不把工程回归写成视觉验收。
+- [~] Q09 AI 补全缺失资料独立 route 与进度状态。工程与浏览器验收完成：2026-07-19；范围确认、事实进度、missing-only CAS、逐槽 provenance、后台刷新和恢复路径已接入，等待用户视觉确认。
+- [~] Q-FLOW 真实验证上传/选择来源 -> 模式 -> 识别进度 -> 总览 -> 精确子页 -> 返回总览。进展：2026-07-19；Q02/Q03 状态门禁、精确子页、标答保存并确认、返回矩阵覆盖率更新已由 Playwright 验证；Q08 闭环由 10 个契约测试覆盖且保留无 PNG 的历史边界；Q09 范围页和 Q03 返回入口已由隔离 Playwright 验证，正式生成、失败、幂等、并发和 CAS 由 7 个契约测试覆盖。
 
 ### 6.2 Q-02 / Q-03 阶段工程与自动验收记录（2026-07-16）
 
@@ -390,7 +390,7 @@
 - Q-03 证据：`q03-matrix-first-1440x900.png`、`q03-matrix-first-390x844.png`；移动根页面 `innerWidth=scrollWidth=bodyScrollWidth=390`，矩阵自身局部滚动。
 - 功能证据：`缺标答 编程题` 从 8 题筛到 Q6；Q2 标答在独立页保存并确认后，矩阵标答覆盖率从 50% 更新为 63%；全部视图仅显示当前标答维度和当前筛选结果。
 - 工程证据：前端 lint/visible-scope/typecheck、临时 production build、`git diff --check` 通过；后端全量 `150 passed, 1 skipped, 7 warnings`。
-- Q02/Q03 阶段当时的阶段门：工程和自动验收完成，等待用户视觉确认；当时 Q08/Q09 均未完成。该记录已由下方 6.3 的 Q08 工程结果继续推进，Q09 仍保持未完成。
+- Q02/Q03 阶段当时的阶段门：工程和自动验收完成，等待用户视觉确认；当时 Q08/Q09 均未完成。该历史记录已由下方 6.3 的 Q08 和 6.4 的 Q09 工程结果继续推进。
 
 ### 6.3 Q-08 批量导入资料阶段工程记录（2026-07-16）
 
@@ -402,6 +402,17 @@
 - 工程证据：Q08 契约 `10 passed`；后端全量 `160 passed, 1 skipped, 9 warnings`；前端 visible-scope/lint/typecheck 与 Vite `456 modules` production build 通过；`git diff --check` 通过。
 - 浏览器证据边界：用户已授权 Playwright，但隔离端口与 Chromium 启动被当前 Codex 本机授权/使用额度拒绝；没有调用真实模型、改写用户任务或伪造 PNG。当前阶段保持 `[~]`，等待用户从题目准备总览打开 Q08 做视觉确认。
 - 真实未实现：资料分组、多文件/整库、DOCX、图片/扫描/OCR、正式测试脚本、持久数据库/对象存储以及 Q09。
+
+### 6.4 Q-09 AI 补全缺失资料阶段工程记录（2026-07-19）
+
+- 详细决策与验收矩阵：`docs/20260719/Q09_AI_COMPLETE_MISSING_MATERIALS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
+- Figma 边界：Q09 不是 Figma 09 课程资料库；选择页组合 Figma 08 的 `900×558` 单卡，进度页组合 Figma 05 的 `800×430` 事实卡，完成后回到 Figma 06 矩阵并使用 Figma 07/17 的逐槽确认与 BYOK 恢复语义。
+- 页面拆分：`/questions/ai-complete` 只显示预检和精确范围；`/questions/ai-complete/progress/:jobId` 只显示事实进度；完成后失效刷新 task query 并返回 `/questions`，没有第二个 apply 页面，也没有把表单追加在 Q03 下方。
+- 后端边界：预检零 provider；教师确认后一次结构化调用；TaskStore 单锁 `missing_only` CAS 只写仍为空的评分标准、标答、编程题示例正确代码和测试样例。示例代码不执行，正式测试脚本不伪造。
+- 状态与恢复：AI 逐槽 provenance 为 pending/edited/confirmed，题干复核与资料确认解耦；同范围幂等、不同范围复用在途 job、stale 重新预检、后台完成/失败刷新、过期和重试均有恢复路径。
+- 工程证据：Q09 定向 `7 passed`；后端全量 `167 passed, 1 skipped, 9 warnings`；前端 visible-scope/lint/typecheck 与 Vite `461 modules` production build 通过；`git diff --check` 通过；终审修复后无已知 P0/P1。
+- 浏览器证据：隔离本地教师 fixture 下完成 `q09-ai-complete-1440x900.png`、`q09-ai-complete-390x844.png` 和 `q09-question-matrix-entry-1440x900.png`；桌面均无滚动，移动 `innerWidth=scrollWidth=bodyScrollWidth=390`。只读取预检和页面状态，未点击生成、未调用真实模型、未改写用户任务。
+- 当前状态：代码、工程与浏览器验收完成，等待用户视觉确认，故保持 `[~]`。真实未实现仍包括 OCR/DOCX、测试脚本执行、资料分组/多文件整库和持久存储。
 
 ---
 
