@@ -6,6 +6,7 @@ export * from "./health";
 export * from "./history";
 export * from "./kb";
 export * from "./lms";
+export * from "./materialImports";
 export * from "./progress";
 export * from "./problemSources";
 export * from "./task";

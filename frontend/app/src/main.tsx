@@ -52,6 +52,15 @@ const QuestionPreparationOverviewPage = React.lazy(() =>
 const QuestionPreparationDetailPage = React.lazy(() =>
   import("@/routes/tasks/QuestionPreparationDetailPage").then((module) => ({ default: module.QuestionPreparationDetailPage })),
 );
+const QuestionMaterialImportPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionMaterialImportPage").then((module) => ({ default: module.QuestionMaterialImportPage })),
+);
+const QuestionMaterialImportProgressPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionMaterialImportProgressPage").then((module) => ({ default: module.QuestionMaterialImportProgressPage })),
+);
+const QuestionMaterialImportReviewPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionMaterialImportReviewPage").then((module) => ({ default: module.QuestionMaterialImportReviewPage })),
+);
 
 function RouteFallback() {
   const { t } = useI18n();
@@ -90,6 +99,9 @@ const router = createBrowserRouter([
       { path: "tasks/:taskId/upload/:kind", element: routeElement(<TaskUploadPage />) },
       { path: "tasks/:taskId/problems/progress", element: routeElement(<ProblemRecognitionProgressPage />) },
       { path: "tasks/:taskId/questions", element: routeElement(<QuestionPreparationOverviewPage />) },
+      { path: "tasks/:taskId/questions/import", element: routeElement(<QuestionMaterialImportPage />) },
+      { path: "tasks/:taskId/questions/import/progress/:jobId", element: routeElement(<QuestionMaterialImportProgressPage />) },
+      { path: "tasks/:taskId/questions/import/review/:jobId", element: routeElement(<QuestionMaterialImportReviewPage />) },
       { path: "tasks/:taskId/questions/:questionId", element: <Navigate to="content" replace /> },
       { path: "tasks/:taskId/questions/:questionId/:section", element: routeElement(<QuestionPreparationDetailPage />) },
       { path: "tasks/:taskId/results", element: routeElement(<TaskResultsPage />) },

@@ -113,7 +113,17 @@ export function QuestionPreparationDetailPage() {
           </h1>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">{sectionMeta.description}</p>
         </div>
-        <span className="text-xs text-muted-foreground">{taskQuery.data?.name ?? ""}</span>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {section !== "content" ? (
+            <Link
+              to={`/tasks/${taskId}/questions/import?targets=${section === "rubric" ? "rubric" : section === "answer" ? "answer" : "tests"}`}
+              className="inline-flex h-8 items-center rounded-[7px] border bg-card px-3 text-xs font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {tx(locale, "批量导入此类资料", "Bulk Import This Material")}
+            </Link>
+          ) : null}
+          <span className="text-xs text-muted-foreground">{taskQuery.data?.name ?? ""}</span>
+        </div>
       </div>
       <NewTaskStepper currentStep={1} />
 

@@ -148,14 +148,15 @@ function isAllowedVisibleText(relativePath, line, rule) {
     rule.id === "visible-course-management" &&
     (
       relativePath === "src/routes/tasks/AddProblemsPage.tsx"
+      || relativePath === "src/routes/tasks/QuestionMaterialImportPage.tsx"
       || relativePath.startsWith("src/api/problemSources")
       || relativePath.startsWith("src/api/hooks/problemSources")
       || relativePath === "src/types/problemSources.ts"
       || (relativePath === "src/i18n/messages.ts" && /^\s*addProblems/.test(line))
     )
   ) {
-    // Q-01 may select real owner-scoped course-library material for the
-    // current task. It does not expose course CRUD, enrollment, or publishing.
+    // Q-01 and Q-08 may select real owner-scoped course-library material for
+    // the current task. They do not expose course CRUD, enrollment, or publishing.
     return true;
   }
 

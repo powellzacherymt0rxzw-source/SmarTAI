@@ -167,13 +167,21 @@ export function QuestionPreparationOverviewPage() {
             <p className="text-xs text-muted-foreground">
               {t("questionOverviewShowingPrefix")}{selection.rows.length}{t("questionOverviewShowingSeparator")}{rows.length}{t("questionOverviewShowingSuffix")}
             </p>
-            <Link
-              to={`/tasks/${taskId}/upload/submissions`}
-              className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
-            >
-              {t("questionOverviewContinue")}
-              <ChevronRight aria-hidden="true" className="h-4 w-4" />
-            </Link>
+            <div className="grid gap-2 sm:flex sm:items-center">
+              <Link
+                to={`/tasks/${taskId}/questions/import`}
+                className="inline-flex h-9 w-full items-center justify-center rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
+              >
+                {t("questionOverviewBulkImport")}
+              </Link>
+              <Link
+                to={`/tasks/${taskId}/upload/submissions`}
+                className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
+              >
+                {t("questionOverviewContinue")}
+                <ChevronRight aria-hidden="true" className="h-4 w-4" />
+              </Link>
+            </div>
           </footer>
         ) : null}
       </section>

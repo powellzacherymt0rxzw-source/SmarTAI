@@ -35,6 +35,11 @@ export const problemSourceKeys = {
     ["problem-sources", "library", taskId, scope, query] as const,
 };
 
+export const materialImportKeys = {
+  all: ["material-imports"] as const,
+  detail: (taskId: string, jobId: string) => ["material-imports", taskId, jobId] as const,
+};
+
 export const expertKeys = {
   all: ["experts"] as const,
   list: () => ["experts", "list"] as const,

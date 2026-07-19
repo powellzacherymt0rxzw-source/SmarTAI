@@ -16,9 +16,14 @@ from threading import RLock
 from backend.models import (
     CourseMaterial,
     GradingJob,
+    MaterialImportCandidate,
+    MaterialImportDraft,
+    MaterialImportPlan,
+    MaterialFieldProvenance,
     ProblemSourceDraft,
     Tag,
     Task,
+    is_programming_question_type,
 )
 
 logger = logging.getLogger(__name__)
@@ -295,6 +300,7 @@ class TaskStore:
             task.status in {"parsing_submissions", "grading"}
             or task.reference_parse_job_id
             or task.test_cases_parse_job_id
+            or task.material_import_job_id
         ):
             return "workflow_busy"
         if cls._has_problem_replacement_artifacts(task) and not replace_confirmed:
@@ -415,6 +421,13 @@ class TaskStore:
             task.test_cases_file_hash = None
             task.test_cases_file_name = None
             task.test_cases_parse_job_id = None
+            task.material_import_job_id = None
+            task.pending_material_import_fingerprint = None
+            task.material_import_fingerprint = None
+            task.last_material_import_job_id = None
+            task.material_import_error = None
+            task.last_failed_material_import_fingerprint = None
+            task.material_import_retry_revision = None
             task.status = "problems_ready"
             task.error = None
             task.last_failed_job_id = None
@@ -473,6 +486,7 @@ class TaskStore:
                 task.status in {"extracting_problems", "grading"}
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
+                or task.material_import_job_id
             ):
                 return "workflow_busy", task
             if task.status not in {"problems_ready", "submissions_ready", "graded", "error"}:
@@ -568,6 +582,7 @@ class TaskStore:
                 task.status in {"extracting_problems", "parsing_submissions", "grading"}
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
+                or task.material_import_job_id
             ):
                 return "workflow_busy", task
             if not task.problem_data:
@@ -603,6 +618,237 @@ class TaskStore:
             task.updated_at = time.time()
             return task
 
+    def begin_material_import(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        job_id: str,
+        request_fingerprint: str,
+    ) -> tuple[str, Optional[Task]]:
+        """Atomically reserve the Q-08 plan-building slot for one task."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return "not_found", None
+            if task.material_import_job_id:
+                if task.pending_material_import_fingerprint == request_fingerprint:
+                    return "already_running", task
+                return "different_material_import_running", task
+            if (
+                task.pending_material_import_fingerprint == request_fingerprint
+                and task.last_material_import_job_id
+            ):
+                return "plan_ready", task
+            if task.material_import_fingerprint == request_fingerprint:
+                return "already_done", task
+            if task.workflow_revision != expected_revision:
+                return "stale_revision", task
+            if (
+                task.status in {"extracting_problems", "parsing_submissions", "grading"}
+                or task.reference_parse_job_id
+                or task.test_cases_parse_job_id
+            ):
+                return "workflow_busy", task
+            if task.status != "problems_ready" or not task.problem_data:
+                return "invalid_state", task
+            task.material_import_job_id = job_id
+            task.pending_material_import_fingerprint = request_fingerprint
+            task.material_import_error = None
+            task.last_failed_job_id = None
+            task.last_failed_material_import_fingerprint = None
+            task.material_import_retry_revision = None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return "started", task
+
+    def finish_material_import_plan(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+    ) -> Optional[Task]:
+        """Publish plan readiness without changing question data."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.material_import_job_id != job_id:
+                return None
+            task.material_import_job_id = None
+            task.last_material_import_job_id = job_id
+            task.material_import_error = None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return task
+
+    def fail_material_import(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+        error: str,
+    ) -> Optional[Task]:
+        """Release a failed Q-08 attempt while retaining all prior fields."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.material_import_job_id != job_id:
+                return None
+            task.material_import_job_id = None
+            task.last_failed_material_import_fingerprint = (
+                task.pending_material_import_fingerprint
+            )
+            task.pending_material_import_fingerprint = None
+            task.last_material_import_job_id = job_id
+            task.material_import_error = error
+            task.last_failed_job_id = job_id
+            task.workflow_revision += 1
+            task.material_import_retry_revision = task.workflow_revision
+            task.updated_at = time.time()
+            return task
+
+    def expire_material_import_plan(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+        request_fingerprint: str,
+    ) -> Optional[Task]:
+        """Release a task pointer whose terminal review plan expired."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if (
+                task is None
+                or task.material_import_job_id is not None
+                or task.last_material_import_job_id != job_id
+                or (
+                    task.pending_material_import_fingerprint != request_fingerprint
+                    and task.material_import_fingerprint != request_fingerprint
+                )
+            ):
+                return task
+            task.last_failed_material_import_fingerprint = request_fingerprint
+            task.pending_material_import_fingerprint = None
+            task.material_import_fingerprint = None
+            task.material_import_error = "material_import_plan_expired"
+            task.workflow_revision += 1
+            task.material_import_retry_revision = task.workflow_revision
+            task.updated_at = time.time()
+            return task
+
+    def apply_material_import(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        job_id: str,
+        request_fingerprint: str,
+        candidates: List[MaterialImportCandidate],
+        accepted_candidate_ids: set[str],
+        overwrite_candidate_ids: set[str],
+        source_kind: str,
+        source_filename: str,
+        library_material_id: Optional[str],
+    ) -> tuple[str, Optional[Task], Dict[str, Any]]:
+        """Apply accepted Q-08 candidates in one lock-held workflow CAS."""
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return "not_found", None, {}
+            if task.workflow_revision != expected_revision:
+                return "stale_revision", task, {}
+            if (
+                task.status != "problems_ready"
+                or task.material_import_job_id
+                or task.reference_parse_job_id
+                or task.test_cases_parse_job_id
+            ):
+                return "workflow_busy", task, {}
+            if (
+                task.last_material_import_job_id != job_id
+                or task.pending_material_import_fingerprint != request_fingerprint
+            ):
+                return "plan_superseded", task, {}
+
+            new_problem_data = dict(task.problem_data)
+            applied: List[str] = []
+            conflicts: List[str] = []
+            skipped: List[str] = []
+            for candidate in candidates:
+                if candidate.candidate_id not in accepted_candidate_ids:
+                    continue
+                current = new_problem_data.get(candidate.q_id)
+                if not isinstance(current, dict):
+                    skipped.append(candidate.candidate_id)
+                    continue
+                if (
+                    candidate.target == "test_cases"
+                    and not is_programming_question_type(current.get("type"))
+                ):
+                    skipped.append(candidate.candidate_id)
+                    continue
+
+                existing = False
+                if candidate.target in {"criterion", "reference_answer"}:
+                    existing = bool(str(current.get(candidate.target) or "").strip())
+                    value: Any = (candidate.text_value or "").strip()
+                    if not value:
+                        skipped.append(candidate.candidate_id)
+                        continue
+                else:
+                    existing = bool(current.get("test_cases"))
+                    value = [case.model_dump() for case in (candidate.test_cases or [])]
+                    if not value:
+                        skipped.append(candidate.candidate_id)
+                        continue
+
+                if existing and candidate.candidate_id not in overwrite_candidate_ids:
+                    conflicts.append(candidate.candidate_id)
+                    continue
+                patched = dict(current)
+                patched[candidate.target] = value
+                patched["review_status"] = "edited"
+                provenance = dict(patched.get("material_provenance") or {})
+                provenance[candidate.target] = MaterialFieldProvenance(
+                    import_job_id=job_id,
+                    candidate_id=candidate.candidate_id,
+                    source_kind=source_kind,  # type: ignore[arg-type]
+                    source_filename=source_filename,
+                    library_material_id=library_material_id,
+                    confidence=candidate.confidence,
+                    match_status=candidate.match_status,
+                    source_excerpt=candidate.source_excerpt,
+                    source_location=candidate.source_location,
+                    reason=candidate.reason,
+                    review_status="pending",
+                ).model_dump()
+                patched["material_provenance"] = provenance
+                new_problem_data[candidate.q_id] = patched
+                applied.append(candidate.candidate_id)
+
+            task.problem_data = new_problem_data
+            task.material_import_job_id = None
+            task.pending_material_import_fingerprint = None
+            task.material_import_fingerprint = request_fingerprint
+            task.last_material_import_job_id = job_id
+            task.material_import_error = None
+            task.last_failed_job_id = None
+            task.last_failed_material_import_fingerprint = None
+            task.material_import_retry_revision = None
+            task.workflow_revision += 1
+            task.updated_at = time.time()
+            return "applied", task, {
+                "applied_candidate_ids": applied,
+                "conflict_candidate_ids": conflicts,
+                "skipped_candidate_ids": skipped,
+                "applied_count": len(applied),
+                "conflict_count": len(conflicts),
+                "skipped_count": len(skipped),
+            }
+
     def begin_grading(
         self,
         task_id: str,
@@ -624,6 +870,7 @@ class TaskStore:
                 task.status in {"extracting_problems", "parsing_submissions"}
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
+                or task.material_import_job_id
             ):
                 return "workflow_busy", task
             if task.status not in {"submissions_ready", "graded", "error"}:
@@ -686,6 +933,7 @@ class TaskStore:
                 }
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
+                or task.material_import_job_id
             ):
                 return None
             for key, value in fields.items():
@@ -893,8 +1141,190 @@ class ProblemSourceDraftStore:
                 self._drafts.pop(token, None)
 
 
+class MaterialImportStore:
+    """Bounded owner-scoped storage for Q-08 drafts and review plans."""
+
+    MAX_DRAFTS = 1000
+    MAX_DRAFTS_PER_OWNER = 20
+    MAX_PLANS = 1000
+    MAX_PLANS_PER_OWNER = 20
+    MAX_RESIDENT_BYTES = 64 * 1024 * 1024
+    MAX_RESIDENT_BYTES_PER_OWNER = 8 * 1024 * 1024
+    PLAN_TERMINAL_TTL = 2 * 60 * 60
+
+    def __init__(self) -> None:
+        self._drafts: OrderedDict[str, MaterialImportDraft] = OrderedDict()
+        self._plans: OrderedDict[str, MaterialImportPlan] = OrderedDict()
+        self._lock = RLock()
+
+    @staticmethod
+    def _draft_bytes(draft: MaterialImportDraft) -> int:
+        return draft.resident_bytes
+
+    @staticmethod
+    def _plan_bytes(plan: MaterialImportPlan) -> int:
+        return len(plan.model_dump_json().encode("utf-8"))
+
+    def create_draft(self, draft: MaterialImportDraft) -> MaterialImportDraft:
+        with self._lock:
+            self._prune_expired()
+            owner_rows = [item for item in self._drafts.values() if item.owner_id == draft.owner_id]
+            owner_bytes = sum(self._draft_bytes(item) for item in owner_rows)
+            total_bytes = sum(self._draft_bytes(item) for item in self._drafts.values())
+            size = self._draft_bytes(draft)
+            if size > self.MAX_RESIDENT_BYTES_PER_OWNER:
+                raise ResourceQuotaError("material_import_draft_too_large", 413)
+            if len(owner_rows) >= self.MAX_DRAFTS_PER_OWNER:
+                raise ResourceQuotaError("material_import_draft_owner_count_limit", 429)
+            if len(self._drafts) >= self.MAX_DRAFTS:
+                raise ResourceQuotaError("material_import_draft_global_count_limit", 429)
+            if owner_bytes + size > self.MAX_RESIDENT_BYTES_PER_OWNER:
+                raise ResourceQuotaError("material_import_draft_owner_bytes_limit", 413)
+            if total_bytes + size > self.MAX_RESIDENT_BYTES:
+                raise ResourceQuotaError("material_import_draft_global_bytes_limit", 413)
+            self._drafts[draft.source_token] = draft
+            return draft
+
+    def get_draft_for_owner_task(
+        self,
+        source_token: str,
+        *,
+        owner_id: str,
+        task_id: str,
+    ) -> Optional[MaterialImportDraft]:
+        with self._lock:
+            self._prune_expired()
+            draft = self._drafts.get(source_token)
+            if draft is None or draft.owner_id != owner_id or draft.task_id != task_id:
+                return None
+            return draft
+
+    def create_plan(self, plan: MaterialImportPlan) -> MaterialImportPlan:
+        with self._lock:
+            self._prune_expired()
+            owner_rows = [item for item in self._plans.values() if item.owner_id == plan.owner_id]
+            if len(owner_rows) >= self.MAX_PLANS_PER_OWNER:
+                raise ResourceQuotaError("material_import_plan_owner_count_limit", 429)
+            if len(self._plans) >= self.MAX_PLANS:
+                raise ResourceQuotaError("material_import_plan_global_count_limit", 429)
+            self._plans[plan.job_id] = plan
+            return plan
+
+    def get_plan_for_owner_task(
+        self,
+        job_id: str,
+        *,
+        owner_id: str,
+        task_id: str,
+    ) -> Optional[MaterialImportPlan]:
+        with self._lock:
+            self._prune_expired()
+            plan = self._plans.get(job_id)
+            if plan is None or plan.owner_id != owner_id or plan.task_id != task_id:
+                return None
+            return plan.model_copy(deep=True)
+
+    def set_plan_ready(
+        self,
+        job_id: str,
+        *,
+        candidates: List[MaterialImportCandidate],
+        summary: Dict[str, Any],
+    ) -> Optional[MaterialImportPlan]:
+        with self._lock:
+            self._prune_expired()
+            plan = self._plans.get(job_id)
+            if plan is None or plan.status != "running":
+                return None
+            candidate_plan = plan.model_copy(deep=True)
+            candidate_plan.candidates = list(candidates)
+            candidate_plan.summary = dict(summary)
+            candidate_plan.status = "ready"
+            candidate_plan.completed_at = time.time()
+            candidate_plan.expires_at = time.time() + self.PLAN_TERMINAL_TTL
+            new_size = self._plan_bytes(candidate_plan)
+            owner_bytes = sum(
+                self._plan_bytes(item)
+                for key, item in self._plans.items()
+                if key != job_id and item.owner_id == plan.owner_id
+            )
+            total_bytes = sum(
+                self._plan_bytes(item)
+                for key, item in self._plans.items()
+                if key != job_id
+            )
+            if new_size > self.MAX_RESIDENT_BYTES_PER_OWNER:
+                raise ResourceQuotaError("material_import_plan_too_large", 413)
+            if owner_bytes + new_size > self.MAX_RESIDENT_BYTES_PER_OWNER:
+                raise ResourceQuotaError("material_import_plan_owner_bytes_limit", 413)
+            if total_bytes + new_size > self.MAX_RESIDENT_BYTES:
+                raise ResourceQuotaError("material_import_plan_global_bytes_limit", 413)
+            self._plans[job_id] = candidate_plan
+            return candidate_plan.model_copy(deep=True)
+
+    def set_plan_error(self, job_id: str, error: str) -> Optional[MaterialImportPlan]:
+        with self._lock:
+            self._prune_expired()
+            plan = self._plans.get(job_id)
+            if plan is None:
+                return None
+            plan.status = "error"
+            plan.error = error
+            plan.completed_at = time.time()
+            plan.expires_at = time.time() + self.PLAN_TERMINAL_TTL
+            return plan.model_copy(deep=True)
+
+    def set_plan_applied(
+        self,
+        job_id: str,
+        applied_candidate_ids: List[str],
+        summary: Dict[str, Any],
+    ) -> Optional[MaterialImportPlan]:
+        with self._lock:
+            plan = self._plans.get(job_id)
+            if plan is None or plan.status not in {"ready", "applied"}:
+                return None
+            plan.status = "applied"
+            plan.applied_candidate_ids = list(applied_candidate_ids)
+            plan.summary = {**plan.summary, **summary}
+            plan.completed_at = time.time()
+            plan.expires_at = time.time() + self.PLAN_TERMINAL_TTL
+            return plan.model_copy(deep=True)
+
+    def delete_plan(self, job_id: str) -> None:
+        with self._lock:
+            self._plans.pop(job_id, None)
+
+    def delete_for_task(self, task_id: str) -> None:
+        with self._lock:
+            for token, draft in list(self._drafts.items()):
+                if draft.task_id == task_id:
+                    self._drafts.pop(token, None)
+            for job_id, plan in list(self._plans.items()):
+                if plan.task_id == task_id:
+                    self._plans.pop(job_id, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._drafts.clear()
+            self._plans.clear()
+
+    def _prune_expired(self) -> None:
+        now = time.time()
+        for token, draft in list(self._drafts.items()):
+            if draft.expires_at <= now:
+                self._drafts.pop(token, None)
+        for job_id, plan in list(self._plans.items()):
+            # A running provider call owns the task's workflow slot. Do not
+            # silently evict its plan and strand that slot; completion/failure
+            # will transition it to a TTL-prunable terminal state.
+            if plan.status != "running" and plan.expires_at <= now:
+                self._plans.pop(job_id, None)
+
+
 _course_material_store = CourseMaterialStore()
 _problem_source_draft_store = ProblemSourceDraftStore()
+_material_import_store = MaterialImportStore()
 
 
 def get_course_material_store() -> CourseMaterialStore:
@@ -903,6 +1333,10 @@ def get_course_material_store() -> CourseMaterialStore:
 
 def get_problem_source_draft_store() -> ProblemSourceDraftStore:
     return _problem_source_draft_store
+
+
+def get_material_import_store() -> MaterialImportStore:
+    return _material_import_store
 
 
 # ─── Tag store (owner-scoped task labels) ────────────────────────────────────

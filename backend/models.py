@@ -74,6 +74,20 @@ class Correction(BaseModel):
 
 # ─── Problem & student answer models ──────────────────────────────────────────
 
+MaterialImportTarget = Literal["criterion", "reference_answer", "test_cases"]
+
+def is_programming_question_type(value: Any) -> bool:
+    """Recognize legacy English and current Chinese programming type labels."""
+
+    normalized = "".join(
+        character for character in str(value or "").strip().casefold()
+        if character not in {" ", "_", "-"}
+    )
+    return normalized in {
+        "编程题", "程序设计题", "programming", "program", "code", "coding",
+        "programmingquestion", "codingquestion",
+    }
+
 class TestCase(BaseModel):
     """A single sandbox test case for programming problems.
 
@@ -114,6 +128,24 @@ class TestCase(BaseModel):
     )
 
 
+class MaterialFieldProvenance(BaseModel):
+    """Durable per-slot audit metadata for an applied Q-08 candidate."""
+
+    import_job_id: str
+    candidate_id: str
+    source_kind: Literal["upload", "library"]
+    source_filename: str
+    library_material_id: Optional[str] = None
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    match_status: Literal["exact", "possible"] = "possible"
+    source_excerpt: str = Field(default="", max_length=600)
+    source_location: str = Field(default="", max_length=160)
+    reason: str = Field(default="", max_length=300)
+    review_status: Literal["pending", "edited", "confirmed"] = "pending"
+    imported_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+
 class ProblemInfo(BaseModel):
     q_id: str = Field(description="Unique question ID, starting from 'q1'")
     number: str = Field(description="Display question number, e.g. '1', '2.3', 'III.'")
@@ -138,6 +170,13 @@ class ProblemInfo(BaseModel):
         description="Teacher-supplied sandbox test cases (programming problems). "
                     "If None, ProgrammingSkill will scan keywords + ask the LLM to "
                     "generate up to 8 cases with a sandbox_feasible flag.",
+    )
+    material_provenance: Dict[MaterialImportTarget, MaterialFieldProvenance] = Field(
+        default_factory=dict,
+        description=(
+            "Per preparation slot provenance retained after a Q-08 plan expires. "
+            "It is audit metadata and does not change grading behavior."
+        ),
     )
 
     @field_validator("q_id", mode="before")
@@ -395,6 +434,73 @@ class ProblemSourceDraft(BaseModel):
     expires_at: float
 
 
+class MaterialImportDraft(BaseModel):
+    """Short-lived, owner/task-scoped source for a Q-08 material import.
+
+    It deliberately uses a different token/model from ``ProblemSourceDraft``:
+    a material-import token must never be accepted by the destructive problem
+    extraction endpoint.
+    """
+
+    source_token: str
+    task_id: str
+    owner_id: str
+    source_kind: Literal["upload", "library"]
+    targets: List[MaterialImportTarget]
+    structure_mode: ProblemStructureMode
+    extraction_hint: str = ""
+    filename: str
+    content_type: str = "application/octet-stream"
+    size_bytes: int
+    content_sha256: str
+    text: Optional[str] = Field(default=None, repr=False)
+    library_material_id: Optional[str] = None
+    base_workflow_revision: int = 0
+    resident_bytes: int = 0
+    candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    created_at: float = Field(default_factory=time.time)
+    expires_at: float
+
+
+class MaterialImportCandidate(BaseModel):
+    """One reviewed field proposal produced by the material-matching model."""
+
+    candidate_id: str
+    q_id: str
+    target: MaterialImportTarget
+    text_value: Optional[str] = None
+    test_cases: Optional[List[TestCase]] = None
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    match_status: Literal["exact", "possible"] = "possible"
+    source_excerpt: str = Field(default="", max_length=600)
+    source_location: str = Field(default="", max_length=160)
+    reason: str = Field(default="", max_length=300)
+    would_overwrite: bool = False
+
+
+class MaterialImportPlan(BaseModel):
+    """Bounded in-memory review plan; no question data is changed until apply."""
+
+    job_id: str
+    task_id: str
+    owner_id: str
+    request_fingerprint: str
+    source_kind: Literal["upload", "library"]
+    source_filename: str
+    library_material_id: Optional[str] = None
+    targets: List[MaterialImportTarget]
+    structure_mode: ProblemStructureMode
+    extraction_hint: str = ""
+    status: Literal["running", "ready", "applied", "error"] = "running"
+    candidates: List[MaterialImportCandidate] = Field(default_factory=list)
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    error: Optional[str] = None
+    applied_candidate_ids: List[str] = Field(default_factory=list)
+    created_at: float = Field(default_factory=time.time)
+    completed_at: Optional[float] = None
+    expires_at: float
+
+
 TagColor = Literal["slate", "blue", "teal", "green", "amber", "rose", "violet"]
 
 
@@ -539,6 +645,18 @@ class Task(BaseModel):
     test_cases_file_name: Optional[str] = None
     test_cases_parse_job_id: Optional[str] = None
 
+    # Q-08 material import is a two-phase auxiliary workflow. The background
+    # job only builds a review plan; accepted candidates are applied later in
+    # one workflow-revision CAS. Pending and successful fingerprints are kept
+    # separate so a failed attempt can be retried with the same source.
+    material_import_job_id: Optional[str] = None
+    pending_material_import_fingerprint: Optional[str] = None
+    material_import_fingerprint: Optional[str] = None
+    last_material_import_job_id: Optional[str] = None
+    material_import_error: Optional[str] = None
+    last_failed_material_import_fingerprint: Optional[str] = None
+    material_import_retry_revision: Optional[int] = None
+
     # ─── Task-scoped knowledge base (RAG MVP) ─────────────────────────────
     # Mirror metadata for documents uploaded via POST /tasks/{id}/kb. The
     # actual chunks + vectors live in backend.rag.store.InMemoryTaskRetriever
@@ -578,6 +696,9 @@ class Task(BaseModel):
             "test_cases_file_name": self.test_cases_file_name,
             "reference_parse_job_id": self.reference_parse_job_id,
             "test_cases_parse_job_id": self.test_cases_parse_job_id,
+            "material_import_job_id": self.material_import_job_id,
+            "last_material_import_job_id": self.last_material_import_job_id,
+            "material_import_error": self.material_import_error,
             "problem_count": len(self.problem_data),
             "student_count": len(self.student_data),
             "kb_docs": dict(self.kb_docs),

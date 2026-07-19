@@ -42,12 +42,24 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from backend.auth import require_teacher
-from backend.models import CourseMaterial, GradingJob, ProblemSourceDraft, Task, TestCase, User
+from backend.models import (
+    CourseMaterial,
+    GradingJob,
+    MaterialImportCandidate,
+    MaterialImportDraft,
+    MaterialImportPlan,
+    MaterialImportTarget,
+    ProblemSourceDraft,
+    Task,
+    TestCase,
+    User,
+    is_programming_question_type,
+)
 from backend.state import (
-    CourseMaterialStore, JobStore, ProblemSourceDraftStore, ResourceQuotaError,
+    CourseMaterialStore, JobStore, MaterialImportStore, ProblemSourceDraftStore, ResourceQuotaError,
     TagStore, TaskStore,
     get_course_material_store, get_course_store, get_job_store,
-    get_problem_source_draft_store, get_tag_store, get_task_store,
+    get_material_import_store, get_problem_source_draft_store, get_tag_store, get_task_store,
 )
 from backend.llm.registry import ExpertRegistry, ExpertRegistryView, get_expert_registry
 from backend.agents.ingest_agent import (
@@ -55,6 +67,7 @@ from backend.agents.ingest_agent import (
     parse_student_answers,
     parse_reference_to_per_question,
     parse_test_cases_to_per_question,
+    parse_material_import_to_candidates,
 )
 from backend.agents.grading_agent import grade_batch
 from backend.tools.file_processing import (
@@ -124,6 +137,16 @@ class UpdateProblemRequest(BaseModel):
     review_status: Optional[Literal["needs_review", "edited", "confirmed"]] = None
 
 
+class StartMaterialImportRequest(BaseModel):
+    source_token: str = Field(min_length=1, max_length=128)
+
+
+class ApplyMaterialImportRequest(BaseModel):
+    accepted_candidate_ids: List[str] = Field(default_factory=list, max_length=200)
+    overwrite_candidate_ids: List[str] = Field(default_factory=list, max_length=200)
+    expected_workflow_revision: int = Field(ge=0)
+
+
 class UpdateStudentAnswerRequest(BaseModel):
     """Edit a single student's parsed answer for a specific question.
 
@@ -173,6 +196,7 @@ def _task_workflow_is_busy(task: Task) -> bool:
         }
         or task.reference_parse_job_id
         or task.test_cases_parse_job_id
+        or task.material_import_job_id
     )
 
 
@@ -196,6 +220,9 @@ _SEMESTER_PATTERN = re.compile(
 )
 _PROBLEM_SOURCE_MAX_BYTES = 5 * 1024 * 1024
 _PROBLEM_SOURCE_DRAFT_TTL_SECONDS = 2 * 60 * 60
+_MATERIAL_IMPORT_TTL_SECONDS = 2 * 60 * 60
+_MATERIAL_IMPORT_MAX_FIELD_CHARACTERS = 100_000
+_MATERIAL_IMPORT_MAX_TEST_CASE_CHARACTERS = 200_000
 _PROBLEM_SOURCE_EXTENSIONS = {".pdf", ".txt", ".md"}
 _PROBLEM_SOURCE_MAX_CHARACTERS = 400_000
 _PROBLEM_SOURCE_MAX_ESTIMATED_TOKENS = 120_000
@@ -984,6 +1011,7 @@ def delete_task(
     task_store: TaskStore = Depends(get_task_store),
     job_store: JobStore = Depends(get_job_store),
     source_draft_store: ProblemSourceDraftStore = Depends(get_problem_source_draft_store),
+    import_store: MaterialImportStore = Depends(get_material_import_store),
 ):
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
@@ -995,6 +1023,8 @@ def delete_task(
         t.grading_job_id,
         t.reference_parse_job_id,
         t.test_cases_parse_job_id,
+        t.material_import_job_id,
+        t.last_material_import_job_id,
         t.last_failed_job_id,
     }:
         if job_id:
@@ -1007,6 +1037,7 @@ def delete_task(
     if isinstance(retriever, InMemoryTaskRetriever):
         retriever.remove_task(task_id)
     source_draft_store.delete_for_task(task_id)
+    import_store.delete_for_task(task_id)
     task_store.delete(task_id)
     return {"status": "success"}
 
@@ -1194,6 +1225,755 @@ async def preflight_problem_source(
     return response
 
 
+# ─── Q-08 bulk material import (review plan, then atomic apply) ─────────────
+
+def _parse_material_import_targets(raw: str) -> List[MaterialImportTarget]:
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "invalid_material_import_targets"},
+        ) from exc
+    allowed = {"criterion", "reference_answer", "test_cases"}
+    if not isinstance(parsed, list) or not parsed:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "material_import_targets_required"},
+        )
+    normalized: List[MaterialImportTarget] = []
+    for value in parsed:
+        if not isinstance(value, str) or value not in allowed:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "invalid_material_import_target"},
+            )
+        if value not in normalized:
+            normalized.append(value)  # type: ignore[arg-type]
+    return normalized
+
+
+def _material_import_fingerprint(draft: MaterialImportDraft) -> str:
+    payload = {
+        "base_workflow_revision": draft.base_workflow_revision,
+        "content_sha256": draft.content_sha256,
+        "source_kind": draft.source_kind,
+        "library_material_id": draft.library_material_id,
+        "targets": sorted(draft.targets),
+        "structure_mode": draft.structure_mode,
+        "extraction_hint": " ".join(draft.extraction_hint.split()),
+        "detected_candidate_ids": sorted(
+            str(candidate.get("candidate_id") or "")
+            for candidate in draft.candidates
+        ),
+        "overwrite_policy": "missing_only",
+    }
+    return hashlib.sha256(json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _material_import_plan_response(
+    plan: MaterialImportPlan,
+    task: Task,
+    progress: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "job_id": plan.job_id,
+        "task_id": plan.task_id,
+        "status": plan.status,
+        "request_fingerprint": plan.request_fingerprint,
+        "source": {
+            "kind": plan.source_kind,
+            "filename": plan.source_filename,
+            "library_material_id": plan.library_material_id,
+        },
+        "targets": list(plan.targets),
+        "structure_mode": plan.structure_mode,
+        "extraction_hint": plan.extraction_hint,
+        "overwrite_policy": "missing_only",
+        "candidates": [candidate.model_dump() for candidate in plan.candidates],
+        "summary": dict(plan.summary),
+        "error": plan.error,
+        "applied_candidate_ids": list(plan.applied_candidate_ids),
+        "progress": progress,
+        "workflow_revision": task.workflow_revision,
+        "created_at": plan.created_at,
+        "completed_at": plan.completed_at,
+        "expires_at": plan.expires_at,
+        "storage": "memory",
+    }
+
+
+@router.post("/{task_id}/material-imports/preflight")
+async def preflight_material_import(
+    task_id: str,
+    file: Optional[UploadFile] = File(default=None),
+    library_material_id: Optional[str] = Form(default=None),
+    targets: str = Form(...),
+    structure_mode: Literal["organized", "extract_from_source"] = Form(default="organized"),
+    extraction_hint: str = Form(default=""),
+    save_to_library: bool = Form(default=False),
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    material_store: CourseMaterialStore = Depends(get_course_material_store),
+    import_store: MaterialImportStore = Depends(get_material_import_store),
+):
+    """Validate one Q-08 source and prepare a zero-provider-call token."""
+
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    if task.status != "problems_ready" or not task.problem_data:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "material_import_requires_problems_ready"},
+        )
+    parsed_targets = _parse_material_import_targets(targets)
+    material_id = (library_material_id or "").strip() or None
+    if (file is None) == (material_id is None):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Provide exactly one of file or library_material_id.",
+        )
+    if file is None and save_to_library:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "save_to_library_requires_upload"},
+        )
+    hint = extraction_hint.strip()
+    if len(hint) > 2000:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="extraction_hint cannot exceed 2000 characters.",
+        )
+
+    saved_material: Optional[CourseMaterial] = None
+    saved_material_created = False
+    if file is not None:
+        filename, content_type, body, text, content_sha256 = await _read_problem_source_upload(file)
+        source_kind: Literal["upload", "library"] = "upload"
+        source_size_bytes = len(body)
+        if save_to_library:
+            if task.course_id is not None:
+                _validate_course_id(task.course_id, task.owner_id)
+            proposed = CourseMaterial(
+                material_id=f"material_{uuid.uuid4().hex[:12]}",
+                owner_id=task.owner_id,
+                course_id=task.course_id,
+                filename=filename,
+                content_type=content_type,
+                size_bytes=len(body),
+                sha256=content_sha256,
+                text=text,
+                resident_bytes=len(text.encode("utf-8")),
+            )
+            try:
+                saved_material, saved_material_created = material_store.create_or_get(proposed)
+            except ResourceQuotaError as exc:
+                raise HTTPException(exc.status_code, detail={"code": exc.code}) from exc
+            material_id = saved_material.material_id
+    else:
+        material = material_store.get_for_owner(material_id or "", task.owner_id)
+        if material is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Course material not found")
+        if material.course_id is not None:
+            _validate_course_id(material.course_id, task.owner_id)
+        filename = material.filename
+        content_type = material.content_type
+        source_size_bytes = material.size_bytes
+        content_sha256 = material.sha256
+        text = material.text
+        source_kind = "library"
+
+    local_candidates, not_found = _detect_problem_source_candidates(
+        text,
+        structure_mode=structure_mode,
+        extraction_hint=hint,
+    )
+    library_backed = material_id is not None
+    draft_text = None if library_backed else text
+    now = time.time()
+    draft = MaterialImportDraft(
+        source_token=f"mi_{uuid.uuid4().hex}",
+        task_id=task.task_id,
+        owner_id=task.owner_id,
+        source_kind=source_kind,
+        targets=parsed_targets,
+        structure_mode=structure_mode,
+        extraction_hint=hint,
+        filename=filename,
+        content_type=content_type,
+        size_bytes=source_size_bytes,
+        content_sha256=content_sha256,
+        text=draft_text,
+        library_material_id=material_id,
+        base_workflow_revision=task.workflow_revision,
+        resident_bytes=(
+            len((draft_text or "").encode("utf-8"))
+            + len(hint.encode("utf-8"))
+            + len(json.dumps(local_candidates, ensure_ascii=False).encode("utf-8"))
+        ),
+        candidates=local_candidates,
+        created_at=now,
+        expires_at=now + _MATERIAL_IMPORT_TTL_SECONDS,
+    )
+    try:
+        import_store.create_draft(draft)
+    except ResourceQuotaError as exc:
+        if saved_material_created and saved_material is not None:
+            material_store.delete_for_owner(saved_material.material_id, task.owner_id)
+        raise HTTPException(exc.status_code, detail={"code": exc.code}) from exc
+
+    response: Dict[str, Any] = {
+        "status": "ready",
+        "source_token": draft.source_token,
+        "source": {
+            "kind": source_kind,
+            "filename": filename,
+            "size_bytes": source_size_bytes,
+            "sha256": content_sha256,
+            "library_material_id": material_id,
+        },
+        "targets": list(parsed_targets),
+        "structure_mode": structure_mode,
+        "extraction_hint": hint,
+        "candidate_summary": {
+            "matched": [item for item in local_candidates if item["match_kind"] == "matched"],
+            "possible_matches": [
+                item for item in local_candidates if item["match_kind"] == "possible_match"
+            ],
+            "not_found": not_found,
+            "matching_method": "local_explicit_heading_detection",
+            "semantic_match_performed": False,
+        },
+        "base_workflow_revision": draft.base_workflow_revision,
+        "workflow_revision": task.workflow_revision,
+        "expires_at": draft.expires_at,
+        "storage": "memory",
+    }
+    if saved_material is not None:
+        response["saved_material"] = {**saved_material.public(), "created": saved_material_created}
+    return response
+
+
+def _normalize_material_import_candidates(
+    raw_candidates: List[Any],
+    *,
+    job_id: str,
+    problems_data: Dict[str, Dict[str, Any]],
+    targets: List[MaterialImportTarget],
+) -> tuple[List[MaterialImportCandidate], Dict[str, Any]]:
+    allowed_targets = set(targets)
+    normalized: Dict[tuple[str, str], MaterialImportCandidate] = {}
+    skipped_unknown_qid = 0
+    skipped_invalid = 0
+    skipped_non_programming = 0
+    for index, raw_candidate in enumerate(raw_candidates[:200], start=1):
+        raw = (
+            raw_candidate.model_dump()
+            if hasattr(raw_candidate, "model_dump")
+            else dict(raw_candidate)
+            if isinstance(raw_candidate, dict)
+            else {}
+        )
+        q_id_raw = raw.get("q_id")
+        q_id = f"q{q_id_raw}" if isinstance(q_id_raw, int) and not isinstance(q_id_raw, bool) else str(q_id_raw or "").strip()
+        if q_id not in problems_data and q_id.isdigit() and f"q{q_id}" in problems_data:
+            q_id = f"q{q_id}"
+        if q_id not in problems_data:
+            skipped_unknown_qid += 1
+            continue
+        target = str(raw.get("target") or "")
+        if target not in allowed_targets:
+            skipped_invalid += 1
+            continue
+        problem = problems_data[q_id]
+        if target == "test_cases" and not is_programming_question_type(problem.get("type")):
+            skipped_non_programming += 1
+            continue
+
+        text_value: Optional[str] = None
+        test_cases: Optional[List[TestCase]] = None
+        if target in {"criterion", "reference_answer"}:
+            text_value = str(raw.get("text_value") or "").strip()
+            if not text_value or len(text_value) > _MATERIAL_IMPORT_MAX_FIELD_CHARACTERS:
+                skipped_invalid += 1
+                continue
+        else:
+            try:
+                test_cases = [
+                    TestCase.model_validate({**case, "source": "teacher"})
+                    for case in list(raw.get("test_cases") or [])[:50]
+                    if isinstance(case, dict)
+                ]
+            except Exception:
+                skipped_invalid += 1
+                continue
+            serialized_test_cases = sum(
+                len(case.model_dump_json().encode("utf-8"))
+                for case in test_cases
+            )
+            if (
+                not test_cases
+                or serialized_test_cases > _MATERIAL_IMPORT_MAX_TEST_CASE_CHARACTERS
+            ):
+                skipped_invalid += 1
+                continue
+        try:
+            confidence = max(0.0, min(float(raw.get("confidence") or 0.0), 1.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        match_status = "exact" if raw.get("match_status") == "exact" else "possible"
+        current_value = problem.get(target)
+        would_overwrite = bool(
+            current_value
+            if target == "test_cases"
+            else str(current_value or "").strip()
+        )
+        candidate = MaterialImportCandidate(
+            candidate_id=f"mic_{job_id[:8]}_{index}",
+            q_id=q_id,
+            target=target,  # type: ignore[arg-type]
+            text_value=text_value,
+            test_cases=test_cases,
+            confidence=confidence,
+            match_status=match_status,
+            source_excerpt=str(raw.get("source_excerpt") or "")[:600],
+            source_location=str(raw.get("source_location") or "")[:160],
+            reason=str(raw.get("reason") or "")[:300],
+            would_overwrite=would_overwrite,
+        )
+        key = (q_id, target)
+        prior = normalized.get(key)
+        if prior is None or candidate.confidence > prior.confidence:
+            normalized[key] = candidate
+
+    candidates = list(normalized.values())
+    summary = {
+        "candidate_count": len(candidates),
+        "conflict_count": sum(1 for candidate in candidates if candidate.would_overwrite),
+        "low_confidence_count": sum(1 for candidate in candidates if candidate.confidence < 0.7),
+        "exact_match_count": sum(1 for candidate in candidates if candidate.match_status == "exact"),
+        "possible_match_count": sum(1 for candidate in candidates if candidate.match_status == "possible"),
+        "skipped_unknown_qid": skipped_unknown_qid,
+        "skipped_invalid": skipped_invalid,
+        "skipped_non_programming": skipped_non_programming,
+        "by_target": {
+            target: sum(1 for candidate in candidates if candidate.target == target)
+            for target in targets
+        },
+    }
+    return candidates, summary
+
+
+async def _run_material_import_plan(
+    *,
+    task_id: str,
+    owner_id: str,
+    text: str,
+    problems_data: Dict[str, Dict[str, Any]],
+    draft: MaterialImportDraft,
+    provider: Any,
+    job_id: str,
+    task_store: TaskStore,
+    import_store: MaterialImportStore,
+) -> None:
+    reporter = get_or_create_reporter(job_id, total_questions=len(problems_data))
+    try:
+        await reporter.set_stage_progress(
+            "source_prepared",
+            total_steps=3,
+            completed_steps=0,
+            message="Material source prepared",
+        )
+        raw_candidates = await parse_material_import_to_candidates(
+            text=text,
+            problems_data=problems_data,
+            targets=list(draft.targets),
+            structure_mode=draft.structure_mode,
+            extraction_hint=draft.extraction_hint,
+            provider=provider,
+            reporter=reporter,
+        )
+        candidates, summary = _normalize_material_import_candidates(
+            list(raw_candidates),
+            job_id=job_id,
+            problems_data=problems_data,
+            targets=list(draft.targets),
+        )
+        ready_plan = import_store.set_plan_ready(
+            job_id,
+            candidates=candidates,
+            summary=summary,
+        )
+        if ready_plan is None:
+            task_store.fail_material_import(
+                task_id,
+                job_id=job_id,
+                error="material_import_plan_unavailable",
+            )
+            remove_reporter(job_id)
+            return
+        committed = task_store.finish_material_import_plan(task_id, job_id=job_id)
+        if committed is None or committed.owner_id != owner_id:
+            import_store.delete_plan(job_id)
+            remove_reporter(job_id)
+            return
+        snapshot = await reporter.snapshot()
+        if snapshot.current_step != "plan_ready":
+            await reporter.set_stage_progress(
+                "plan_ready",
+                total_steps=3,
+                completed_steps=3,
+                message=f"Prepared {len(candidates)} material candidates for review",
+            )
+            await reporter.set_phase("done")
+    except Exception as exc:
+        logger.error(
+            "[task:%s] material import plan failed; exception_type=%s",
+            task_id,
+            type(exc).__name__,
+        )
+        import_store.set_plan_error(job_id, "material_import_failed")
+        failed_task = task_store.fail_material_import(
+            task_id,
+            job_id=job_id,
+            error="material_import_failed",
+        )
+        if failed_task is None:
+            remove_reporter(job_id)
+        else:
+            await reporter.set_error(
+                "Material matching failed. Check the model configuration and retry."
+            )
+
+
+@router.post("/{task_id}/material-imports")
+async def start_material_import(
+    task_id: str,
+    req: StartMaterialImportRequest,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    material_store: CourseMaterialStore = Depends(get_course_material_store),
+    import_store: MaterialImportStore = Depends(get_material_import_store),
+    registry: ExpertRegistry = Depends(get_expert_registry),
+):
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    _require_task_llm_principal(task, current)
+    draft = import_store.get_draft_for_owner_task(
+        req.source_token.strip(),
+        owner_id=task.owner_id,
+        task_id=task.task_id,
+    )
+    if draft is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail="Material import source token not found or expired.",
+        )
+    fingerprint = _material_import_fingerprint(draft)
+
+    if task.material_import_job_id and task.pending_material_import_fingerprint == fingerprint:
+        return {
+            "status": "already_running",
+            "job_id": task.material_import_job_id,
+            "task_id": task.task_id,
+            "workflow_revision": task.workflow_revision,
+        }
+    if (
+        task.pending_material_import_fingerprint == fingerprint
+        and task.last_material_import_job_id
+    ):
+        existing_plan = import_store.get_plan_for_owner_task(
+            task.last_material_import_job_id,
+            owner_id=task.owner_id,
+            task_id=task.task_id,
+        )
+        if existing_plan is not None:
+            return {
+                "status": "plan_ready",
+                "job_id": task.last_material_import_job_id,
+                "task_id": task.task_id,
+                "workflow_revision": task.workflow_revision,
+            }
+        task = task_store.expire_material_import_plan(
+            task_id,
+            job_id=task.last_material_import_job_id,
+            request_fingerprint=fingerprint,
+        ) or task
+    if task.material_import_fingerprint == fingerprint and task.last_material_import_job_id:
+        existing_plan = import_store.get_plan_for_owner_task(
+            task.last_material_import_job_id,
+            owner_id=task.owner_id,
+            task_id=task.task_id,
+        )
+        if existing_plan is not None:
+            return {
+                "status": "already_done",
+                "job_id": task.last_material_import_job_id,
+                "task_id": task.task_id,
+                "workflow_revision": task.workflow_revision,
+            }
+        task = task_store.expire_material_import_plan(
+            task_id,
+            job_id=task.last_material_import_job_id,
+            request_fingerprint=fingerprint,
+        ) or task
+
+    if draft.library_material_id is not None:
+        material = material_store.get_for_owner(draft.library_material_id, task.owner_id)
+        if material is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Course material not found")
+        if material.sha256 != draft.content_sha256:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "material_import_source_changed"},
+            )
+        text = material.text
+    else:
+        text = draft.text
+    if text is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "material_import_source_unavailable"},
+        )
+
+    provider = registry.for_owner(current.id).pick_default()
+    if provider is None:
+        raise HTTPException(503, detail="No LLM provider configured. Add an API key first.")
+
+    job_id = str(uuid.uuid4())
+    now = time.time()
+    plan = MaterialImportPlan(
+        job_id=job_id,
+        task_id=task.task_id,
+        owner_id=task.owner_id,
+        request_fingerprint=fingerprint,
+        source_kind=draft.source_kind,
+        source_filename=draft.filename,
+        library_material_id=draft.library_material_id,
+        targets=list(draft.targets),
+        structure_mode=draft.structure_mode,
+        extraction_hint=draft.extraction_hint,
+        status="running",
+        created_at=now,
+        expires_at=now + _MATERIAL_IMPORT_TTL_SECONDS,
+    )
+    try:
+        import_store.create_plan(plan)
+    except ResourceQuotaError as exc:
+        raise HTTPException(exc.status_code, detail={"code": exc.code}) from exc
+    expected_revision = draft.base_workflow_revision
+    if (
+        task.last_failed_material_import_fingerprint == fingerprint
+        and task.material_import_retry_revision == task.workflow_revision
+    ):
+        # The only intervening mutation was this workflow releasing its own
+        # failed job. Reuse the token without allowing an unrelated edit to
+        # bypass the preflight revision guard.
+        expected_revision = task.workflow_revision
+    outcome, current_task = task_store.begin_material_import(
+        task_id,
+        expected_revision=expected_revision,
+        job_id=job_id,
+        request_fingerprint=fingerprint,
+    )
+    if outcome != "started":
+        import_store.delete_plan(job_id)
+        if current_task is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+        if outcome in {"already_running", "plan_ready", "already_done"}:
+            existing_job_id = (
+                current_task.material_import_job_id
+                if outcome == "already_running"
+                else current_task.last_material_import_job_id
+            )
+            if outcome in {"plan_ready", "already_done"} and existing_job_id:
+                existing_plan = import_store.get_plan_for_owner_task(
+                    existing_job_id,
+                    owner_id=current_task.owner_id,
+                    task_id=current_task.task_id,
+                )
+                if existing_plan is None:
+                    task_store.expire_material_import_plan(
+                        task_id,
+                        job_id=existing_job_id,
+                        request_fingerprint=fingerprint,
+                    )
+                    raise HTTPException(
+                        status.HTTP_409_CONFLICT,
+                        detail={"code": "material_import_plan_expired"},
+                    )
+            return {
+                "status": outcome,
+                "job_id": existing_job_id,
+                "task_id": current_task.task_id,
+                "workflow_revision": current_task.workflow_revision,
+            }
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": outcome,
+                "workflow_revision": current_task.workflow_revision,
+            },
+        )
+
+    problem_snapshot = json.loads(json.dumps(task.problem_data, ensure_ascii=False))
+    asyncio.create_task(_run_material_import_plan(
+        task_id=task.task_id,
+        owner_id=task.owner_id,
+        text=text,
+        problems_data=problem_snapshot,
+        draft=draft.model_copy(deep=True),
+        provider=provider,
+        job_id=job_id,
+        task_store=task_store,
+        import_store=import_store,
+    ))
+    return {
+        "status": "started",
+        "job_id": job_id,
+        "task_id": task.task_id,
+        "request_fingerprint": fingerprint,
+        "workflow_revision": current_task.workflow_revision if current_task else task.workflow_revision,
+    }
+
+
+@router.get("/{task_id}/material-imports/{job_id}")
+async def get_material_import(
+    task_id: str,
+    job_id: str,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    import_store: MaterialImportStore = Depends(get_material_import_store),
+):
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    plan = import_store.get_plan_for_owner_task(
+        job_id,
+        owner_id=task.owner_id,
+        task_id=task.task_id,
+    )
+    if plan is None:
+        pointer_fingerprint = None
+        if task.last_material_import_job_id == job_id:
+            pointer_fingerprint = (
+                task.pending_material_import_fingerprint
+                or task.material_import_fingerprint
+            )
+        if pointer_fingerprint:
+            task_store.expire_material_import_plan(
+                task_id,
+                job_id=job_id,
+                request_fingerprint=pointer_fingerprint,
+            )
+            raise HTTPException(
+                status.HTTP_410_GONE,
+                detail={"code": "material_import_plan_expired"},
+            )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Material import job not found")
+    progress = None
+    reporter = get_reporter(job_id)
+    if reporter is not None:
+        progress = (await reporter.snapshot()).model_dump()
+    return _material_import_plan_response(plan, task, progress)
+
+
+@router.post("/{task_id}/material-imports/{job_id}/apply")
+def apply_material_import(
+    task_id: str,
+    job_id: str,
+    req: ApplyMaterialImportRequest,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    import_store: MaterialImportStore = Depends(get_material_import_store),
+):
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    plan = import_store.get_plan_for_owner_task(
+        job_id,
+        owner_id=task.owner_id,
+        task_id=task.task_id,
+    )
+    if plan is None:
+        pointer_fingerprint = None
+        if task.last_material_import_job_id == job_id:
+            pointer_fingerprint = (
+                task.pending_material_import_fingerprint
+                or task.material_import_fingerprint
+            )
+        if pointer_fingerprint:
+            task_store.expire_material_import_plan(
+                task_id,
+                job_id=job_id,
+                request_fingerprint=pointer_fingerprint,
+            )
+            raise HTTPException(
+                status.HTTP_410_GONE,
+                detail={"code": "material_import_plan_expired"},
+            )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Material import job not found")
+    if plan.status == "applied":
+        return {
+            "status": "already_done",
+            "job_id": job_id,
+            "task_id": task_id,
+            "summary": dict(plan.summary),
+            "workflow_revision": task.workflow_revision,
+        }
+    if plan.status != "ready":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": f"material_import_{plan.status}"},
+        )
+
+    known_ids = {candidate.candidate_id for candidate in plan.candidates}
+    accepted_ids = set(req.accepted_candidate_ids)
+    overwrite_ids = set(req.overwrite_candidate_ids)
+    if not accepted_ids.issubset(known_ids):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "unknown_material_import_candidate"},
+        )
+    if not overwrite_ids.issubset(accepted_ids):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "overwrite_candidate_must_be_accepted"},
+        )
+
+    outcome, committed_task, summary = task_store.apply_material_import(
+        task_id,
+        expected_revision=req.expected_workflow_revision,
+        job_id=job_id,
+        request_fingerprint=plan.request_fingerprint,
+        candidates=list(plan.candidates),
+        accepted_candidate_ids=accepted_ids,
+        overwrite_candidate_ids=overwrite_ids,
+        source_kind=plan.source_kind,
+        source_filename=plan.source_filename,
+        library_material_id=plan.library_material_id,
+    )
+    if outcome != "applied" or committed_task is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": outcome,
+                "workflow_revision": committed_task.workflow_revision if committed_task else None,
+            },
+        )
+    import_store.set_plan_applied(job_id, summary["applied_candidate_ids"], summary)
+    return {
+        "status": "applied",
+        "job_id": job_id,
+        "task_id": task_id,
+        "summary": summary,
+        "workflow_revision": committed_task.workflow_revision,
+    }
+
+
 # ─── Extract problems (with idempotency) ─────────────────────────────────────
 
 async def _run_extract(
@@ -1282,6 +2062,8 @@ async def task_extract_problems(
             t.grading_job_id,
             t.reference_parse_job_id,
             t.test_cases_parse_job_id,
+            t.material_import_job_id,
+            t.last_material_import_job_id,
             t.last_failed_job_id,
         }
         if prior_job_id
@@ -2083,6 +2865,8 @@ async def task_state(
         # Failed reporters remain available so the error screen can explain
         # the last attempt without exposing the underlying provider exception.
         active_job_id = t.last_failed_job_id
+    elif t.material_import_job_id:
+        active_job_id = t.material_import_job_id
 
     progress = None
     if active_job_id:
@@ -2093,6 +2877,7 @@ async def task_state(
 
     out["progress"] = progress
     out["active_job_id"] = active_job_id
+    out["active_operation"] = "material_import" if t.material_import_job_id else None
     return out
 
 
@@ -2169,8 +2954,29 @@ def update_problem(
             if req.test_cases is not None
             else None
         )
+    material_provenance = dict(new_problem.get("material_provenance") or {})
+    for target in ("criterion", "reference_answer", "test_cases"):
+        if target not in req.model_fields_set:
+            continue
+        current_provenance = material_provenance.get(target)
+        if isinstance(current_provenance, dict):
+            material_provenance[target] = {
+                **current_provenance,
+                "review_status": "edited",
+                "updated_at": time.time(),
+            }
     if req.review_status == "confirmed":
         new_problem["review_status"] = "confirmed"
+        for target in ("criterion", "reference_answer", "test_cases"):
+            if target not in req.model_fields_set:
+                continue
+            provenance = material_provenance.get(target)
+            if isinstance(provenance, dict):
+                material_provenance[target] = {
+                    **provenance,
+                    "review_status": "confirmed",
+                    "updated_at": time.time(),
+                }
     elif content_edited:
         # Recognition content changed manually, so it is no longer untouched
         # even when a caller also asks to move it back to needs_review. Only an
@@ -2178,6 +2984,8 @@ def update_problem(
         new_problem["review_status"] = "edited"
     elif req.review_status is not None:
         new_problem["review_status"] = req.review_status
+    if material_provenance:
+        new_problem["material_provenance"] = material_provenance
 
     new_problems = dict(t.problem_data)
     new_problems[q_id] = new_problem
