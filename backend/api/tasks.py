@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from backend.auth import require_teacher
 from backend.models import (
@@ -54,6 +54,7 @@ from backend.models import (
     MaterialImportTarget,
     ProblemSourceDraft,
     Task,
+    TaskGradingSetup,
     TestCase,
     User,
     is_programming_question_type,
@@ -125,6 +126,13 @@ class GradeRequest(BaseModel):
         description="单专家场景下并行采样次数；None = 用全局默认（settings.multi_sample_n，目前 1）。"
                     "≥ 2 个启用专家时本字段被忽略（变量来自专家本身）。",
     )
+
+
+class UpdateGradingSetupRequest(BaseModel):
+    expected_workflow_revision: int = Field(ge=0)
+    # Parse manually so semantic validation failures use stable product codes
+    # rather than leaking Pydantic's implementation-shaped error arrays.
+    grading_setup: Dict[str, Any]
 
 
 class UpdateProblemRequest(BaseModel):
@@ -238,6 +246,211 @@ _MATERIAL_IMPORT_MAX_TEST_CASE_CHARACTERS = 200_000
 _AI_COMPLETION_TTL_SECONDS = 2 * 60 * 60
 _AI_COMPLETION_MAX_TEXT_CHARACTERS = 100_000
 _AI_COMPLETION_MAX_TEST_CASE_CHARACTERS = 200_000
+
+
+def _parse_grading_setup(payload: Dict[str, Any]) -> TaskGradingSetup:
+    try:
+        return TaskGradingSetup.model_validate(payload)
+    except ValidationError as exc:
+        fields = {
+            str(item)
+            for error in exc.errors()
+            for item in error.get("loc", ())
+        }
+        if "aggregation_method" in fields:
+            code = "invalid_aggregation"
+        elif "selected_provider_ids" in fields:
+            code = "invalid_provider_count"
+        else:
+            code = "invalid_grading_setup"
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": code},
+        ) from exc
+
+
+def _grading_setup_fingerprint(setup: TaskGradingSetup) -> str:
+    canonical = json.dumps(
+        setup.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _public_grading_setup_snapshot(
+    snapshot: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Return only the strict, credential-free C-01 audit shape."""
+
+    if snapshot is None:
+        return None
+    try:
+        return TaskGradingSetup.model_validate(snapshot).model_dump(mode="json")
+    except ValidationError:
+        # Never reflect a malformed or legacy arbitrary dict through an
+        # owner-facing result endpoint.
+        return None
+
+
+def _validate_grading_setup_semantics(
+    setup: TaskGradingSetup,
+    registry_view: ExpertRegistryView,
+):
+    provider_ids = setup.selected_provider_ids
+    if len(set(provider_ids)) != len(provider_ids):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "duplicate_provider_ids"},
+        )
+    if setup.primary_provider_id not in provider_ids:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "primary_provider_not_selected"},
+        )
+    if setup.aggregation_method == "single":
+        if len(provider_ids) != 1:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "invalid_provider_count"},
+            )
+    elif len(provider_ids) < 2:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "invalid_provider_count"},
+        )
+    if setup.aggregation_method != "single" and setup.multi_sample_n != 1:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "multi_sample_not_applicable"},
+        )
+    try:
+        selected = registry_view.select(
+            provider_ids,
+            primary_provider_id=setup.primary_provider_id,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code not in {"primary_provider_not_selected", "provider_not_enabled"}:
+            code = "provider_not_enabled"
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": code},
+        ) from exc
+    if selected.uses_shared_pool() and (
+        len(provider_ids) != 1
+        or setup.aggregation_method != "single"
+        or setup.multi_sample_n != 1
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "shared_pool_single_expert_required"},
+        )
+    return selected
+
+
+def _public_grading_experts(registry_view: ExpertRegistryView) -> List[Dict[str, Any]]:
+    fields = (
+        "provider_id", "provider_type", "model", "display_name", "enabled",
+        "scope", "is_shared", "editable", "max_concurrent", "rpm",
+    )
+    return [
+        {key: item.get(key) for key in fields}
+        for item in registry_view.list_configs()
+    ]
+
+
+def _suggest_grading_setup(
+    task: Task,
+    registry_view: ExpertRegistryView,
+) -> Optional[TaskGradingSetup]:
+    provider = registry_view.pick_default()
+    if provider is None:
+        return None
+    return TaskGradingSetup(
+        selected_provider_ids=[provider.provider_id],
+        primary_provider_id=provider.provider_id,
+        knowledge_scope="all_task_docs" if task.kb_docs else "none",
+    )
+
+
+def _grading_setup_readiness(
+    task: Task,
+    registry_view: ExpertRegistryView,
+) -> Dict[str, Any]:
+    blocking: List[str] = []
+    warnings: List[str] = []
+    if registry_view.count() == 0:
+        blocking.append("provider_required")
+    if task.grading_setup is not None:
+        try:
+            _validate_grading_setup_semantics(task.grading_setup, registry_view)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            blocking.append(str(detail.get("code") or "invalid_grading_setup"))
+        if task.grading_setup.knowledge_scope == "all_task_docs" and not task.kb_docs:
+            warnings.append("task_knowledge_empty")
+    if task.status == "graded":
+        blocking.append("grading_setup_locked")
+    elif _task_workflow_is_busy(task):
+        blocking.append("workflow_busy")
+    elif (
+        task.status not in {"problems_ready", "submissions_ready", "error"}
+        or not task.problem_data
+    ):
+        blocking.append("invalid_state")
+    blocking = list(dict.fromkeys(blocking))
+    return {
+        "ready": not blocking,
+        "blocking_issues": blocking,
+        "warnings": list(dict.fromkeys(warnings)),
+    }
+
+
+def _grading_setup_payload(
+    task: Task,
+    registry_view: ExpertRegistryView,
+    *,
+    mutation_status: Optional[str] = None,
+) -> Dict[str, Any]:
+    docs = []
+    for doc in (task.kb_docs or {}).values():
+        if not isinstance(doc, dict):
+            continue
+        docs.append({
+            "doc_id": doc.get("doc_id"),
+            "filename": doc.get("filename"),
+            "chunk_count": doc.get("chunk_count", 0),
+            "uploaded_at": doc.get("uploaded_at"),
+        })
+    payload: Dict[str, Any] = {
+        "task_id": task.task_id,
+        "task_status": task.status,
+        "workflow_revision": task.workflow_revision,
+        "configured": task.grading_setup is not None,
+        "grading_setup": (
+            task.grading_setup.model_dump(mode="json")
+            if task.grading_setup is not None else None
+        ),
+        "suggested_setup": (
+            suggested.model_dump(mode="json")
+            if (suggested := _suggest_grading_setup(task, registry_view)) is not None
+            else None
+        ),
+        "grading_setup_fingerprint": task.grading_setup_fingerprint,
+        "grading_setup_updated_at": task.grading_setup_updated_at,
+        "available_experts": _public_grading_experts(registry_view),
+        "knowledge": {
+            "scope_options": ["none", "all_task_docs"],
+            "task_doc_count": len(docs),
+            "task_docs": docs,
+        },
+        "readiness": _grading_setup_readiness(task, registry_view),
+    }
+    if mutation_status is not None:
+        payload["status"] = mutation_status
+    return payload
 _AI_COMPLETION_MAX_GENERATED_BYTES = 2 * 1024 * 1024
 _PROBLEM_SOURCE_EXTENSIONS = {".pdf", ".txt", ".md"}
 _PROBLEM_SOURCE_MAX_CHARACTERS = 400_000
@@ -3176,6 +3389,55 @@ async def task_upload_test_cases(
     }
 
 
+# ─── C-01 task grading setup ────────────────────────────────────────────────
+
+@router.get("/{task_id}/grading-setup")
+def get_task_grading_setup(
+    task_id: str,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    registry: ExpertRegistry = Depends(get_expert_registry),
+):
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    _require_task_llm_principal(task, current)
+    return _grading_setup_payload(task, registry.for_owner(current.id))
+
+
+@router.put("/{task_id}/grading-setup")
+def update_task_grading_setup(
+    task_id: str,
+    req: UpdateGradingSetupRequest,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    registry: ExpertRegistry = Depends(get_expert_registry),
+):
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    _require_task_llm_principal(task, current)
+    setup = _parse_grading_setup(req.grading_setup)
+    owner_registry = registry.for_owner(current.id)
+    _validate_grading_setup_semantics(setup, owner_registry)
+    outcome, saved = task_store.save_grading_setup(
+        task_id,
+        expected_revision=req.expected_workflow_revision,
+        setup=setup,
+        fingerprint=_grading_setup_fingerprint(setup),
+    )
+    if saved is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if outcome not in {"saved", "unchanged"}:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": outcome},
+        )
+    return _grading_setup_payload(
+        saved,
+        owner_registry,
+        mutation_status=outcome,
+    )
+
+
 # ─── Grade ───────────────────────────────────────────────────────────────────
 
 async def _run_grade(
@@ -3186,6 +3448,7 @@ async def _run_grade(
     job_store: JobStore,
     language: str,
     multi_sample_n: Optional[int] = None,
+    grading_setup: Optional[TaskGradingSetup] = None,
 ):
     reporter = get_or_create_reporter(
         job_id,
@@ -3199,8 +3462,18 @@ async def _run_grade(
             registry=registry,
             reporter=reporter,
             language=language,
-            task_id=task.task_id,
+            task_id=(
+                task.task_id
+                if grading_setup is None
+                or grading_setup.knowledge_scope == "all_task_docs"
+                else None
+            ),
             multi_sample_n=multi_sample_n,
+            aggregation_method=(
+                grading_setup.aggregation_method
+                if grading_setup is not None else None
+            ),
+            grading_setup=grading_setup,
         )
         # Serialize corrections
         serialized = []
@@ -3223,6 +3496,10 @@ async def _run_grade(
             "task_id": task.task_id,
             "problem_data": task.problem_data,
             "student_data": task.student_data,
+            "grading_setup_snapshot": (
+                grading_setup.model_dump(mode="json")
+                if grading_setup is not None else None
+            ),
             "timestamp": time.time(),
         })
 
@@ -3329,11 +3606,29 @@ async def task_grade(
         raise HTTPException(409, detail={"code": "invalid_state"})
 
     owner_registry = registry.for_owner(current.id)
-    if owner_registry.count() == 0:
-        raise HTTPException(503, detail="No LLM provider configured.")
-    effective_multi_sample_n = (
-        1 if owner_registry.uses_shared_pool() else req.multi_sample_n
-    )
+    grading_setup = t.grading_setup
+    if grading_setup is not None:
+        if req.multi_sample_n is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "grading_setup_override_forbidden"},
+            )
+        selected_registry = _validate_grading_setup_semantics(
+            grading_setup,
+            owner_registry,
+        )
+        effective_registry = selected_registry
+        effective_multi_sample_n = grading_setup.multi_sample_n
+        effective_language = grading_setup.feedback_language
+    else:
+        # Backwards compatibility for tasks created before C-01 existed.
+        if owner_registry.count() == 0:
+            raise HTTPException(503, detail="No LLM provider configured.")
+        effective_registry = owner_registry
+        effective_multi_sample_n = (
+            1 if owner_registry.uses_shared_pool() else req.multi_sample_n
+        )
+        effective_language = req.language
 
     if job_store.active_count() >= 10:
         raise HTTPException(429, detail="Too many concurrent jobs. Try again later.")
@@ -3343,6 +3638,10 @@ async def task_grade(
         job_id=job_id,
         job_name=t.name,
         job_type="batch",
+        grading_setup_snapshot=(
+            grading_setup.model_dump(mode="json")
+            if grading_setup is not None else None
+        ),
     ))
     outcome, current_task = task_store.begin_grading(
         task_id,
@@ -3370,8 +3669,9 @@ async def task_grade(
         job_store.discard(job_id)
         raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": outcome})
     asyncio.create_task(_run_grade(
-        t, owner_registry, job_id, task_store, job_store, req.language,
+        t, effective_registry, job_id, task_store, job_store, effective_language,
         multi_sample_n=effective_multi_sample_n,
+        grading_setup=grading_setup,
     ))
 
     return {
@@ -3444,12 +3744,25 @@ def task_result(
     _check_owner(t, current)
 
     if t.status != "graded" or not t.grading_job_id:
-        return {"status": t.status, "task_id": t.task_id, "error": t.error}
+        job = job_store.get(t.grading_job_id) if t.grading_job_id else None
+        return {
+            "status": t.status,
+            "task_id": t.task_id,
+            "error": t.error,
+            "grading_setup_snapshot": _public_grading_setup_snapshot(
+                job.grading_setup_snapshot if job is not None else None
+            ),
+        }
 
     job = job_store.get(t.grading_job_id)
     if job is None or job.results is None:
         return {"status": "not_found", "task_id": t.task_id}
-    return {"status": "completed", "task_id": t.task_id, **(job.results or {})}
+    result = {"status": "completed", "task_id": t.task_id, **(job.results or {})}
+    if "grading_setup_snapshot" in result:
+        result["grading_setup_snapshot"] = _public_grading_setup_snapshot(
+            result["grading_setup_snapshot"]
+        )
+    return result
 
 
 # ─── Edit problem (manual stem / rubric refinement) ──────────────────────────

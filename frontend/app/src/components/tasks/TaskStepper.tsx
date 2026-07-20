@@ -15,7 +15,9 @@ export function TaskStepper({ current, task }: { current: TaskWorkflowStepKey; t
   const currentIndex = getTaskStepIndex(current);
   const currentStep = TASK_WORKFLOW_STEPS.find((step) => step.key === current) ?? TASK_WORKFLOW_STEPS[0];
   const currentStepNumber = Math.max(currentIndex + 1, 1);
-  const currentStepAvailable = task ? isTaskStepAvailable(task.status, currentStep.key) : true;
+  const currentStepAvailable = task
+    ? isTaskStepAvailable(task.status, currentStep.key, task.grading_setup_configured)
+    : true;
 
   return (
     <div className="grid gap-2">
@@ -42,7 +44,9 @@ export function TaskStepper({ current, task }: { current: TaskWorkflowStepKey; t
           {TASK_WORKFLOW_STEPS.map((step, index) => {
             const isActive = step.key === current;
             const isComplete = index < currentIndex;
-            const isAvailable = task ? isTaskStepAvailable(task.status, step.key) : true;
+            const isAvailable = task
+              ? isTaskStepAvailable(task.status, step.key, task.grading_setup_configured)
+              : true;
             const stepHref = step.key === "problems" && task && task.status !== "draft"
               ? task.status === "extracting_problems"
                 ? `/tasks/${taskId}/problems/progress`

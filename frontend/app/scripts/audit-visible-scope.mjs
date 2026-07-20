@@ -45,12 +45,6 @@ const visibleTextRules = [
     allowHiddenDisclaimer: true,
   },
   {
-    id: "visible-grading-language",
-    description: "Do not show grading-language selection.",
-    pattern: /批改语言|评语语言|学科语言|grading[-\s]?language|feedback[-\s]?language/i,
-    allowHiddenDisclaimer: false,
-  },
-  {
     id: "visible-global-kb",
     description: "Do not show user/global knowledge base as implemented without a backend-pending disclaimer.",
     pattern: /全局知识库|个人知识库|我的知识库|用户级知识库|跨任务复用|global knowledge base|personal knowledge base|user-scoped knowledge base/i,
@@ -323,5 +317,5 @@ if (findings.length > 0) {
   console.log("PASS visible scope audit");
   console.log(`Scanned ${files.length} user-visible source files.`);
   console.log("Checked Router paths for hidden LMS/course/assignment integrations.");
-  console.log("No visible LMS, unsupported course management, assignment publishing, grading-language, or unsupported KB claims found.");
+  console.log("No visible LMS, unsupported course management, assignment publishing, or unsupported KB claims found.");
 }

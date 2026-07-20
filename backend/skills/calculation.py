@@ -34,7 +34,7 @@ from typing import Optional, List, TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from backend.skills.base import GradingSkill, build_system_prompt, register_skill
-from backend.models import ExpertResult, ProblemInfo, StudentAnswerInfo, StepScore
+from backend.models import ExpertResult, ProblemInfo, StudentAnswerInfo, StepScore, TaskGradingSetup
 from backend.llm.providers import BaseProvider
 from backend.tools.structured_llm import structured_llm_call
 from backend.tools import numerical
@@ -243,8 +243,12 @@ class CalculationSkill(GradingSkill):
         reporter: Optional["ProgressReporter"] = None,
         language: str = "en",
         task_id: Optional[str] = None,
+        grading_setup: Optional[TaskGradingSetup] = None,
     ):
-        super().__init__(provider, reporter=reporter, language=language, task_id=task_id)
+        super().__init__(
+            provider, reporter=reporter, language=language, task_id=task_id,
+            grading_setup=grading_setup,
+        )
         self._template = _load_template()
 
     async def grade(
@@ -356,6 +360,7 @@ class CalculationSkill(GradingSkill):
                 "and produce a structured per-dimension score. Respect the verification branch "
                 "rules in the user prompt.",
                 self.language,
+                self.grading_setup,
             )
 
             result, raw = await structured_llm_call(

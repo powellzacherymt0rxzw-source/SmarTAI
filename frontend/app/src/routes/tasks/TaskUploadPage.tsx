@@ -49,6 +49,7 @@ import { InlineNotice } from "@/components/ui/InlineNotice";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { WorkflowSection } from "@/components/ui/WorkflowSection";
 import { useTaskProgress } from "@/hooks/useTaskProgress";
+import { useI18n } from "@/i18n/I18nProvider";
 import { cn } from "@/lib/cn";
 import {
   classifyRecoverableError,
@@ -67,6 +68,7 @@ const SUBMISSIONS_ACCEPT = ".zip,.rar,.7z,.tar,.tar.gz,.tgz,.tar.bz2,.tbz2,.txt"
 export function TaskUploadPage() {
   const { taskId, kind } = useParams();
   const navigate = useNavigate();
+  const { t } = useI18n();
   const isSubmissions = kind === "submissions";
   const isProblems = !isSubmissions;
   const safeTaskId = taskId ?? "";
@@ -350,7 +352,7 @@ export function TaskUploadPage() {
     );
   }
 
-  const canContinueToSubmissions =
+  const canContinueToGradingSetup =
     problems.length > 0 ||
     currentStatus === "problems_ready" ||
     currentStatus === "parsing_submissions" ||
@@ -588,10 +590,10 @@ export function TaskUploadPage() {
               <Button
                 type="button"
                 className="w-full sm:w-auto"
-                disabled={!canContinueToSubmissions}
-                onClick={() => navigate(`/tasks/${safeTaskId}/upload/submissions`)}
+                disabled={!canContinueToGradingSetup}
+                onClick={() => navigate(`/tasks/${safeTaskId}/grading-setup`)}
               >
-                继续上传作答
+                {t("taskUploadContinueGradingSetup")}
                 <ChevronRight className="h-4 w-4" />
               </Button>
             ) : currentStatus === "grading" || currentStatus === "graded" ? (
@@ -666,13 +668,15 @@ function UploadPreparationBrief({
           ) : null
         }
       >
-        {expertSummary}。当前阶段沿用已启用专家池；逐阶段选择单专家/多专家组合需要后端继续接入任务级配置。
+        {isProblems
+          ? `${expertSummary}。题目识别沿用当前已启用专家池；正式批改模型会在题目准备完成后按任务单独保存。`
+          : `${expertSummary}。作答识别沿用当前已启用专家池；正式批改只使用上一阶段保存的任务级模型组合。`}
       </BriefRow>
 
       <BriefRow icon={FileText} label="资料配置" status={taskDocCount > 0 ? `${taskDocCount} 份已有` : "识别后补齐"} tone="neutral">
         {isProblems
           ? "题目识别完成后，在题目准备总览里补评分标准、标答和测试样例；知识库文件、分组或全库选择仍需要后端数据模型支持。"
-          : "作答识别只处理学生答案本身；正式批改前会集中确认专家组合、资料范围与评分策略。"}
+          : "作答识别只处理学生答案本身；正式批改会使用上一阶段保存的模型组合、任务资料范围与评分方式。"}
       </BriefRow>
 
       <BriefRow icon={Images} label="识别能力" status="当前能力" tone="info">
@@ -692,7 +696,7 @@ function UploadPreparationBrief({
             当前会从作答正文和文件名提取学号、姓名；CSV/XLSX 名单导入、按名单自动匹配和批量改身份需要后端字段支持。
           </BriefRow>
           <BriefRow icon={UserCheck} label="识别设置继承" status="沿用当前任务" tone="info">
-            作答识别沿用已启用 BYOK 专家池与当前文本解析能力；逐阶段选择专家、手写识别增强和 OCR 开关仍是后端待接配置。
+            作答识别沿用已启用专家池与当前文本解析能力；正式批改与识别配置分离，并使用已保存的任务级批改设置。手写识别增强和 OCR 开关仍待后端接入。
           </BriefRow>
         </>
       ) : null}

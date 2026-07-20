@@ -53,7 +53,7 @@ export function ExpertsPage() {
   const enabledCount = experts.filter((expert) => expert.enabled).length;
   const defaultModel = providerDefaults[provider];
   const isAdding = addExpertKey.isPending;
-  const returnTo = safeAddProblemsReturnTo(new URLSearchParams(location.search).get("returnTo"));
+  const returnTo = safeExpertsReturnTo(new URLSearchParams(location.search).get("returnTo"));
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -165,7 +165,7 @@ export function ExpertsPage() {
                 onClick={() => navigate(returnTo, { state: location.state })}
               >
                 <ArrowLeft aria-hidden="true" size={16} />
-                {t("expertsReturnToAddProblems")}
+                {t("expertsReturnToTask")}
               </Button>
             ) : null}
             <Button
@@ -399,6 +399,6 @@ function formatRpm(rpm: number) {
   return rpm > 0 ? `${rpm} / min` : "0（不限）";
 }
 
-function safeAddProblemsReturnTo(value: string | null): string | null {
-  return value && /^\/tasks\/[^/?#]+\/upload\/problems$/.test(value) ? value : null;
+function safeExpertsReturnTo(value: string | null): string | null {
+  return value && /^\/tasks\/[^/?#]+\/(?:upload\/problems|grading-setup|questions\/(?:ai-complete|import))$/.test(value) ? value : null;
 }

@@ -129,6 +129,58 @@ class ExpertRegistryView:
     def uses_shared_pool(self) -> bool:
         return self._registry._uses_shared_pool(self.owner_id)
 
+    def select(
+        self,
+        provider_ids: List[str],
+        *,
+        primary_provider_id: str,
+    ) -> "SelectedExpertRegistryView":
+        """Freeze an exact, enabled subset without exposing another owner.
+
+        Provider objects are resolved under the registry lock. Shared-pool
+        providers remain wrapped by the owner-bound usage limiter, so choosing
+        an explicit subset cannot bypass cost controls.
+        """
+
+        return self._registry._select_visible(
+            self.owner_id,
+            provider_ids,
+            primary_provider_id=primary_provider_id,
+        )
+
+
+class SelectedExpertRegistryView:
+    """Immutable provider selection captured for one grading run."""
+
+    def __init__(
+        self,
+        *,
+        owner_id: Optional[str],
+        providers: List[BaseProvider],
+        primary_provider_id: str,
+        uses_shared_pool: bool,
+    ) -> None:
+        self.owner_id = owner_id
+        self._providers = tuple(providers)
+        self._by_id = {provider.provider_id: provider for provider in providers}
+        self._primary_provider_id = primary_provider_id
+        self._shared = uses_shared_pool
+
+    def get(self, provider_id: str) -> Optional[BaseProvider]:
+        return self._by_id.get(provider_id)
+
+    def list_available(self) -> List[BaseProvider]:
+        return list(self._providers)
+
+    def count(self) -> int:
+        return len(self._providers)
+
+    def pick_default(self) -> Optional[BaseProvider]:
+        return self._by_id.get(self._primary_provider_id)
+
+    def uses_shared_pool(self) -> bool:
+        return self._shared
+
 
 class ExpertRegistry:
     """Thread-safe shared + owner-specific LLM provider registry."""
@@ -408,6 +460,52 @@ class ExpertRegistry:
             ):
                 return _GuardedSharedProvider(provider, owner_id)  # type: ignore[return-value]
             return provider
+
+    def _select_visible(
+        self,
+        owner_id: Optional[str],
+        provider_ids: List[str],
+        *,
+        primary_provider_id: str,
+    ) -> SelectedExpertRegistryView:
+        """Resolve an exact visible provider subset atomically.
+
+        This is intentionally stricter than repeated ``get`` calls: every
+        selected provider must still exist and be enabled at the same registry
+        snapshot. The HTTP layer maps ``ValueError`` codes to stable 422
+        responses and repeats this validation immediately before grading.
+        """
+
+        with self._lock:
+            visible = self._visible_storage_ids(owner_id)
+            if primary_provider_id not in provider_ids:
+                raise ValueError("primary_provider_not_selected")
+            providers: List[BaseProvider] = []
+            selected_storage_ids: List[str] = []
+            for provider_id in provider_ids:
+                storage_id = visible.get(provider_id)
+                if (
+                    storage_id is None
+                    or storage_id not in self._providers
+                    or storage_id not in self._configs
+                    or not self._configs[storage_id].enabled
+                ):
+                    raise ValueError("provider_not_enabled")
+                provider = self._providers[storage_id]
+                if owner_id is not None and storage_id in self._shared_provider_ids:
+                    provider = _GuardedSharedProvider(provider, owner_id)  # type: ignore[assignment]
+                providers.append(provider)
+                selected_storage_ids.append(storage_id)
+            shared = bool(selected_storage_ids) and all(
+                storage_id in self._shared_provider_ids
+                for storage_id in selected_storage_ids
+            )
+            return SelectedExpertRegistryView(
+                owner_id=owner_id,
+                providers=providers,
+                primary_provider_id=primary_provider_id,
+                uses_shared_pool=shared,
+            )
 
     def _list_available(self, owner_id: Optional[str]) -> List[BaseProvider]:
         with self._lock:

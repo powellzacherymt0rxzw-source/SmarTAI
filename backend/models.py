@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import time
 from typing import List, Optional, Literal, Dict, Any
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ─── Grading result models ────────────────────────────────────────────────────
@@ -331,6 +331,13 @@ class GradingJob(BaseModel):
     created_at: float = Field(default_factory=time.time)
     completed_at: Optional[float] = None
     progress: JobProgress = Field(default_factory=JobProgress)
+    grading_setup_snapshot: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Public, key-free task grading configuration captured before a "
+            "batch starts. It is audit metadata, never a provider credential."
+        ),
+    )
     results: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
@@ -363,6 +370,53 @@ class ProviderConfig(BaseModel):
                     "rolling 60s window has room — prevents 429 quota errors instead of "
                     "burning retries on them.",
     )
+
+
+# ─── Task-level grading setup (C-01) ────────────────────────────────────────
+
+GradingAggregationMethod = Literal["single", "weighted_average", "judge_agent"]
+GradingKnowledgeScope = Literal["none", "all_task_docs"]
+GradingFeedbackTone = Literal["encouraging", "neutral", "strict"]
+GradingFeedbackLength = Literal["short", "medium", "long"]
+GradingFeedbackLanguage = Literal["zh", "en"]
+
+
+class TaskGradingSetup(BaseModel):
+    """Versioned, key-free configuration that a task's grader really consumes.
+
+    C-01 deliberately exposes only capabilities implemented by the current
+    grading pipeline. In particular, task knowledge can be all-or-none; the
+    in-memory retriever cannot yet select individual files or library groups.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    selected_provider_ids: List[str] = Field(min_length=1, max_length=8)
+    primary_provider_id: str = Field(min_length=1, max_length=240)
+    aggregation_method: GradingAggregationMethod = "single"
+    multi_sample_n: int = Field(default=1, ge=1, le=5)
+    knowledge_scope: GradingKnowledgeScope = "all_task_docs"
+    strictness: int = Field(default=50, ge=0, le=100)
+    allow_partial_credit: bool = True
+    feedback_tone: GradingFeedbackTone = "neutral"
+    feedback_length: GradingFeedbackLength = "medium"
+    feedback_language: GradingFeedbackLanguage = "zh"
+    suggest_corrections: bool = True
+    low_confidence_threshold: float = Field(default=0.60, ge=0.30, le=0.80)
+    teacher_notes: str = Field(default="", max_length=500)
+
+    @field_validator("selected_provider_ids", mode="before")
+    @classmethod
+    def _normalize_provider_ids(cls, value):
+        if not isinstance(value, list):
+            return value
+        return [item.strip() if isinstance(item, str) else item for item in value]
+
+    @field_validator("primary_provider_id", "teacher_notes", mode="before")
+    @classmethod
+    def _strip_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 # ─── User / Course / Assignment models (P0 — multi-role product) ──────────────
@@ -676,6 +730,13 @@ class Task(BaseModel):
     parse_job_id: Optional[str] = None
     grading_job_id: Optional[str] = None
 
+    # C-01 is the single editable source for task-level grading behavior.
+    # It is embedded in the in-memory task so C-02 can later be a read-only
+    # preflight instead of a second configuration page.
+    grading_setup: Optional[TaskGradingSetup] = None
+    grading_setup_fingerprint: Optional[str] = None
+    grading_setup_updated_at: Optional[float] = None
+
     problem_file_hash: Optional[str] = None
     submission_file_hash: Optional[str] = None
     problem_file_name: Optional[str] = None
@@ -758,6 +819,7 @@ class Task(BaseModel):
             "extract_job_id": self.extract_job_id,
             "parse_job_id": self.parse_job_id,
             "grading_job_id": self.grading_job_id,
+            "grading_setup_configured": self.grading_setup is not None,
             "problem_file_name": self.problem_file_name,
             "pending_problem_file_name": self.pending_problem_file_name,
             "pending_submission_file_name": self.pending_submission_file_name,

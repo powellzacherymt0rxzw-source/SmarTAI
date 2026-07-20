@@ -5,6 +5,7 @@ import { TaskStatusIndicator } from "@/components/tasks/TaskStatusIndicator";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { InlineNotice } from "@/components/ui/InlineNotice";
+import { useI18n } from "@/i18n/I18nProvider";
 import { getTaskStepGate, type TaskWorkflowStepKey } from "@/lib/taskFlow";
 import type { TaskLite } from "@/types";
 
@@ -25,6 +26,8 @@ export function TaskStageGate({
   onRetry?: () => void;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
+
   if (isLoading) {
     return (
       <Card className="flex items-center gap-3 text-sm text-muted-foreground">
@@ -53,7 +56,7 @@ export function TaskStageGate({
     );
   }
 
-  const gate = getTaskStepGate(task, current);
+  const gate = getTaskStepGate(task, current, t);
 
   if (gate.available) {
     return children;

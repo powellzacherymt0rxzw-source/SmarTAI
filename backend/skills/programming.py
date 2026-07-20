@@ -34,8 +34,13 @@ from typing import Optional, List, Tuple, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from backend.skills.base import GradingSkill, build_system_prompt, register_skill
-from backend.models import ExpertResult, ProblemInfo, StudentAnswerInfo, StepScore, TestCase
+from backend.skills.base import (
+    GradingSkill,
+    build_system_prompt,
+    format_deterministic_feedback,
+    register_skill,
+)
+from backend.models import ExpertResult, ProblemInfo, StudentAnswerInfo, StepScore, TaskGradingSetup, TestCase
 from backend.llm.providers import BaseProvider
 from backend.tools.structured_llm import structured_llm_call
 from backend.tools.code_interpreter import run_sandbox, ExecutionReport
@@ -448,8 +453,12 @@ class ProgrammingSkill(GradingSkill):
         reporter: Optional["ProgressReporter"] = None,
         language: str = "en",
         task_id: Optional[str] = None,
+        grading_setup: Optional[TaskGradingSetup] = None,
     ):
-        super().__init__(provider, reporter=reporter, language=language, task_id=task_id)
+        super().__init__(
+            provider, reporter=reporter, language=language, task_id=task_id,
+            grading_setup=grading_setup,
+        )
         self._template = _load_template()
 
     async def grade(
@@ -482,7 +491,19 @@ class ProgrammingSkill(GradingSkill):
                     score=0.0,
                     max_score=10.0,
                     confidence=1.0,
-                    comment="No code provided by student.\n\n（沙箱测评：✗ 学生未提交代码）",
+                    comment=format_deterministic_feedback(
+                        self.grading_setup,
+                        zh_message="学生未提交代码，本题记 0 分。",
+                        en_message="No student code was provided, so this item receives 0 points.",
+                        zh_detail="未运行沙箱或模型批改。",
+                        en_detail="Neither sandbox execution nor model grading was run.",
+                        zh_suggestion="请补交代码后重新批改。",
+                        en_suggestion="Submit the missing code, then grade this item again.",
+                        legacy_message=(
+                            "No code provided by student.\n\n"
+                            "（沙箱测评：✗ 学生未提交代码）"
+                        ),
+                    ),
                     steps=[],
                     logs="",
                 )
@@ -618,6 +639,7 @@ class ProgrammingSkill(GradingSkill):
                 "Code quality → Efficiency) and produce a structured per-dimension score. "
                 "Respect the sandbox branch rules in the user prompt.",
                 self.language,
+                self.grading_setup,
             )
             result, raw = await structured_llm_call(
                 self.provider,

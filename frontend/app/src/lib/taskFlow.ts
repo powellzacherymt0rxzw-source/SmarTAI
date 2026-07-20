@@ -1,4 +1,5 @@
 import type { TaskLite, TaskStatus } from "@/types";
+import type { MessageKey } from "@/i18n/messages";
 
 export type TaskDisplayStatus = TaskStatus | "completed" | "not_found" | "review_confirmed" | "generating_analysis" | "finalized";
 
@@ -198,7 +199,11 @@ export function getTaskStepHref(step: TaskWorkflowStepKey, taskId: string): stri
   return TASK_WORKFLOW_STEPS.find((item) => item.key === step)?.href(taskId) ?? `/tasks/${taskId}/setup`;
 }
 
-export function isTaskStepAvailable(status: TaskStatus | string | undefined, step: TaskWorkflowStepKey): boolean {
+export function isTaskStepAvailable(
+  status: TaskStatus | string | undefined,
+  step: TaskWorkflowStepKey,
+  gradingSetupConfigured?: boolean,
+): boolean {
   if (!status || status === "error") {
     return step === "setup";
   }
@@ -209,6 +214,9 @@ export function isTaskStepAvailable(status: TaskStatus | string | undefined, ste
     case "problems":
       return true;
     case "submissions":
+      if (gradingSetupConfigured !== true) {
+        return false;
+      }
       return [
         "problems_ready",
         "parsing_submissions",
@@ -247,34 +255,56 @@ export interface TaskStepGateResult {
   actionLabel: string;
 }
 
-export function getTaskStepGate(task: TaskLite | undefined, requestedStep: TaskWorkflowStepKey): TaskStepGateResult {
+export function getTaskStepGate(
+  task: TaskLite | undefined,
+  requestedStep: TaskWorkflowStepKey,
+  translate?: (key: MessageKey) => string,
+): TaskStepGateResult {
   const taskId = task?.task_id ?? "";
   const status = task?.status;
   const currentStep = getTaskCurrentStep(status);
   const currentStepConfig = TASK_WORKFLOW_STEPS.find((step) => step.key === currentStep) ?? TASK_WORKFLOW_STEPS[0];
   const requestedStepConfig = TASK_WORKFLOW_STEPS.find((step) => step.key === requestedStep) ?? TASK_WORKFLOW_STEPS[0];
-  const available = Boolean(task && isTaskStepAvailable(status, requestedStep));
+  const available = Boolean(task && isTaskStepAvailable(status, requestedStep, task.grading_setup_configured));
+  const needsGradingSetup = Boolean(
+    task &&
+    requestedStep === "submissions" &&
+    ["problems_ready", "parsing_submissions", "submissions_ready"].includes(status ?? "") &&
+    task.grading_setup_configured !== true,
+  );
 
   return {
     available,
     currentStep,
     currentStepLabel: currentStepConfig.label,
-    currentStepHref: task ? getTaskDestination(task) : "/history",
+    currentStepHref: needsGradingSetup
+      ? `/tasks/${taskId}/grading-setup`
+      : task
+        ? getTaskDestination(task)
+        : "/history",
     requestedStepLabel: requestedStepConfig.label,
-    title: `还不能进入${requestedStepConfig.label}`,
-    description: task
-      ? `当前任务处于「${getTaskStatusMeta(status).label}」，请先完成「${currentStepConfig.label}」后再继续。`
-      : "任务信息尚未读取完成，请稍后刷新或从历史任务重新进入。",
-    actionLabel: `回到${currentStepConfig.label}`,
+    title: needsGradingSetup
+      ? translate?.("taskGateGradingSetupTitle") ?? "请先完成批改设置"
+      : `还不能进入${requestedStepConfig.label}`,
+    description: needsGradingSetup
+      ? translate?.("taskGateGradingSetupDescription") ?? "保存本任务的模型、资料范围与评分方式后，才能添加学生作答。"
+      : task
+        ? `当前任务处于「${getTaskStatusMeta(status).label}」，请先完成「${currentStepConfig.label}」后再继续。`
+        : "任务信息尚未读取完成，请稍后刷新或从历史任务重新进入。",
+    actionLabel: needsGradingSetup
+      ? translate?.("taskGateGradingSetupAction") ?? "前往批改设置"
+      : `回到${currentStepConfig.label}`,
   };
 }
 
-export function getTaskDestination(task: Pick<TaskLite, "task_id" | "status">): string {
+export function getTaskDestination(task: Pick<TaskLite, "task_id" | "status" | "grading_setup_configured">): string {
   switch (task.status) {
     case "extracting_problems":
       return `/tasks/${task.task_id}/problems/progress`;
     case "problems_ready":
-      return `/tasks/${task.task_id}/questions`;
+      return task.grading_setup_configured
+        ? `/tasks/${task.task_id}/upload/submissions`
+        : `/tasks/${task.task_id}/questions`;
     case "parsing_submissions":
     case "submissions_ready":
       return `/tasks/${task.task_id}/upload/submissions`;
@@ -324,7 +354,11 @@ export interface TaskNextStep {
   to: string;
 }
 
-export function getTaskNextStep(task: TaskLite | undefined, taskId: string): TaskNextStep {
+export function getTaskNextStep(
+  task: TaskLite | undefined,
+  taskId: string,
+  translate?: (key: MessageKey) => string,
+): TaskNextStep {
   if (!task || !taskId) {
     return {
       title: "读取任务后继续",
@@ -355,10 +389,18 @@ export function getTaskNextStep(task: TaskLite | undefined, taskId: string): Tas
         to: problemProgress,
       };
     case "problems_ready":
+      if (task.grading_setup_configured) {
+        return {
+          title: translate?.("taskNextProblemsConfiguredTitle") ?? "添加学生作答",
+          description: translate?.("taskNextProblemsConfiguredDescription") ?? "批改设置已保存，可以上传并识别本次任务的学生作答。",
+          buttonLabel: translate?.("taskNextProblemsConfiguredAction") ?? "添加学生作答",
+          to: submissionUpload,
+        };
+      }
       return {
-        title: "校对题目并补充资料",
-        description: "确认题干、评分标准、标答和测试样例，再添加学生作答。",
-        buttonLabel: "校对题目",
+        title: translate?.("taskNextProblemsSetupTitle") ?? "校对题目并补充资料",
+        description: translate?.("taskNextProblemsSetupDescription") ?? "确认题干、评分标准、标答和测试样例，再完成批改设置。",
+        buttonLabel: translate?.("taskNextProblemsSetupAction") ?? "校对题目",
         to: `/tasks/${taskId}/questions`,
       };
     case "parsing_submissions":

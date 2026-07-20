@@ -22,6 +22,7 @@ import { Card, SectionHeader } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
 import { InlineNotice } from "@/components/ui/InlineNotice";
 import { Textarea } from "@/components/ui/Input";
+import { useI18n } from "@/i18n/I18nProvider";
 import { getModelReadiness } from "@/lib/taskActionGuards";
 import { formatTaskTime, getTaskNextStep, type TaskNextStep } from "@/lib/taskFlow";
 import {
@@ -39,6 +40,7 @@ const KB_ACCEPT = ".pdf,.txt,.md,.markdown,.rst,text/plain,text/markdown,applica
 
 export function TaskSetupPage() {
   const { taskId = "" } = useParams();
+  const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
@@ -63,7 +65,7 @@ export function TaskSetupPage() {
     isLoading: expertsQuery.isLoading,
     isError: expertsQuery.isError,
   });
-  const nextStep = getTaskNextStep(task, taskId);
+  const nextStep = getTaskNextStep(task, taskId, t);
   const uploadDisabledReason = getUploadDisabledReason(taskId, docs, enabledExperts.length, expertsQuery.isSuccess);
   const nextStepDisabledReason = task?.status === "draft" ? modelReadiness.disabledReason : null;
 

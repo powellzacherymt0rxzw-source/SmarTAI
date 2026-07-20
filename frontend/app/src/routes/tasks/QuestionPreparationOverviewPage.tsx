@@ -209,7 +209,7 @@ export function QuestionPreparationOverviewPage() {
                     {t("questionOverviewAIComplete")}
                   </Link>
                   <Link
-                    to={`/tasks/${taskId}/upload/submissions`}
+                    to={`/tasks/${taskId}/grading-setup`}
                     className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
                   >
                     {t("questionOverviewContinue")}

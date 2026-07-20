@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import OrderedDict
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 from threading import RLock
 
@@ -26,6 +27,7 @@ from backend.models import (
     ProblemSourceDraft,
     Tag,
     Task,
+    TaskGradingSetup,
     is_programming_question_type,
 )
 
@@ -119,6 +121,12 @@ class JobStore:
             job.error = error
             job.completed_at = time.time()
             job.results = {"status": "error", "message": error}
+            if job.grading_setup_snapshot is not None:
+                # Preserve the immutable, credential-free C-01 audit record on
+                # failures just as completed jobs preserve it in their result.
+                job.results["grading_setup_snapshot"] = deepcopy(
+                    job.grading_setup_snapshot
+                )
             self._history[job_id] = job
             self._prune_if_needed()
 
@@ -1144,6 +1152,57 @@ class TaskStore:
             task.workflow_revision += 1
             task.updated_at = time.time()
             return "started", task
+
+    def save_grading_setup(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        setup: TaskGradingSetup,
+        fingerprint: str,
+    ) -> tuple[str, Optional[Task]]:
+        """Persist C-01 with idempotent replay and workflow-wide CAS.
+
+        The fingerprint excludes timestamps. Replaying the exact same setup is
+        therefore a no-op even if the caller still has the pre-save revision;
+        a different setup must match the current workflow revision.
+        """
+
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return "not_found", None
+            if (
+                task.grading_setup is not None
+                and task.grading_setup_fingerprint == fingerprint
+            ):
+                return "unchanged", task
+            if task.workflow_revision != expected_revision:
+                return "stale_revision", task
+            if task.status == "graded":
+                return "grading_setup_locked", task
+            if (
+                task.status in {
+                    "extracting_problems", "parsing_submissions", "grading",
+                }
+                or task.reference_parse_job_id
+                or task.test_cases_parse_job_id
+                or task.material_import_job_id
+                or task.ai_completion_job_id
+            ):
+                return "workflow_busy", task
+            if (
+                task.status not in {"problems_ready", "submissions_ready", "error"}
+                or not task.problem_data
+            ):
+                return "invalid_state", task
+            now = time.time()
+            task.grading_setup = setup.model_copy(deep=True)
+            task.grading_setup_fingerprint = fingerprint
+            task.grading_setup_updated_at = now
+            task.workflow_revision += 1
+            task.updated_at = now
+            return "saved", task
 
     def finish_grading(
         self,

@@ -247,23 +247,41 @@ def test_shared_pool_is_kill_switched_single_expert_and_hard_limited(
         provider.provider_id for provider in registry.for_owner(B_ID).list_available()
     ] == [first_id]
 
-    monkeypatch.setattr(settings, "shared_pool_enabled", False)
-    assert registry.for_owner(B_ID).list_available() == []
-    monkeypatch.setattr(settings, "shared_pool_enabled", True)
-    monkeypatch.setattr(settings, "shared_pool_daily_request_limit", 1)
-    monkeypatch.setattr(settings, "shared_pool_daily_estimated_token_limit", 100)
-    _shared_pool_usage.clear()
-
     raw_provider = registry.shared_view().get(first_id)
 
     async def fake_ainvoke(messages):
         return SimpleNamespace(content="ok")
 
     monkeypatch.setattr(raw_provider, "ainvoke", fake_ainvoke)
-    guarded = registry.for_owner(B_ID).get(first_id)
+    selected = registry.for_owner(B_ID).select(
+        [first_id], primary_provider_id=first_id,
+    )
+    guarded = selected.list_available()[0]
+
+    # A frozen C-01 view must still consult the live shared-pool kill switch.
+    monkeypatch.setattr(settings, "shared_pool_enabled", False)
+    assert registry.for_owner(B_ID).list_available() == []
+    with pytest.raises(SharedPoolLimitError):
+        asyncio.run(guarded.ainvoke([SimpleNamespace(content="blocked")]))
+
+    # Request-count limit is charged by the selected wrapper, not bypassed by
+    # freezing the provider selection before the grading job starts.
+    monkeypatch.setattr(settings, "shared_pool_enabled", True)
+    monkeypatch.setattr(settings, "shared_pool_daily_request_limit", 1)
+    monkeypatch.setattr(settings, "shared_pool_daily_estimated_token_limit", 100)
+    _shared_pool_usage.clear()
     asyncio.run(guarded.ainvoke([SimpleNamespace(content="first")]))
     with pytest.raises(SharedPoolLimitError):
         asyncio.run(guarded.ainvoke([SimpleNamespace(content="second")]))
+
+    # Estimated-token limit is independently enforced across selected-view
+    # calls even when the request-count budget still has room.
+    monkeypatch.setattr(settings, "shared_pool_daily_request_limit", 10)
+    monkeypatch.setattr(settings, "shared_pool_daily_estimated_token_limit", 5)
+    _shared_pool_usage.clear()
+    asyncio.run(guarded.ainvoke([SimpleNamespace(content="1234")]))
+    with pytest.raises(SharedPoolLimitError):
+        asyncio.run(guarded.ainvoke([SimpleNamespace(content="x" * 20)]))
 
 
 def test_q01_formal_extraction_uses_task_owner_provider(

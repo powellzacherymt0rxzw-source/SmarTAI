@@ -46,6 +46,11 @@ export const aiCompletionKeys = {
   detail: (taskId: string, jobId: string) => ["ai-completions", taskId, jobId] as const,
 };
 
+export const gradingSetupKeys = {
+  all: ["grading-setup"] as const,
+  detail: (taskId: string) => ["grading-setup", taskId] as const,
+};
+
 export const expertKeys = {
   all: ["experts"] as const,
   list: () => ["experts", "list"] as const,

@@ -144,6 +144,7 @@ export interface TaskLite {
   ai_completion_job_id?: string | null;
   last_ai_completion_job_id?: string | null;
   ai_completion_error?: string | null;
+  grading_setup_configured?: boolean;
   problem_count: number;
   student_count: number;
   kb_docs: Record<string, KBDoc>;
