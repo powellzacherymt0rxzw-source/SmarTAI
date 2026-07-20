@@ -93,10 +93,12 @@ Q-09 是旧文档明确要求、但 17 张 Figma 图没有单独画出的补充�
 ### 4.3 Q-03 返回入口与矩阵优先
 
 - 视口：`1440×900`；`scrollWidth=1440`、`scrollHeight=900`。
-- 标题与七步条后立即显示覆盖率、筛选和矩阵，4 道验收题首屏看全。
+- 2026-07-20 根据用户视觉纠正，题干复核、评分标准、标答和测试样例改为独占一整行的 4 张 `112px` 高圆角指标卡；主百分比约 `30px`，完成度低于 50% 才使用琥珀色，其他使用主蓝/完成青绿，不给整卡铺彩色背景。
+- 搜索框另起一整行并占满可用宽度；排序降为下一辅助行右侧控件，不再与覆盖率卡抢同一横向空间。
+- 标题与七步条后依次显示大号覆盖率卡、独占搜索行和矩阵，4 道验收题仍在桌面首屏看全。
 - 表格 footer 的 `批量导入资料`、`AI 补全缺失项`、`继续上传作答` 分别进入专门页面；没有把 AI 表单追加在矩阵下方。
 - 代码与测试仍合并在既有“代码 / 测试”列，保持 Figma 06 的 7 列结构。
-- 截图：`q09-question-matrix-entry-1440x900.png`。
+- 当前截图：`q03-metrics-figma14-correction-1440x900.png`、`q03-metrics-figma14-correction-390x844.png`；前者替代较紧凑的 `q09-question-matrix-entry-1440x900.png` 作为 Q03 最新视觉证据。
 
 上述 PNG 位于 Codex 临时可视化目录：
 
@@ -111,6 +113,7 @@ Q-09 是旧文档明确要求、但 17 张 Figma 图没有单独画出的补充�
 - 前端 `npm run lint`：visible-scope、ESLint 与 `tsc --noEmit` 通过。
 - Vite production build：`461 modules transformed`，通过。
 - `git diff --check`：通过。
+- 2026-07-20 Q03 指标卡纠正后再次通过 visible-scope、`tsc --noEmit`、Vite `461 modules` production build；桌面 `scrollHeight=900`，移动 `innerWidth=scrollWidth=bodyScrollWidth=390`。
 - 两轮只读终审发现的 P1 已修复：题干/资料状态耦合、后台完成后 Q-03 不刷新、stale/different-scope 恢复缺失、Q-03 忽略 Q-08 provenance；修复后未发现遗留 P0/P1。
 
 ## 6. 明确不在本阶段的能力

@@ -88,136 +88,138 @@ export function QuestionPreparationOverviewPage() {
       </h1>
       <NewTaskStepper currentStep={1} />
 
-      <section className="mt-[22px] min-w-0 overflow-hidden rounded-[10px] border bg-card" aria-labelledby="question-preparation-matrix">
+      <section className="mt-[22px] min-w-0" aria-labelledby="question-preparation-matrix">
         <h2 id="question-preparation-matrix" className="sr-only">{t("questionOverviewTitle")}</h2>
 
-        <div className="grid min-w-0 gap-3 border-b px-4 py-3 lg:grid-cols-[minmax(440px,1fr)_minmax(440px,0.9fr)] lg:items-center xl:px-5">
-          <dl className="grid min-w-0 grid-cols-2 overflow-hidden rounded-[8px] border sm:grid-cols-4">
-            <CoverageMetric label={t("questionOverviewCoverageReview")} ready={coverage.reviewed} total={coverage.total} />
-            <CoverageMetric label={t("questionOverviewCoverageRubric")} ready={coverage.rubrics} total={coverage.total} />
-            <CoverageMetric label={t("questionOverviewCoverageAnswer")} ready={coverage.answers} total={coverage.total} />
-            <CoverageMetric
-              label={t("questionOverviewCoverageTests")}
-              ready={coverage.tests}
-              total={coverage.programming}
-              emptyLabel={t("questionOverviewNoProgramming")}
-            />
-          </dl>
+        <dl className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+          <CoverageMetric label={t("questionOverviewCoverageReview")} ready={coverage.reviewed} total={coverage.total} />
+          <CoverageMetric label={t("questionOverviewCoverageRubric")} ready={coverage.rubrics} total={coverage.total} />
+          <CoverageMetric label={t("questionOverviewCoverageAnswer")} ready={coverage.answers} total={coverage.total} />
+          <CoverageMetric
+            label={t("questionOverviewCoverageTests")}
+            ready={coverage.tests}
+            total={coverage.programming}
+            emptyLabel={t("questionOverviewNoProgramming")}
+          />
+        </dl>
 
-          <div className="grid min-w-0 gap-1.5 sm:grid-cols-[minmax(0,1fr)_150px]">
-            <label className="relative min-w-0">
-              <span className="sr-only">{t("questionOverviewSearchLabel")}</span>
-              <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-[11px] h-4 w-4 text-muted-foreground" />
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => updateQuery(event.target.value)}
-                placeholder={t("questionOverviewSearchPlaceholder")}
-                className="h-9 w-full min-w-0 rounded-[7px] border bg-background pl-9 pr-3 text-[13px] leading-5 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
-              />
-            </label>
-            <label className="min-w-0">
+        <div className="mt-4 min-w-0">
+          <label className="relative min-w-0">
+            <span className="sr-only">{t("questionOverviewSearchLabel")}</span>
+            <Search aria-hidden="true" className="pointer-events-none absolute left-4 top-[16px] h-4 w-4 text-muted-foreground" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => updateQuery(event.target.value)}
+              placeholder={t("questionOverviewSearchPlaceholder")}
+              className="h-12 w-full min-w-0 rounded-[10px] border bg-card pl-11 pr-4 text-[13px] leading-5 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
+            />
+          </label>
+          <div className="mt-2 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="min-w-0 truncate px-1 text-[11px] leading-4 text-muted-foreground" title={getRuleDescription(selection.rules, t)}>
+              {getRuleDescription(selection.rules, t)}
+            </p>
+            <label className="w-full min-w-0 shrink-0 sm:w-[160px]">
               <span className="sr-only">{t("questionOverviewSortLabel")}</span>
               <select
                 value={selection.effectiveSort}
                 onChange={(event) => updateSort(event.target.value as QuestionPreparationSort)}
-                className="h-9 w-full min-w-0 rounded-[7px] border bg-background px-3 text-[13px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                className="h-9 w-full min-w-0 rounded-[8px] border bg-card px-3 text-[13px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
               >
                 <option value="number">{t("questionOverviewSortNumber")}</option>
                 <option value="missing">{t("questionOverviewSortMissing")}</option>
                 <option value="type">{t("questionOverviewSortType")}</option>
               </select>
             </label>
-            <p className="min-w-0 truncate text-[11px] leading-4 text-muted-foreground sm:col-span-2" title={getRuleDescription(selection.rules, t)}>
-              {getRuleDescription(selection.rules, t)}
-            </p>
           </div>
         </div>
 
-        {taskQuery.isLoading ? (
-          <QuestionTableLoading />
-        ) : taskQuery.isError ? (
-          <div className="flex min-h-[300px] flex-col items-center justify-center px-5 text-center">
-            <p className="text-sm font-semibold text-foreground">{t("questionOverviewLoadError")}</p>
-            <button
-              type="button"
-              className="mt-3 h-9 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground hover:bg-muted"
-              onClick={() => void taskQuery.refetch()}
-            >
-              {t("questionOverviewRetry")}
-            </button>
-          </div>
-        ) : !taskId ? (
-          <div className="flex min-h-[300px] flex-col items-center justify-center px-5 text-center">
-            <p className="text-sm font-semibold text-foreground">{t("questionOverviewTaskMissing")}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{t("questionOverviewTaskMissingDescription")}</p>
-            <Link className="mt-3 text-sm font-semibold text-primary hover:underline" to="/">
-              {t("questionOverviewBackWorkspace")}
-            </Link>
-          </div>
-        ) : (
-          <QuestionMatrix
-            rows={selection.rows}
-            taskId={taskId}
-            returnPath={buildReturnPath(location.pathname, query, selection.effectiveSort)}
-            t={t}
-          />
-        )}
+        <div className="mt-4 min-w-0 overflow-hidden rounded-[10px] border bg-card">
+          {taskQuery.isLoading ? (
+            <QuestionTableLoading />
+          ) : taskQuery.isError ? (
+            <div className="flex min-h-[300px] flex-col items-center justify-center px-5 text-center">
+              <p className="text-sm font-semibold text-foreground">{t("questionOverviewLoadError")}</p>
+              <button
+                type="button"
+                className="mt-3 h-9 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground hover:bg-muted"
+                onClick={() => void taskQuery.refetch()}
+              >
+                {t("questionOverviewRetry")}
+              </button>
+            </div>
+          ) : !taskId ? (
+            <div className="flex min-h-[300px] flex-col items-center justify-center px-5 text-center">
+              <p className="text-sm font-semibold text-foreground">{t("questionOverviewTaskMissing")}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{t("questionOverviewTaskMissingDescription")}</p>
+              <Link className="mt-3 text-sm font-semibold text-primary hover:underline" to="/">
+                {t("questionOverviewBackWorkspace")}
+              </Link>
+            </div>
+          ) : (
+            <QuestionMatrix
+              rows={selection.rows}
+              taskId={taskId}
+              returnPath={buildReturnPath(location.pathname, query, selection.effectiveSort)}
+              t={t}
+            />
+          )}
 
-        {!taskQuery.isLoading && !taskQuery.isError && taskId ? (
-          <footer className="flex min-h-[58px] flex-col gap-2 border-t px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between xl:px-5">
-            <p className="text-xs text-muted-foreground">
-              {t("questionOverviewShowingPrefix")}{selection.rows.length}{t("questionOverviewShowingSeparator")}{rows.length}{t("questionOverviewShowingSuffix")}
-            </p>
-            {taskQuery.data?.ai_completion_job_id ? (
-              <div className="flex min-w-0 flex-col gap-2 rounded-[7px] border border-blue-100 bg-blue-50/60 px-3 py-2 sm:flex-row sm:items-center dark:border-blue-900 dark:bg-blue-950/20">
-                <span className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold text-primary">
-                  <LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 shrink-0 animate-spin" />
-                  <span className="truncate">{t("questionOverviewAIRunning")}</span>
-                </span>
-                <Link
-                  to={`/tasks/${taskId}/questions/ai-complete/progress/${encodeURIComponent(taskQuery.data.ai_completion_job_id)}`}
-                  className="inline-flex h-8 shrink-0 items-center justify-center rounded-[6px] bg-primary px-3 text-xs font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {t("questionOverviewReturnAIProgress")}
-                </Link>
-              </div>
-            ) : taskQuery.data?.ai_completion_error ? (
-              <div className="flex min-w-0 flex-col gap-2 rounded-[7px] border border-red-100 bg-red-50/60 px-3 py-2 sm:flex-row sm:items-center dark:border-red-900 dark:bg-red-950/20">
-                <span className="min-w-0 truncate text-xs font-semibold text-danger">{t("questionOverviewAIFailed")}</span>
-                <Link
-                  to={`/tasks/${taskId}/questions/ai-complete`}
-                  className="inline-flex h-8 shrink-0 items-center justify-center rounded-[6px] bg-primary px-3 text-xs font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {t("questionOverviewRetryAI")}
-                </Link>
-              </div>
-            ) : (
-              <div className="grid gap-2 sm:flex sm:items-center">
-                <Link
-                  to={`/tasks/${taskId}/questions/import`}
-                  className="inline-flex h-9 w-full items-center justify-center rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
-                >
-                  {t("questionOverviewBulkImport")}
-                </Link>
-                <Link
-                  to={`/tasks/${taskId}/questions/ai-complete`}
-                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
-                >
-                  <Sparkles aria-hidden="true" className="h-4 w-4" />
-                  {t("questionOverviewAIComplete")}
-                </Link>
-                <Link
-                  to={`/tasks/${taskId}/upload/submissions`}
-                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
-                >
-                  {t("questionOverviewContinue")}
-                  <ChevronRight aria-hidden="true" className="h-4 w-4" />
-                </Link>
-              </div>
-            )}
-          </footer>
-        ) : null}
+          {!taskQuery.isLoading && !taskQuery.isError && taskId ? (
+            <footer className="flex min-h-[58px] flex-col gap-2 border-t px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between xl:px-5">
+              <p className="text-xs text-muted-foreground">
+                {t("questionOverviewShowingPrefix")}{selection.rows.length}{t("questionOverviewShowingSeparator")}{rows.length}{t("questionOverviewShowingSuffix")}
+              </p>
+              {taskQuery.data?.ai_completion_job_id ? (
+                <div className="flex min-w-0 flex-col gap-2 rounded-[7px] border border-blue-100 bg-blue-50/60 px-3 py-2 sm:flex-row sm:items-center dark:border-blue-900 dark:bg-blue-950/20">
+                  <span className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold text-primary">
+                    <LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                    <span className="truncate">{t("questionOverviewAIRunning")}</span>
+                  </span>
+                  <Link
+                    to={`/tasks/${taskId}/questions/ai-complete/progress/${encodeURIComponent(taskQuery.data.ai_completion_job_id)}`}
+                    className="inline-flex h-8 shrink-0 items-center justify-center rounded-[6px] bg-primary px-3 text-xs font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {t("questionOverviewReturnAIProgress")}
+                  </Link>
+                </div>
+              ) : taskQuery.data?.ai_completion_error ? (
+                <div className="flex min-w-0 flex-col gap-2 rounded-[7px] border border-red-100 bg-red-50/60 px-3 py-2 sm:flex-row sm:items-center dark:border-red-900 dark:bg-red-950/20">
+                  <span className="min-w-0 truncate text-xs font-semibold text-danger">{t("questionOverviewAIFailed")}</span>
+                  <Link
+                    to={`/tasks/${taskId}/questions/ai-complete`}
+                    className="inline-flex h-8 shrink-0 items-center justify-center rounded-[6px] bg-primary px-3 text-xs font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {t("questionOverviewRetryAI")}
+                  </Link>
+                </div>
+              ) : (
+                <div className="grid gap-2 sm:flex sm:items-center">
+                  <Link
+                    to={`/tasks/${taskId}/questions/import`}
+                    className="inline-flex h-9 w-full items-center justify-center rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
+                  >
+                    {t("questionOverviewBulkImport")}
+                  </Link>
+                  <Link
+                    to={`/tasks/${taskId}/questions/ai-complete`}
+                    className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
+                  >
+                    <Sparkles aria-hidden="true" className="h-4 w-4" />
+                    {t("questionOverviewAIComplete")}
+                  </Link>
+                  <Link
+                    to={`/tasks/${taskId}/upload/submissions`}
+                    className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
+                  >
+                    {t("questionOverviewContinue")}
+                    <ChevronRight aria-hidden="true" className="h-4 w-4" />
+                  </Link>
+                </div>
+              )}
+            </footer>
+          ) : null}
+        </div>
       </section>
     </div>
   );
@@ -235,7 +237,7 @@ function QuestionMatrix({
   t: (key: MessageKey) => string;
 }) {
   return (
-    <div className="max-h-[calc(100vh-365px)] min-h-[280px] w-full overflow-auto overscroll-contain">
+    <div className="max-h-[calc(100vh-515px)] min-h-[280px] w-full overflow-auto overscroll-contain">
       <table className="w-full min-w-[980px] border-collapse text-left text-[13px]">
         <thead className="sticky top-0 z-10 bg-muted/95 text-[12px] font-semibold text-muted-foreground backdrop-blur-sm">
           <tr className="border-b">
@@ -447,12 +449,31 @@ function CoverageMetric({
   emptyLabel?: string;
 }) {
   const percentage = total > 0 ? Math.round((ready / total) * 100) : null;
+  const tone = percentage === null
+    ? "muted"
+    : ready === total
+      ? "ready"
+      : percentage < 50
+        ? "attention"
+        : "primary";
   return (
-    <div className="min-w-0 border-b px-3 py-2 last:border-b-0 odd:border-r sm:border-b-0 sm:border-r sm:last:border-r-0">
-      <dt className="truncate text-[11px] font-medium leading-4 text-muted-foreground" title={label}>{label}</dt>
-      <dd className="mt-0.5 flex items-baseline gap-1.5">
-        <span className="text-base font-bold leading-5 text-foreground">{percentage === null ? "—" : `${percentage}%`}</span>
-        <span className="truncate text-[11px] text-muted-foreground">{percentage === null ? emptyLabel : `${ready}/${total}`}</span>
+    <div className="flex min-h-[104px] min-w-0 flex-col justify-center rounded-[10px] border bg-card px-5 py-4 sm:min-h-[112px] sm:px-6">
+      <dt className="order-2 mt-2 truncate text-[13px] font-medium leading-5 text-muted-foreground sm:text-sm" title={label}>{label}</dt>
+      <dd className="order-1 flex min-w-0 items-baseline gap-2">
+        <span
+          className={cn(
+            "text-[28px] font-bold leading-8 tracking-[-0.02em] sm:text-[30px] sm:leading-9",
+            tone === "primary" && "text-primary",
+            tone === "ready" && "text-emerald-600 dark:text-emerald-400",
+            tone === "attention" && "text-amber-600 dark:text-amber-400",
+            tone === "muted" && "text-muted-foreground",
+          )}
+        >
+          {percentage === null ? "—" : `${percentage}%`}
+        </span>
+        <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+          {percentage === null ? emptyLabel : `${ready}/${total}`}
+        </span>
       </dd>
     </div>
   );
