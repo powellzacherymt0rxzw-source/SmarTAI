@@ -78,8 +78,8 @@ class TestCase(BaseModel):
     """A single sandbox test case for programming problems.
 
     Replaces the dataclass previously defined in backend/tools/code_interpreter.py
-    so the same shape is used by api/tasks upload, ingest_agent parsing,
-    ProblemInfo storage, and the sandbox executor.
+    so the same shape is used by normalized assignment questions,
+    ingest_agent parsing, ProblemInfo storage, and the sandbox executor.
     """
     # Tell pytest NOT to try to collect this as a test class — without this,
     # the leading "Test" prefix triggers a PytestCollectionWarning.
@@ -232,22 +232,6 @@ class JobProgress(BaseModel):
     error_detail: Optional[str] = None
 
 
-# ─── Job lifecycle model ──────────────────────────────────────────────────────
-
-class GradingJob(BaseModel):
-    """Represents a grading job (single student or batch)."""
-    job_id: str
-    job_name: Optional[str] = None
-    job_type: Literal["student", "batch"] = "student"
-    status: Literal["pending", "running", "completed", "error"] = "pending"
-    student_id: Optional[str] = None
-    created_at: float = Field(default_factory=time.time)
-    completed_at: Optional[float] = None
-    progress: JobProgress = Field(default_factory=JobProgress)
-    results: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-
-
 # ─── LLM provider config ─────────────────────────────────────────────────────
 
 class ProviderConfig(BaseModel):
@@ -284,158 +268,27 @@ Role = Literal["teacher", "student", "admin"]
 
 
 class User(BaseModel):
-    """A user record (teacher / student / admin)."""
+    """A user record (teacher / student / admin).
+
+    Membership is read only from ``course_enrollments``; the legacy
+    ``course_ids`` mirror is intentionally absent so there is one source of
+    truth for who belongs to which course.
+    """
     id: str
     username: str
     email: str = ""
     role: Role = "teacher"
     password_hash: str = Field("", description="bcrypt hash; never returned to clients")
-    course_ids: List[str] = Field(default_factory=list, description="Courses this user belongs to (teacher: owns; student: enrolled)")
     created_at: float = Field(default_factory=time.time)
+    is_active: bool = True
 
     def public(self) -> Dict[str, Any]:
-        """Dict safe to return to clients (no password hash)."""
+        """Dict safe to return to clients (no password hash, no course_ids)."""
         return {
             "id": self.id,
             "username": self.username,
             "email": self.email,
             "role": self.role,
-            "course_ids": self.course_ids,
+            "is_active": self.is_active,
             "created_at": self.created_at,
-        }
-
-
-class Course(BaseModel):
-    """A course / class."""
-    id: str
-    name: str
-    code: str = ""
-    description: str = ""
-    teacher_id: str
-    student_ids: List[str] = Field(default_factory=list)
-    created_at: float = Field(default_factory=time.time)
-
-
-class Assignment(BaseModel):
-    """An assignment within a course.
-
-    Wraps the existing problem_data structure (dict[q_id → ProblemInfo-like]) and
-    adds metadata (course, due date, publish status) so students can see and
-    submit to it.
-    """
-    id: str
-    course_id: str
-    teacher_id: str
-    name: str
-    description: str = ""
-    problem_data: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-    status: Literal["draft", "published", "closed"] = "draft"
-    due_at: Optional[float] = None
-    created_at: float = Field(default_factory=time.time)
-    published_at: Optional[float] = None
-
-
-class Submission(BaseModel):
-    """A student's submission for an assignment."""
-    id: str
-    assignment_id: str
-    student_id: str
-    answers: Dict[str, str] = Field(default_factory=dict, description="{q_id: answer_text}")
-    file_name: str = ""
-    submitted_at: float = Field(default_factory=time.time)
-    job_id: Optional[str] = Field(None, description="Linked grading job_id")
-    grade: Optional[Dict[str, Any]] = Field(None, description="Final grade dict (corrections + total)")
-
-
-# ─── Task lifecycle (frontend_v2 task-centric workflow) ───────────────────────
-
-TaskStatus = Literal[
-    "draft",
-    "extracting_problems",
-    "problems_ready",
-    "parsing_submissions",
-    "submissions_ready",
-    "grading",
-    "graded",
-    "error",
-]
-
-
-class Task(BaseModel):
-    """A grading task — bundles problems + submissions + grading job into one
-    user-visible unit. Replaces the global problem_store/student_store coupling
-    by making each task carry its own data.
-
-    Status machine (linear, with `error` as a sink):
-        draft
-          → extracting_problems → problems_ready
-          → parsing_submissions → submissions_ready
-          → grading → graded
-        any phase → error (recoverable by re-uploading)
-    """
-    task_id: str
-    name: str = "Untitled task"
-    owner_id: str = "anonymous"
-    status: TaskStatus = "draft"
-
-    problem_data: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-    student_data: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-
-    extract_job_id: Optional[str] = None
-    parse_job_id: Optional[str] = None
-    grading_job_id: Optional[str] = None
-
-    problem_file_hash: Optional[str] = None
-    submission_file_hash: Optional[str] = None
-    problem_file_name: Optional[str] = None
-    submission_file_name: Optional[str] = None
-
-    # Reference answers (calculation-style problems) — auxiliary upload, does NOT
-    # change task.status. Stored per-question in problem_data[q_id]["reference_answer"]
-    # after parsing; these top-level fields hold the upload metadata.
-    reference_file_hash: Optional[str] = None
-    reference_file_name: Optional[str] = None
-    reference_parse_job_id: Optional[str] = None
-
-    # Test cases (programming problems) — same model as reference. Stored per-question
-    # in problem_data[q_id]["test_cases"] after parsing.
-    test_cases_file_hash: Optional[str] = None
-    test_cases_file_name: Optional[str] = None
-    test_cases_parse_job_id: Optional[str] = None
-
-    # ─── Task-scoped knowledge base (RAG MVP) ─────────────────────────────
-    # Mirror metadata for documents uploaded via POST /tasks/{id}/kb. The
-    # actual chunks + vectors live in backend.rag.store.InMemoryTaskRetriever
-    # (pure in-memory, evicted with the task). Keys = doc_id (random hex);
-    # values = KBDoc.public() shape. Frontend reads this dict to render the
-    # uploaded-files list on the Setup page.
-    kb_docs: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-
-    error: Optional[str] = None
-    created_at: float = Field(default_factory=time.time)
-    updated_at: float = Field(default_factory=time.time)
-
-    def lite(self) -> Dict[str, Any]:
-        """Metadata-only representation for list views (no problem/student data)."""
-        return {
-            "task_id": self.task_id,
-            "name": self.name,
-            "owner_id": self.owner_id,
-            "status": self.status,
-            "extract_job_id": self.extract_job_id,
-            "parse_job_id": self.parse_job_id,
-            "grading_job_id": self.grading_job_id,
-            "problem_file_name": self.problem_file_name,
-            "submission_file_name": self.submission_file_name,
-            "reference_file_name": self.reference_file_name,
-            "test_cases_file_name": self.test_cases_file_name,
-            "reference_parse_job_id": self.reference_parse_job_id,
-            "test_cases_parse_job_id": self.test_cases_parse_job_id,
-            "problem_count": len(self.problem_data),
-            "student_count": len(self.student_data),
-            "kb_docs": dict(self.kb_docs),
-            "kb_doc_count": len(self.kb_docs),
-            "error": self.error,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
         }

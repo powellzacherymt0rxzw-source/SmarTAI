@@ -1,8 +1,13 @@
 import { AlertTriangle, CheckCircle2, RefreshCw, Server } from "lucide-react";
+import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/Button";
 import { Card, SectionHeader } from "@/components/ui/Card";
-import { backendUrl } from "@/api/client";
-import { useHealthStatus } from "@/api/hooks";
+import { backendUrl, normalizeAPIError } from "@/api/client";
+import { createInvite } from "@/api/users";
+import { useCurrentUser, useHealthStatus } from "@/api/hooks";
+import { Field } from "@/components/ui/Field";
+import { Input } from "@/components/ui/Input";
 import { useI18n } from "@/i18n/I18nProvider";
 import { type ThemeMode, useTheme } from "@/theme/ThemeProvider";
 
@@ -12,6 +17,7 @@ export function SettingsPage() {
   const { locale, setLocale, t } = useI18n();
   const { theme, setTheme } = useTheme();
   const healthQuery = useHealthStatus({ refetchInterval: 30_000 });
+  const currentUser = useCurrentUser();
   const isHealthy = healthQuery.data?.status === "healthy";
   const healthLabel = healthQuery.isLoading
     ? t("checking")
@@ -58,6 +64,7 @@ export function SettingsPage() {
           </div>
         </div>
       </Card>
+      {currentUser.data?.role === "admin" ? <AdminInviteCard /> : null}
       <Card className="grid gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
@@ -126,6 +133,32 @@ export function SettingsPage() {
         ) : null}
       </Card>
     </div>
+  );
+}
+
+function AdminInviteCard() {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"teacher" | "student">("teacher");
+  const invite = useMutation({ mutationFn: createInvite });
+
+  return (
+    <Card className="grid gap-4">
+      <div>
+        <h2 className="text-base font-semibold">生成邀请码</h2>
+        <p className="mt-1 text-sm text-muted-foreground">邀请码默认 7 天有效且只能使用一次。</p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <Field label="绑定邮箱（可选）"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <Field label="账号角色">
+          <select className="h-9 rounded-md border bg-background px-3 text-sm" value={role} onChange={(e) => setRole(e.target.value as "teacher" | "student")}>
+            <option value="teacher">教师</option><option value="student">学生</option>
+          </select>
+        </Field>
+        <div className="flex items-end"><Button type="button" disabled={invite.isPending} onClick={() => invite.mutate({ email: email.trim(), role, expires_in_hours: 168 })}>{invite.isPending ? "生成中…" : "生成"}</Button></div>
+      </div>
+      {invite.data ? <div className="rounded-md border bg-muted p-3 text-sm"><div className="font-mono text-lg font-semibold">{invite.data.invite_code}</div><div className="mt-1 text-muted-foreground">有效期至 {new Date(invite.data.expires_at * 1000).toLocaleString()}</div></div> : null}
+      {invite.isError ? <div className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{normalizeAPIError(invite.error).message}</div> : null}
+    </Card>
   );
 }
 

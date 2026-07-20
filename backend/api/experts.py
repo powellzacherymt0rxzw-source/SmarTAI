@@ -11,11 +11,14 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.models import ProviderConfig
-from backend.llm.registry import get_expert_registry, ExpertRegistry
+from backend.auth import get_current_user
+from backend.config import settings
+from backend.db.provider_repository import delete_provider_config, set_provider_enabled, upsert_provider_config
+from backend.models import ProviderConfig, User
+from backend.llm.registry import get_scoped_expert_registry, ExpertRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +43,8 @@ class SelectRequest(BaseModel):
 @router.post("/keys")
 def add_key(
     request: AddKeyRequest,
-    registry: ExpertRegistry = Depends(get_expert_registry),
+    current: User = Depends(get_current_user),
+    registry: ExpertRegistry = Depends(get_scoped_expert_registry),
 ):
     """Register or update a provider's API key."""
     config = ProviderConfig(
@@ -52,12 +56,18 @@ def add_key(
         max_concurrent=max(1, request.max_concurrent),
         rpm=max(0, request.rpm),
     )
-    provider_id = registry.register(config)
+    if not settings.provider_encryption_key:
+        raise HTTPException(503, detail="Provider credential encryption is not configured.")
+    record = upsert_provider_config(current.id, config, master_key=settings.provider_encryption_key)
+    provider_id = registry.register(config, provider_id=record.id)
     return {"status": "success", "provider_id": provider_id}
 
 
 @router.get("/available")
-def list_available(registry: ExpertRegistry = Depends(get_expert_registry)):
+def list_available(
+    current: User = Depends(get_current_user),
+    registry: ExpertRegistry = Depends(get_scoped_expert_registry),
+):
     """List all configured providers with redacted API keys.
 
     Each item contains: provider_id, provider_type, model, base_url, enabled,
@@ -70,24 +80,23 @@ def list_available(registry: ExpertRegistry = Depends(get_expert_registry)):
 @router.post("/select")
 def select_provider(
     request: SelectRequest,
-    registry: ExpertRegistry = Depends(get_expert_registry),
+    current: User = Depends(get_current_user),
+    registry: ExpertRegistry = Depends(get_scoped_expert_registry),
 ):
     """Enable or disable a specific provider."""
-    # Access internal config to toggle enabled
-    with registry._lock:
-        if request.provider_id in registry._configs:
-            registry._configs[request.provider_id].enabled = request.enabled
-            return {"status": "success", "provider_id": request.provider_id, "enabled": request.enabled}
+    if set_provider_enabled(current.id, request.provider_id, request.enabled):
+        return {"status": "success", "provider_id": request.provider_id, "enabled": request.enabled}
     return {"status": "not_found", "message": f"Provider {request.provider_id} not found."}
 
 
 @router.delete("/{provider_id}")
 def remove_provider(
     provider_id: str,
-    registry: ExpertRegistry = Depends(get_expert_registry),
+    current: User = Depends(get_current_user),
+    registry: ExpertRegistry = Depends(get_scoped_expert_registry),
 ):
     """Remove a provider entirely."""
-    existed = registry.unregister(provider_id)
+    existed = delete_provider_config(current.id, provider_id)
     if existed:
         return {"status": "success", "message": f"Provider {provider_id} removed."}
     return {"status": "not_found", "message": f"Provider {provider_id} not found."}

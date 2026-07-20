@@ -30,10 +30,18 @@ export class APIError extends Error {
 export const apiClient = axios.create({
   baseURL: backendUrl,
   timeout: 30_000,
+  withCredentials: true,
   headers: {
     Accept: "application/json",
   },
 });
+
+interface RefreshableRequestConfig extends AxiosRequestConfig {
+  _retry?: boolean;
+  _skipAuthRefresh?: boolean;
+}
+
+let refreshPromise: Promise<string> | null = null;
 
 apiClient.interceptors.request.use((config) => {
   const token = getAuthToken();
@@ -42,6 +50,35 @@ apiClient.interceptors.request.use((config) => {
   }
   return config;
 });
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const config = error.config as RefreshableRequestConfig | undefined;
+    const path = config?.url ?? "";
+    if (error.response?.status !== 401 || !config || config._retry || config._skipAuthRefresh || path.includes("/auth/login") || path.includes("/auth/refresh")) {
+      return Promise.reject(error);
+    }
+    config._retry = true;
+    refreshPromise ??= apiClient
+      .post<{ token: string }>("/auth/refresh", {}, { _skipAuthRefresh: true } as RefreshableRequestConfig)
+      .then((response) => {
+        setAuthToken(response.data.token);
+        return response.data.token;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+    try {
+      const token = await refreshPromise;
+      config.headers = { ...config.headers, Authorization: `Bearer ${token}` };
+      return apiClient.request(config);
+    } catch (refreshError) {
+      clearAuthToken();
+      return Promise.reject(refreshError);
+    }
+  },
+);
 
 export function getAuthToken(): string | null {
   if (typeof localStorage === "undefined") {

@@ -195,6 +195,11 @@ async def _grade_single_answer(
             comment = (
                 "⚠ 所有 AI 专家批改失败 — 请检查 BYOK 配置后重新批改。"
             )
+        failed_providers = ", ".join(
+            er.provider for er in e.failures if er.provider
+        )
+        if failed_providers:
+            comment += f"\n失败专家：{failed_providers}"
         if reporter:
             await reporter.increment_completed()
         return Correction(

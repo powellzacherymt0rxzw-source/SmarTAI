@@ -14,14 +14,6 @@ dist/
 .mypy_cache/
 .ruff_cache/
 
-# ─── Reflex (frontend) build artifacts ──────────────────────────────────────
-.web/
-.states/
-frontend/.web/
-frontend/.states/
-frontend/assets/external/
-frontend/uploaded_files/
-
 # ─── React / Vite frontend artifacts ────────────────────────────────────────
 frontend/app/node_modules/
 frontend/app/dist/
@@ -40,6 +32,7 @@ secrets.toml
 # of the repo. Generate locally with: python scripts/generate_test_users.py
 data/test_users.json
 data/test_users.*.json
+data/uploads/
 
 # ─── Editor / IDE / OS ──────────────────────────────────────────────────────
 .vscode/
@@ -65,4 +58,5 @@ CLAUDE.md
 
 # codex
 .codex
+.worktrees/
 AGENTS.md

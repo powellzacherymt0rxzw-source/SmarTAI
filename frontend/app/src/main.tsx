@@ -1,43 +1,41 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
-import { RequireTeacherSession } from "@/components/auth/RequireTeacherSession";
+import { RequireRoleSession } from "@/components/auth/RequireRoleSession";
+import { homeForRole } from "@/components/layout/nav";
 import { AppShell } from "@/components/layout/AppShell";
 import { Providers } from "@/providers/Providers";
-import { StudentUnavailablePage } from "@/routes/StudentUnavailablePage";
+import { useCurrentUser } from "@/api/hooks";
+import { AdminPlaceholder } from "@/routes/admin/AdminPlaceholder";
+import { AdminUsersPage } from "@/routes/admin/AdminUsersPage";
+import { AdminInvitesPage } from "@/routes/admin/AdminInvitesPage";
+import { AdminSystemPage } from "@/routes/admin/AdminSystemPage";
+import { StudentDashboardPage } from "@/routes/student/StudentDashboardPage";
+import { StudentCoursesPage } from "@/routes/student/StudentCoursesPage";
+import { StudentCourseDetailPage } from "@/routes/student/StudentCourseDetailPage";
+import { StudentAssignmentPage } from "@/routes/student/StudentAssignmentPage";
+import { StudentResultPage } from "@/routes/student/StudentResultPage";
+import { TeacherDashboardPage } from "@/routes/teacher/TeacherDashboardPage";
+import { TeacherCoursesPage } from "@/routes/teacher/TeacherCoursesPage";
+import { TeacherCourseDetailPage } from "@/routes/teacher/TeacherCourseDetailPage";
+import { TeacherAssignmentDetailPage } from "@/routes/teacher/TeacherAssignmentDetailPage";
+import { TeacherGradingPage } from "@/routes/teacher/TeacherGradingPage";
+import { AssignmentEditorPage } from "@/routes/teacher/AssignmentEditorPage";
+import { TeacherSubmissionsPage } from "@/routes/teacher/TeacherSubmissionsPage";
+import { TeacherResultsPage } from "@/routes/teacher/TeacherResultsPage";
 import "@/styles/globals.css";
 
-const DashboardPage = React.lazy(() =>
-  import("@/routes/DashboardPage").then((module) => ({ default: module.DashboardPage })),
-);
 const ExpertsPage = React.lazy(() => import("@/routes/ExpertsPage").then((module) => ({ default: module.ExpertsPage })));
-const HistoryPage = React.lazy(() => import("@/routes/HistoryPage").then((module) => ({ default: module.HistoryPage })));
 const KnowledgeBasePage = React.lazy(() =>
   import("@/routes/KnowledgeBasePage").then((module) => ({ default: module.KnowledgeBasePage })),
 );
 const LoginPage = React.lazy(() => import("@/routes/LoginPage").then((module) => ({ default: module.LoginPage })));
-const NewTaskPage = React.lazy(() => import("@/routes/NewTaskPage").then((module) => ({ default: module.NewTaskPage })));
 const NotFoundPage = React.lazy(() =>
   import("@/routes/NotFoundPage").then((module) => ({ default: module.NotFoundPage })),
 );
 const RegisterPage = React.lazy(() => import("@/routes/RegisterPage").then((module) => ({ default: module.RegisterPage })));
 const SettingsPage = React.lazy(() =>
   import("@/routes/SettingsPage").then((module) => ({ default: module.SettingsPage })),
-);
-const TaskQuestionDetailPage = React.lazy(() =>
-  import("@/routes/tasks/TaskQuestionDetailPage").then((module) => ({ default: module.TaskQuestionDetailPage })),
-);
-const TaskResultsPage = React.lazy(() =>
-  import("@/routes/tasks/TaskResultsPage").then((module) => ({ default: module.TaskResultsPage })),
-);
-const TaskSetupPage = React.lazy(() =>
-  import("@/routes/tasks/TaskSetupPage").then((module) => ({ default: module.TaskSetupPage })),
-);
-const TaskStudentDetailPage = React.lazy(() =>
-  import("@/routes/tasks/TaskStudentDetailPage").then((module) => ({ default: module.TaskStudentDetailPage })),
-);
-const TaskUploadPage = React.lazy(() =>
-  import("@/routes/tasks/TaskUploadPage").then((module) => ({ default: module.TaskUploadPage })),
 );
 
 function RouteFallback() {
@@ -52,33 +50,84 @@ function routeElement(element: React.ReactNode) {
   return <React.Suspense fallback={<RouteFallback />}>{element}</React.Suspense>;
 }
 
+/**
+ * Root redirect: send the authenticated user to their role home; anonymous
+ * users land on /login. Replaces the legacy shared "/" teacher dashboard so
+ * every role's nav is self-consistent (teacher → /teacher, etc.).
+ */
+function RootRedirect() {
+  const currentUser = useCurrentUser();
+  if (currentUser.isLoading) {
+    return <RouteFallback />;
+  }
+  if (currentUser.isError || !currentUser.data) {
+    return <Navigate to="/login" replace />;
+  }
+  return <Navigate to={homeForRole(currentUser.data.role)} replace />;
+}
+
 const router = createBrowserRouter([
   { path: "/login", element: routeElement(<LoginPage />) },
   { path: "/register", element: routeElement(<RegisterPage />) },
-  { path: "/student", element: <StudentUnavailablePage /> },
+  { path: "/", element: <RootRedirect /> },
   {
-    path: "/",
+    // Admin workspace.
+    path: "/admin",
     element: (
-      <RequireTeacherSession>
+      <RequireRoleSession allowed="admin" homeFor={homeForRole}>
         <AppShell />
-      </RequireTeacherSession>
+      </RequireRoleSession>
     ),
     children: [
-      { index: true, element: routeElement(<DashboardPage />) },
-      { path: "history", element: routeElement(<HistoryPage />) },
+      { index: true, element: routeElement(<AdminPlaceholder />) },
+      { path: "users", element: routeElement(<AdminUsersPage />) },
+      { path: "invites", element: routeElement(<AdminInvitesPage />) },
+      { path: "system", element: routeElement(<AdminSystemPage />) },
+      { path: "*", element: routeElement(<NotFoundPage />) },
+    ],
+  },
+  {
+    // Student workspace.
+    path: "/student",
+    element: (
+      <RequireRoleSession allowed="student" homeFor={homeForRole}>
+        <AppShell />
+      </RequireRoleSession>
+    ),
+    children: [
+      { index: true, element: routeElement(<StudentDashboardPage />) },
+      { path: "courses", element: routeElement(<StudentCoursesPage />) },
+      { path: "courses/:courseId", element: routeElement(<StudentCourseDetailPage />) },
+      { path: "assignments/:assignmentId", element: routeElement(<StudentAssignmentPage />) },
+      { path: "results", element: routeElement(<StudentResultPage />) },
+      { path: "*", element: routeElement(<NotFoundPage />) },
+    ],
+  },
+  {
+    // Teacher workspace (admin may also view): normalized course→assignment→
+    // question→grading workflow. Shared experts/knowledge-base/settings live here.
+    path: "/teacher",
+    element: (
+      <RequireRoleSession allowed={["teacher", "admin"]} homeFor={homeForRole}>
+        <AppShell />
+      </RequireRoleSession>
+    ),
+    children: [
+      { index: true, element: routeElement(<TeacherDashboardPage />) },
+      { path: "courses", element: routeElement(<TeacherCoursesPage />) },
+      { path: "courses/:courseId", element: routeElement(<TeacherCourseDetailPage />) },
+      { path: "assignments/:assignmentId", element: routeElement(<TeacherAssignmentDetailPage />) },
+      { path: "assignments/:assignmentId/edit", element: routeElement(<AssignmentEditorPage />) },
+      { path: "assignments/:assignmentId/grading", element: routeElement(<TeacherGradingPage />) },
+      { path: "assignments/:assignmentId/submissions", element: routeElement(<TeacherSubmissionsPage />) },
+      { path: "assignments/:assignmentId/results", element: routeElement(<TeacherResultsPage />) },
       { path: "knowledge-base", element: routeElement(<KnowledgeBasePage />) },
-      { path: "tasks/new", element: routeElement(<NewTaskPage />) },
-      { path: "tasks/:taskId", element: <Navigate to="setup" replace /> },
-      { path: "tasks/:taskId/setup", element: routeElement(<TaskSetupPage />) },
-      { path: "tasks/:taskId/upload/:kind", element: routeElement(<TaskUploadPage />) },
-      { path: "tasks/:taskId/results", element: routeElement(<TaskResultsPage />) },
-      { path: "tasks/:taskId/results/:studentId", element: routeElement(<TaskStudentDetailPage />) },
-      { path: "tasks/:taskId/questions/:questionId", element: routeElement(<TaskQuestionDetailPage />) },
       { path: "experts", element: routeElement(<ExpertsPage />) },
       { path: "settings", element: routeElement(<SettingsPage />) },
       { path: "*", element: routeElement(<NotFoundPage />) },
     ],
   },
+  { path: "*", element: routeElement(<NotFoundPage />) },
 ]);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

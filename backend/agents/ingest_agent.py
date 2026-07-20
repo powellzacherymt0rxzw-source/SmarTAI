@@ -270,8 +270,9 @@ async def parse_reference_to_per_question(
 ) -> Dict[str, str]:
     """Parse a teacher-supplied reference answer document into a {q_id: answer_text} mapping.
 
-    Used by ``POST /tasks/{id}/upload_reference``. The same document may be the
-    original problem file (when the teacher checks "题目文件已包含标答" — we re-feed
+    Used while importing reference answers for normalized assignment questions.
+    The same document may be the original problem file (when the teacher checks
+    "题目文件已包含标答" — we re-feed
     the same bytes here) — the prompt explicitly tells the LLM not to reproduce
     the stem, only the answer portion.
 
