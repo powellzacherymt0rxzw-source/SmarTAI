@@ -31,8 +31,11 @@ const TaskQuestionDetailPage = React.lazy(() =>
 const TaskResultsPage = React.lazy(() =>
   import("@/routes/tasks/TaskResultsPage").then((module) => ({ default: module.TaskResultsPage })),
 );
-const TaskSetupPage = React.lazy(() =>
-  import("@/routes/tasks/TaskSetupPage").then((module) => ({ default: module.TaskSetupPage })),
+const TaskEntryRedirect = React.lazy(() =>
+  import("@/routes/tasks/TaskEntryRedirect").then((module) => ({ default: module.TaskEntryRedirect })),
+);
+const TaskMaterialsPage = React.lazy(() =>
+  import("@/routes/tasks/TaskMaterialsPage").then((module) => ({ default: module.TaskMaterialsPage })),
 );
 const TaskStudentDetailPage = React.lazy(() =>
   import("@/routes/tasks/TaskStudentDetailPage").then((module) => ({ default: module.TaskStudentDetailPage })),
@@ -102,8 +105,9 @@ const router = createBrowserRouter([
       { path: "history", element: routeElement(<HistoryPage />) },
       { path: "knowledge-base", element: routeElement(<KnowledgeBasePage />) },
       { path: "tasks/new", element: routeElement(<NewTaskPage />) },
-      { path: "tasks/:taskId", element: <Navigate to="setup" replace /> },
-      { path: "tasks/:taskId/setup", element: routeElement(<TaskSetupPage />) },
+      { path: "tasks/:taskId", element: routeElement(<TaskEntryRedirect />) },
+      { path: "tasks/:taskId/setup", element: routeElement(<TaskEntryRedirect />) },
+      { path: "tasks/:taskId/materials", element: routeElement(<TaskMaterialsPage />) },
       { path: "tasks/:taskId/upload/problems", element: routeElement(<AddProblemsPage />) },
       { path: "tasks/:taskId/upload/:kind", element: routeElement(<TaskUploadPage />) },
       { path: "tasks/:taskId/problems/progress", element: routeElement(<ProblemRecognitionProgressPage />) },

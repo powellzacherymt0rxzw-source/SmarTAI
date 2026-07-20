@@ -135,6 +135,7 @@ export interface TaskLite {
   extract_job_id?: string | null;
   parse_job_id?: string | null;
   grading_job_id?: string | null;
+  last_failed_job_id?: string | null;
   problem_file_name?: string | null;
   submission_file_name?: string | null;
   reference_file_name?: string | null;

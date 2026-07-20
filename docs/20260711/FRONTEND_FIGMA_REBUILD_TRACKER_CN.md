@@ -8,7 +8,7 @@
 >
 > R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 >
-> 当前阶段：Q-03 最终视觉纠正与 Q-09 返回闭环已在用户明确要求继续下一阶段后归档；C-01“批改设置”已完成代码、合同、工程回归与桌面/移动浏览器验收，等待用户视觉确认。C-01 的决定、真实能力边界与验收证据见 `docs/20260720/C01_GRADING_SETUP_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
+> 当前阶段：Q-03 最终视觉纠正与 Q-09 返回闭环已在用户明确要求继续下一阶段后归档；C-01“批改设置”已完成代码、合同、工程回归与桌面/移动浏览器验收，等待用户视觉确认。C-01 的决定、真实能力边界与验收证据见 `docs/20260720/C01_GRADING_SETUP_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。2026-07-20 用户发现工作台/历史任务中的草稿仍会进入遗留 `/tasks/:id/setup` 长页；6.6 节的跨阶段 canonical task entry 纠偏现已完成代码和关键浏览器验收，等待用户确认。
 
 ---
 
@@ -423,6 +423,16 @@
 - 工程证据：相关回归 `66 passed`；后端全量 `180 passed, 1 skipped, 16 warnings`；前端可见范围审计 `65` 个文件、TypeScript、Vite `466 modules` production build 与 `git diff --check` 通过；两轮终审修复后无已知 P0/P1/P2。
 - 浏览器证据：`c01-grading-setup-1440x900.png` 与 `c01-grading-setup-390x844.png`；桌面 `innerWidth=scrollWidth=1440` 且 `scrollHeight=900`，移动 `innerWidth=scrollWidth=390`。未配置直达作答被拦截，双模型默认 weighted、保存进入作答、返回恢复及改回单模型均通过；未调用真实模型。
 - 当前状态：代码、合同、工程与浏览器验收完成，等待用户视觉确认，故保持 `[~]`。下一阶段为 S01；C02 保持只读确认页，不成为第二套配置表单。
+
+### 6.6 跨阶段 canonical task entry 纠偏（2026-07-20）
+
+- 用户现场证据：从工作台或历史任务点击草稿 `T_95ee9af828` 后进入 `/tasks/T_95ee9af828/setup`，展示的是本轮 route map 已淘汰的“资料配置”长页；新版 Q01 `/tasks/:id/upload/problems` 实际已经存在，并非页面尚未开发。
+- 根因：任务卡片使用的 destination resolver 仍把 `draft`/默认状态指向 `/setup`，同时 router 又把 `/tasks/:id` 静态导向 `/setup`；新建任务和 Q01-Q09 使用另一套新路由，形成两个入口真相源。
+- [~] T-FLOW-01 工作台、历史任务、`/tasks/:id` 和其他“继续任务”入口已统一使用同一状态感知 resolver；`draft` 的 canonical destination 固定为 Q01，新建任务与恢复草稿不再分叉。工作台和历史任务中的 `test1` 均已实际点击验证进入 `/upload/problems`；等待用户确认。
+- [~] T-FLOW-02 `/tasks/:id/setup` 现只保留为旧书签兼容入口，并与 `/tasks/:id` 一样按真实任务状态跳到当前新阶段；`error` 根据最近失败 job 与已有文件/计数事实恢复，不再返回遗留长页。13 个 destination 分支和 3 个 error gate 分支的确定性检查通过；未为验收制造真实失败任务。
+- [~] T-FLOW-03 Q01 的返回动作已改为返回历史任务，不再生成指向 `/setup` 的新链接；遗留 `TaskSetupPage` 文件和可见渲染均已删除。旧 `/setup` 地址实际打开后直接进入新版 Q01，且干净标签页无控制台 error/warning；等待用户确认。
+- [~] T-FLOW-04 遗留页唯一需要保留的真实能力——当前任务 KB 资料上传、列表和删除——已迁移到独立 `/tasks/:id/materials`，并由 C01“任务资料范围”提供明确入口。遗留页未接保存的“补充规则”文本框、仅浏览器本地的“个人知识库选择”和重复 BYOK 摘要未迁移；教师注意事项只以 C01 已版本化保存的真实字段为准。C01 → 任务资料 → C01 往返已实际验证，未上传或删除用户文件。
+- [~] T-FLOW-QA 工程检查于 2026-07-20 15:25 UTC+8 完成：前端可见范围审计扫描 66 个文件、TypeScript、Vite production build（465 modules）和 `git diff --check` 均通过。浏览器证据为 `draft-entry-to-q01-correction-20260720.png` 与 `task-materials-entry-correction-20260720.png`（1280×720）；任务资料页 `innerWidth=document/body scrollWidth=1280`、`scrollHeight=720`，无页面级横向溢出且首屏完整。移动端未为本次跨阶段热修重复截图，继续沿用组件既有响应式约束并留待用户按需检查。
 
 ---
 

@@ -400,5 +400,5 @@ function formatRpm(rpm: number) {
 }
 
 function safeExpertsReturnTo(value: string | null): string | null {
-  return value && /^\/tasks\/[^/?#]+\/(?:upload\/problems|grading-setup|questions\/(?:ai-complete|import))$/.test(value) ? value : null;
+  return value && /^\/tasks\/[^/?#]+\/(?:upload\/problems|grading-setup|materials|questions\/(?:ai-complete|import))$/.test(value) ? value : null;
 }

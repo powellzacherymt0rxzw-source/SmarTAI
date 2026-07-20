@@ -237,6 +237,7 @@ export function GradingSetupPage() {
 
                 <KnowledgeSection
                   locale={locale}
+                  taskId={taskId}
                   knowledge={response.knowledge}
                   value={setup.knowledge_scope}
                   onChange={(knowledgeScope) => updateSetup((current) => ({ ...current, knowledge_scope: knowledgeScope }))}
@@ -419,8 +420,9 @@ function ModelSection({
   );
 }
 
-function KnowledgeSection({ locale, knowledge, value, onChange }: {
+function KnowledgeSection({ locale, taskId, knowledge, value, onChange }: {
   locale: Locale;
+  taskId: string;
   knowledge: GradingSetupKnowledge;
   value: GradingKnowledgeScope;
   onChange: (scope: GradingKnowledgeScope) => void;
@@ -428,7 +430,16 @@ function KnowledgeSection({ locale, knowledge, value, onChange }: {
   return (
     <fieldset>
       <legend className="text-[17px] font-bold leading-6 text-foreground">{gradingSetupText(locale, "knowledgeTitle")}</legend>
-      <p className="mt-0.5 text-[12px] leading-4 text-muted-foreground">{gradingSetupText(locale, "knowledgeDescription")}</p>
+      <div className="mt-0.5 flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <p className="text-[12px] leading-4 text-muted-foreground">{gradingSetupText(locale, "knowledgeDescription")}</p>
+        <Link
+          to={`/tasks/${taskId}/materials`}
+          className="inline-flex shrink-0 items-center gap-0.5 self-start text-[12px] font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {locale === "zh-CN" ? "管理任务资料" : "Manage task documents"}
+          <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
+        </Link>
+      </div>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <RadioCard
           name="grading-knowledge-scope"

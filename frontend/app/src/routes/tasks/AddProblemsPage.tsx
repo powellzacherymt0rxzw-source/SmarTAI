@@ -236,16 +236,14 @@ export function AddProblemsPage() {
         <h1 className="shrink-0 text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
           {t("addProblemsTitle")}
         </h1>
-        {task && taskId ? (
-          <Link
-            to={`/tasks/${taskId}/setup`}
-            className="inline-flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
-            title={`${t("addProblemsBackToTask")}${task.name}`}
-          >
-            <ArrowLeft aria-hidden="true" className="h-4 w-4 shrink-0" />
-            <span className="max-w-[520px] truncate">{t("addProblemsBackToTask")}{task.name}</span>
-          </Link>
-        ) : null}
+        <Link
+          to="/history"
+          className="inline-flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+          title={t("addProblemsBackToTask")}
+        >
+          <ArrowLeft aria-hidden="true" className="h-4 w-4 shrink-0" />
+          <span>{t("addProblemsBackToTask")}</span>
+        </Link>
       </div>
       <NewTaskStepper currentStep={0} />
 

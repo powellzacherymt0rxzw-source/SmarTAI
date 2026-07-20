@@ -115,3 +115,17 @@
 ## 7. 阶段结论与下一步
 
 C01 的代码、合同、测试、桌面/移动实渲染和保存闭环已完成；阶段状态保持 `[~]`，只等待用户查看本轮最终截图后做视觉确认。下一阶段按 route map 进入 S01“添加学生作答”，把当前旧长页拆成独立上传页；C02 继续保持只读确认页边界，不再复制一套可编辑批改配置。
+
+## 8. 2026-07-20 跨阶段入口纠偏补充
+
+用户从工作台/历史任务打开草稿时看到了遗留 `/tasks/:id/setup`“资料配置”长页。新版 Q01 `/tasks/:id/upload/problems` 已经完成，实际问题是旧 destination 默认值和 router 静态重定向仍绕过了新 route map。因此本项属于跨阶段 canonical task entry 修复，不重新定义 C01，也不把遗留 Setup 当作 C01 的前置页面。
+
+冻结边界：
+
+- `/tasks/:id` 与兼容 `/tasks/:id/setup` 必须通过同一状态感知入口恢复任务；草稿进入 Q01，错误任务进入最近失败阶段的恢复页面，其他状态进入其唯一 canonical 新页面。
+- Q01 返回历史任务，不再链接 `/setup`；遗留 `TaskSetupPage` 从正常流程和兼容 route 的可见渲染中退役。
+- 遗留 Setup 中真实接入后端的当前任务 KB 上传、列表和删除迁入 `/tasks/:id/materials`；C01 的“任务资料范围”显示资料计数，并提供进入该页管理后再返回 C01 的入口。
+- 遗留页中没有保存接线的“补充规则”文本框不迁移；教师注意事项继续只使用 C01 已版本化保存并被正式批改消费的字段。
+- 仅保存在浏览器本地、尚不参与后端检索的“个人知识库选择”不迁移；重复 BYOK 概览不迁移，模型恢复仍由全局模型摘要和 `/settings/byok` 负责。
+
+补充项已完成：工作台、历史任务、`/tasks/:id` 与旧 `/setup` 的草稿入口均落到 Q01；C01“管理任务资料”进入 900px 单卡短页并可返回 C01。前端可见范围审计（66 文件）、TypeScript、Vite production build（465 modules）、`git diff --check`、13 个 destination 分支与 3 个 error gate 分支检查通过；干净浏览器标签页无控制台 error/warning。截图为 `draft-entry-to-q01-correction-20260720.png` 与 `task-materials-entry-correction-20260720.png`（1280×720）。验收未调用模型，也未上传或删除用户文件；用户视觉确认仍待完成。

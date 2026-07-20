@@ -126,7 +126,7 @@ export const TASK_WORKFLOW_STEPS: Array<{
     key: "setup",
     label: "资料配置",
     description: "专家与任务资料",
-    href: (taskId) => `/tasks/${taskId}/setup`,
+    href: (taskId) => `/tasks/${taskId}`,
   },
   {
     key: "problems",
@@ -196,7 +196,7 @@ export function getTaskStepIndex(step: TaskWorkflowStepKey): number {
 }
 
 export function getTaskStepHref(step: TaskWorkflowStepKey, taskId: string): string {
-  return TASK_WORKFLOW_STEPS.find((item) => item.key === step)?.href(taskId) ?? `/tasks/${taskId}/setup`;
+  return TASK_WORKFLOW_STEPS.find((item) => item.key === step)?.href(taskId) ?? `/tasks/${taskId}`;
 }
 
 export function isTaskStepAvailable(
@@ -262,10 +262,17 @@ export function getTaskStepGate(
 ): TaskStepGateResult {
   const taskId = task?.task_id ?? "";
   const status = task?.status;
-  const currentStep = getTaskCurrentStep(status);
+  const recoveryHref = task && status === "error" ? getTaskDestination(task) : null;
+  const currentStep = recoveryHref
+    ? getRecoveryStep(recoveryHref)
+    : getTaskCurrentStep(status);
   const currentStepConfig = TASK_WORKFLOW_STEPS.find((step) => step.key === currentStep) ?? TASK_WORKFLOW_STEPS[0];
   const requestedStepConfig = TASK_WORKFLOW_STEPS.find((step) => step.key === requestedStep) ?? TASK_WORKFLOW_STEPS[0];
-  const available = Boolean(task && isTaskStepAvailable(status, requestedStep, task.grading_setup_configured));
+  const available = Boolean(task && (
+    recoveryHref
+      ? requestedStep === currentStep
+      : isTaskStepAvailable(status, requestedStep, task.grading_setup_configured)
+  ));
   const needsGradingSetup = Boolean(
     task &&
     requestedStep === "submissions" &&
@@ -279,9 +286,11 @@ export function getTaskStepGate(
     currentStepLabel: currentStepConfig.label,
     currentStepHref: needsGradingSetup
       ? `/tasks/${taskId}/grading-setup`
-      : task
-        ? getTaskDestination(task)
-        : "/history",
+      : recoveryHref
+        ? recoveryHref
+        : task
+          ? getTaskDestination(task)
+          : "/history",
     requestedStepLabel: requestedStepConfig.label,
     title: needsGradingSetup
       ? translate?.("taskGateGradingSetupTitle") ?? "请先完成批改设置"
@@ -297,24 +306,77 @@ export function getTaskStepGate(
   };
 }
 
-export function getTaskDestination(task: Pick<TaskLite, "task_id" | "status" | "grading_setup_configured">): string {
+function getRecoveryStep(destination: string): TaskWorkflowStepKey {
+  if (destination.endsWith("/results")) {
+    return "results";
+  }
+  if (destination.endsWith("/upload/submissions")) {
+    return "submissions";
+  }
+  return "problems";
+}
+
+type TaskDestinationInput = Pick<TaskLite, "task_id" | "status" | "grading_setup_configured"> & Partial<Pick<
+  TaskLite,
+  | "last_failed_job_id"
+  | "extract_job_id"
+  | "parse_job_id"
+  | "grading_job_id"
+  | "problem_file_name"
+  | "submission_file_name"
+  | "problem_count"
+  | "student_count"
+>>;
+
+export function getTaskDestination(task: TaskDestinationInput): string {
+  const taskRoot = `/tasks/${task.task_id}`;
+
   switch (task.status) {
     case "extracting_problems":
-      return `/tasks/${task.task_id}/problems/progress`;
+      return `${taskRoot}/problems/progress`;
     case "problems_ready":
       return task.grading_setup_configured
-        ? `/tasks/${task.task_id}/upload/submissions`
-        : `/tasks/${task.task_id}/questions`;
+        ? `${taskRoot}/upload/submissions`
+        : `${taskRoot}/questions`;
     case "parsing_submissions":
     case "submissions_ready":
-      return `/tasks/${task.task_id}/upload/submissions`;
+      return `${taskRoot}/upload/submissions`;
     case "grading":
     case "graded":
-      return `/tasks/${task.task_id}/results`;
+      return `${taskRoot}/results`;
     case "draft":
-    case "error":
+      return `${taskRoot}/upload/problems`;
+    case "error": {
+      const failedJobId = task.last_failed_job_id;
+
+      if (failedJobId && failedJobId === task.grading_job_id) {
+        return `${taskRoot}/results`;
+      }
+      if (failedJobId && failedJobId === task.parse_job_id) {
+        return `${taskRoot}/upload/submissions`;
+      }
+      if (failedJobId && failedJobId === task.extract_job_id) {
+        return `${taskRoot}/problems/progress`;
+      }
+
+      // Older task snapshots may not expose last_failed_job_id. Recover to
+      // the furthest stage supported by persisted job/file/count evidence.
+      if (task.grading_job_id) {
+        return `${taskRoot}/results`;
+      }
+      if (task.parse_job_id || task.submission_file_name || (task.student_count ?? 0) > 0) {
+        return `${taskRoot}/upload/submissions`;
+      }
+      if ((task.problem_count ?? 0) > 0) {
+        return `${taskRoot}/questions`;
+      }
+      if (task.extract_job_id || task.problem_file_name) {
+        return `${taskRoot}/problems/progress`;
+      }
+      return `${taskRoot}/upload/problems`;
+    }
     default:
-      return `/tasks/${task.task_id}/setup`;
+      return `${taskRoot}/upload/problems`;
   }
 }
 
@@ -436,7 +498,7 @@ export function getTaskNextStep(
         title: "处理任务异常",
         description: "查看错误原因，可重试、重新上传，或回到最近阶段继续。",
         buttonLabel: "处理异常",
-        to: task.problem_count > 0 ? submissionUpload : problemUpload,
+        to: getTaskDestination(task),
       };
   }
 }

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as kbApi from "@/api/kb";
 import type { UploadOptions } from "@/api/client";
-import { kbKeys, taskKeys } from "./keys";
+import { gradingSetupKeys, kbKeys, taskKeys } from "./keys";
 
 export function useKBDocs(taskId?: string) {
   return useQuery({
@@ -19,6 +19,7 @@ export function useUploadKBDoc() {
       kbApi.uploadKBDoc(taskId, file, { onProgress }),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: kbKeys.list(variables.taskId) });
+      queryClient.invalidateQueries({ queryKey: gradingSetupKeys.detail(variables.taskId) });
       queryClient.invalidateQueries({ queryKey: taskKeys.detail(variables.taskId) });
       queryClient.invalidateQueries({ queryKey: taskKeys.state(variables.taskId) });
     },
@@ -32,6 +33,7 @@ export function useDeleteKBDoc() {
     mutationFn: ({ taskId, docId }: { taskId: string; docId: string }) => kbApi.deleteKBDoc(taskId, docId),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: kbKeys.list(variables.taskId) });
+      queryClient.invalidateQueries({ queryKey: gradingSetupKeys.detail(variables.taskId) });
       queryClient.invalidateQueries({ queryKey: taskKeys.detail(variables.taskId) });
       queryClient.invalidateQueries({ queryKey: taskKeys.state(variables.taskId) });
     },
