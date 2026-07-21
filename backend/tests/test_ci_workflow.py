@@ -80,6 +80,52 @@ def test_e2e_readiness_probe_uses_http_get(workflow_text: str) -> None:
     assert "/ready" in e2e_section, "E2E job must still probe the /ready endpoint"
 
 
+def test_sqlite_backend_job_installs_pytest_asyncio(workflow_text: str) -> None:
+    """The SQLite backend job must install ``pytest-asyncio`` before tests.
+
+    The async test functions are decorated with ``@pytest.mark.asyncio``. The
+    mark is only recognized when ``pytest-asyncio`` is installed; without it
+    every async test fails with
+    ``async def functions are not natively supported`` plus a
+    ``PytestUnknownMarkWarning`` for ``pytest.mark.asyncio``.
+    ``render-requirements.txt`` is the deployment pin list and does not declare
+    test-only dependencies, so the job must install ``pytest-asyncio``
+    explicitly alongside ``pytest``.
+    """
+    assert "name: Backend (SQLite)" in workflow_text, "SQLite backend job must exist"
+
+    sqlite_section = _job_section(workflow_text, "backend-sqlite")
+    install_step = _install_step(sqlite_section)
+    assert "pytest-asyncio" in install_step, (
+        "SQLite backend job's dependency install step must include "
+        "pytest-asyncio (async tests use @pytest.mark.asyncio and fail with "
+        "'async def functions are not natively supported' without it)"
+    )
+
+
+def test_postgres_backend_job_installs_pytest_asyncio(workflow_text: str) -> None:
+    """The PostgreSQL backend job must install ``pytest-asyncio`` before tests.
+
+    The PostgreSQL integration job runs ``python -m pytest
+    backend/tests/test_postgres_integration.py``. Even though that file is
+    currently synchronous, the job shares the test environment with the async
+    test suite and must install ``pytest-asyncio`` so the async test
+    infrastructure (and the ``@pytest.mark.asyncio`` mark handling) is
+    available. ``render-requirements.txt`` does not declare it, so it must be
+    installed explicitly, mirroring the SQLite backend job.
+    """
+    assert "name: Backend (PostgreSQL)" in workflow_text, (
+        "PostgreSQL backend job must exist"
+    )
+
+    postgres_section = _job_section(workflow_text, "backend-postgres")
+    install_step = _install_step(postgres_section)
+    assert "pytest-asyncio" in install_step, (
+        "PostgreSQL backend job's dependency install step must include "
+        "pytest-asyncio so the async test infrastructure is available"
+    )
+
+
 def _job_section(workflow_text: str, job_id: str) -> str:
     """Return the YAML text for a single named job.
 

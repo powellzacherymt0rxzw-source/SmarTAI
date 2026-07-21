@@ -22,7 +22,10 @@ jobs:
           pip install -r render-requirements.txt
           # render-requirements.txt is the deployment pin list and does not
           # declare test-only deps; pytest is required by the test step below.
-          pip install pytest
+          # pytest-asyncio is required because the async test functions are
+          # decorated with @pytest.mark.asyncio; without it they fail with
+          # "async def functions are not natively supported".
+          pip install pytest pytest-asyncio
       - name: Compile
         run: python -m compileall -q backend
       - name: Test (SQLite)
@@ -63,7 +66,10 @@ jobs:
           pip install -r render-requirements.txt
           # render-requirements.txt is the deployment pin list and does not
           # declare test-only deps; pytest is required by the test step below.
-          pip install pytest
+          # pytest-asyncio is required because the async test functions are
+          # decorated with @pytest.mark.asyncio; without it they fail with
+          # "async def functions are not natively supported".
+          pip install pytest pytest-asyncio
       - name: Apply PostgreSQL migration
         env:
           SMARTAI_DATABASE_HEAVY: "ON"

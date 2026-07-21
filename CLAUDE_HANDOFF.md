@@ -79,6 +79,115 @@ The red-test output from the interrupted Claude session was not observed, so
 that part of the TDD audit remains a process gap; the focused regression tests
 and full verification are green.
 
+## Follow-up: CI Run 29800660868
+
+The first pushed fix correctly made E2E and frontend jobs pass, but exposed two
+additional dependency/schema-boundary failures:
+
+1. SQLite now installs `pytest`, but 41 async tests fail with `async def
+   functions are not natively supported` and `PytestUnknownMarkWarning` for
+   `pytest.mark.asyncio`. The CI test environment also needs
+   `pytest-asyncio`.
+2. PostgreSQL migration succeeds, but the PostgreSQL integration fixture calls
+   `Base.metadata.create_all()`. ORM columns in `backend/db/models.py` still
+   emit `BOOLEAN DEFAULT 1/0` for `UserRecord.is_active`,
+   `ProviderConfigRecord.enabled`, and `GradeResultRecord.requires_review`.
+   PostgreSQL rejects the integer default before the integration tests run.
+
+Implement only this follow-up. Add focused regression tests first and observe
+the expected failures, then make the minimal fixes. Update the Claude -> Codex
+section with the new verification results and remaining gaps. Do not commit or
+push; Codex will review and integrate.
+
+## Claude -> Codex (Follow-up: CI Run 29800660868)
+
+Claude implemented the follow-up with TDD (red → green) for the two diagnosed
+failures. No commit or push was performed.
+
+### Modified files
+
+- `.github/workflows/ci.yml` — both backend jobs (`backend-sqlite`,
+  `backend-postgres`) now install `pytest-asyncio` alongside `pytest` in their
+  `Install dependencies` step. The E2E job is unaffected (it does not run the
+  pytest suite).
+- `backend/db/models.py` — three ORM boolean `server_default` values switched
+  from integer literals to portable boolean literals so
+  `Base.metadata.create_all()` agrees with the already-fixed Alembic baseline
+  migration on PostgreSQL:
+  - `UserRecord.is_active`: `text("1")` → `text("true")`
+  - `ProviderConfigRecord.enabled`: `text("1")` → `text("true")`
+  - `GradeResultRecord.requires_review`: `text("0")` → `text("false")`
+- `backend/tests/test_ci_workflow.py` — added
+  `test_sqlite_backend_job_installs_pytest_asyncio` and
+  `test_postgres_backend_job_installs_pytest_asyncio`. They parse the workflow
+  YAML and assert each backend job's `Install dependencies` step contains
+  `pytest-asyncio`.
+- `backend/tests/test_orm_postgres_boolean_defaults.py` (new) — renders
+  `Base.metadata.create_all()` DDL for the PostgreSQL dialect via
+  `CreateTable(...).compile(dialect=postgresql.dialect())` and asserts the
+  three boolean columns emit `DEFAULT true` / `DEFAULT false` rather than
+  `DEFAULT 1` / `DEFAULT 0`.
+
+### TDD red phase (observed before fixes)
+
+`python -m pytest backend/tests/test_ci_workflow.py::test_sqlite_backend_job_installs_pytest_asyncio backend/tests/test_ci_workflow.py::test_postgres_backend_job_installs_pytest_asyncio backend/tests/test_orm_postgres_boolean_defaults.py -q`:
+`3 failed`.
+
+- `test_sqlite_backend_job_installs_pytest_asyncio`: failed because the
+  SQLite job's install step contained `pip install pytest` but not
+  `pytest-asyncio`.
+- `test_postgres_backend_job_installs_pytest_asyncio`: same root cause for the
+  PostgreSQL job.
+- `test_orm_boolean_columns_emit_portable_postgres_defaults`: failed with
+  `assert '1' == 'true'` for `is_active`, confirming the ORM metadata rendered
+  `BOOLEAN DEFAULT 1` on PostgreSQL.
+
+### Green verification
+
+- New regression tests:
+  `python -m pytest backend/tests/test_ci_workflow.py::test_sqlite_backend_job_installs_pytest_asyncio backend/tests/test_ci_workflow.py::test_postgres_backend_job_installs_pytest_asyncio backend/tests/test_orm_postgres_boolean_defaults.py -q`:
+  `3 passed`.
+- CI-equivalent SQLite suite:
+  `python -m pytest backend/tests -q`: `203 passed, 4 skipped` (was
+  `200 passed, 4 skipped`; the three new tests account for the increase).
+- Migration + ORM DDL guards together:
+  `python -m pytest backend/tests/test_migration_roundtrip.py backend/tests/test_ci_workflow.py backend/tests/test_orm_postgres_boolean_defaults.py -v`:
+  `10 passed`.
+- Async-heavy files (confirm async infrastructure still works):
+  `python -m pytest backend/tests/test_calculation_skill.py backend/tests/test_programming_skill.py backend/tests/test_multi_expert_robustness.py backend/tests/test_rag_inmemory.py -q`:
+  `50 passed`.
+- SQLite DDL portability check (manual): `CreateTable(...).compile(dialect=sqlite.dialect())`
+  renders `BOOLEAN DEFAULT true` / `DEFAULT false` for the three columns, which
+  SQLite accepts as aliases for `1`/`0`.
+
+### Risks
+
+- A live PostgreSQL service was not available locally (Docker unavailable), so
+  the PostgreSQL `create_all()` path is covered by the dialect-rendered DDL
+  regression test rather than a live run. The Alembic migration's
+  `test_postgresql_upgrade_uses_portable_boolean_defaults` already covers the
+  migration DDL; the new test covers the ORM `create_all()` DDL so both schema
+  producers are pinned to portable literals.
+- `pytest-asyncio` is installed without a version pin in CI, matching the
+  existing un-pinned `pytest` install. If a future `pytest-asyncio` release
+  changes the default `asyncio_mode` or breaks the `@pytest.mark.asyncio` mark
+  handling, the async tests could regress. The project has no `pyproject.toml`
+  / `pytest.ini` `asyncio_mode` setting today; the async tests currently rely
+  on `@pytest.mark.asyncio` decorators, which work under the default mode.
+
+### Remaining verification gaps
+
+- The live PostgreSQL service-migration job and the
+  `backend/tests/test_postgres_integration.py` fixture (which calls
+  `Base.metadata.create_all()` indirectly via `create_schema` in other tests,
+  and runs `alembic upgrade head` in its own fixture) were not executed
+  against a real PostgreSQL instance locally. They are covered by the
+  dialect-rendered DDL tests; final confirmation requires the GitHub Actions
+  PostgreSQL service container.
+- The E2E (Playwright) job was not in scope for this follow-up and was not
+  re-run; the previous fix (explicit `curl` GET probe for `/ready`) is
+  unchanged.
+
 ## Codex Review
 
 The diff matches the diagnosed failures. CI installs `pytest` explicitly in

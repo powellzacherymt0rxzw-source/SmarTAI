@@ -47,7 +47,7 @@ class UserRecord(Base):
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="teacher")
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(
-        default=True, server_default=text("1"), nullable=False
+        default=True, server_default=text("true"), nullable=False
     )
     created_at: Mapped[float] = mapped_column(Float, nullable=False, default=time.time)
     updated_at: Mapped[float] = mapped_column(
@@ -126,7 +126,7 @@ class ProviderConfigRecord(Base):
     nonce: Mapped[str] = mapped_column(String(128), nullable=False)
     key_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     enabled: Mapped[bool] = mapped_column(
-        default=True, server_default=text("1"), nullable=False
+        default=True, server_default=text("true"), nullable=False
     )
     max_concurrent: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     rpm: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -502,7 +502,7 @@ class GradeResultRecord(Base):
     ai_expert_results: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     ai_synthesis_method: Mapped[str | None] = mapped_column(String(64), nullable=True)
     requires_review: Mapped[bool] = mapped_column(
-        default=False, server_default=text("0"), nullable=False
+        default=False, server_default=text("false"), nullable=False
     )
     review_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # graded | failed | needs_review. "failed"/"needs_review" are excluded from
