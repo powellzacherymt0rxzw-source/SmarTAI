@@ -103,6 +103,41 @@ def test_postgresql_upgrade_adds_deferred_foreign_keys_after_tables(monkeypatch)
     assert "REFERENCES knowledge_documents" not in stored_files_definition
 
 
+def test_postgresql_upgrade_uses_portable_boolean_defaults(monkeypatch):
+    """Boolean column defaults must be portable between SQLite and PostgreSQL.
+
+    PostgreSQL rejects integer literals as defaults for a BOOLEAN column
+    (``column "is_active" is of type boolean but default expression is of type
+    integer``), so the baseline migration must emit a real boolean default
+    (``true``/``false``) rather than ``1``/``0``. SQLite accepts both forms, so
+    switching to boolean literals keeps the SQLite round-trip working while
+    unblocking the PostgreSQL service-migration job.
+    """
+    import re
+
+    sql = _postgresql_sql(monkeypatch, "head")
+
+    boolean_columns = {
+        "is_active": "true",
+        "enabled": "true",
+        "requires_review": "false",
+    }
+    for column, expected_literal in boolean_columns.items():
+        pattern = re.compile(
+            rf"\b{column}\s+BOOLEAN\s+DEFAULT\s+(\S+)\s+NOT\s+NULL",
+            re.IGNORECASE,
+        )
+        match = pattern.search(sql)
+        assert match is not None, (
+            f"expected a BOOLEAN DEFAULT for {column!r} in the PostgreSQL DDL"
+        )
+        default = match.group(1).rstrip(",")
+        assert default.lower() == expected_literal, (
+            f"{column!r} default must be the boolean literal {expected_literal!r} "
+            f"on PostgreSQL, got {default!r}"
+        )
+
+
 def test_postgresql_downgrade_drops_deferred_foreign_keys_before_tables(monkeypatch):
     sql = _postgresql_sql(monkeypatch, "0001_normalized_learning:base")
     constraint_tables = {

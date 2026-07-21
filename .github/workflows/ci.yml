@@ -20,6 +20,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r render-requirements.txt
+          # render-requirements.txt is the deployment pin list and does not
+          # declare test-only deps; pytest is required by the test step below.
+          pip install pytest
       - name: Compile
         run: python -m compileall -q backend
       - name: Test (SQLite)
@@ -58,6 +61,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r render-requirements.txt
+          # render-requirements.txt is the deployment pin list and does not
+          # declare test-only deps; pytest is required by the test step below.
+          pip install pytest
       - name: Apply PostgreSQL migration
         env:
           SMARTAI_DATABASE_HEAVY: "ON"
@@ -142,5 +148,18 @@ jobs:
           # run the Playwright suite against it. The workflow stops the server
           # afterwards regardless of test outcome.
           (cd ../.. && SMARTAI_DATABASE_HEAVY=OFF SMARTAI_DATABASE_URL=sqlite:////tmp/smartai-e2e.db SMARTAI_DATABASE_URL_LIGHT=sqlite:////tmp/smartai-e2e.db SMARTAI_STORAGE_ROOT=/tmp/smartai-e2e-uploads SMARTAI_DATABASE_AUTO_CREATE=true SMARTAI_SEED_TEST_USERS=false SMARTAI_ALLOW_DEMO_TOKENS=true SMARTAI_E2E_FAKE_PROVIDER=true SMARTAI_E2E_FAIL_QID=q1 SMARTAI_PROVIDER_ENCRYPTION_KEY=e2e-master-key SMARTAI_GRADING_ENGINE=v2 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 > /tmp/backend.log 2>&1 &)
-          npx --yes wait-on -t 30000 http://127.0.0.1:8000/ready || (cat /tmp/backend.log && exit 1)
+          # wait-on issues HEAD for HTTP URL resources, but the /ready route is
+          # GET-only and returns 405 for HEAD — that caused the readiness wait
+          # to time out. Poll /ready with an explicit GET instead.
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8000/ready; then
+              break
+            fi
+            sleep 0.5
+            if [ "$i" -eq 60 ]; then
+              echo "backend not ready after 30s; /ready never returned 2xx"
+              cat /tmp/backend.log
+              exit 1
+            fi
+          done
           npm run e2e
