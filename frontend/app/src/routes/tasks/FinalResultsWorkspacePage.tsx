@@ -28,7 +28,8 @@ import { cn } from "@/lib/cn";
 import { formatTaskTime, getTaskDestination } from "@/lib/taskFlow";
 import { QuestionAnalysisDetail } from "@/routes/tasks/results/QuestionAnalysisDetail";
 import { QuestionAnalysisOverview } from "@/routes/tasks/results/QuestionAnalysisOverview";
-import type { Correction, TaskFinalizationResponse, TaskResultResponse } from "@/types";
+import { StudentAnalysisOverview } from "@/routes/tasks/results/StudentAnalysisOverview";
+import type { TaskFinalizationResponse, TaskResultResponse } from "@/types";
 
 type WorkspaceSection = "overview" | "questions" | "students" | "visualizations" | "reports";
 
@@ -205,7 +206,6 @@ function WorkspaceContent({
   finalization: TaskFinalizationResponse;
   result?: TaskResultResponse;
 }) {
-  const students = result?.results ?? [];
   const model = buildResultsModel(undefined, result);
 
   if (section === "overview") {
@@ -219,27 +219,7 @@ function WorkspaceContent({
   }
 
   if (section === "students") {
-    return (
-      <section className="rounded-[10px] border bg-card p-5">
-        <SectionHeading locale={locale} title="学生分析" titleEn="Student analysis" description={`当前正式版本包含 ${students.length} 位学生。`} descriptionEn={`The current formal version contains ${students.length} students.`} />
-        <div className="mt-4 divide-y rounded-[9px] border">
-          {students.slice(0, 6).map((student) => {
-            const earned = student.corrections.reduce((sum, correction) => sum + effectiveScore(correction), 0);
-            const possible = student.corrections.reduce((sum, correction) => sum + correction.max_score, 0);
-            return (
-              <div key={student.student_id} className="flex items-center justify-between gap-4 px-4 py-3">
-                <div className="min-w-0">
-                  <strong className="block truncate text-[13px] text-foreground">{student.student_id} · {student.student_name || student.student_id}</strong>
-                  <span className="text-[12px] text-muted-foreground">{student.corrections.length} {tx(locale, "道作答", "responses")}</span>
-                </div>
-                <span className="shrink-0 text-[14px] font-bold text-primary">{earned.toFixed(1)} / {possible.toFixed(1)}</span>
-              </div>
-            );
-          })}
-          {!students.length ? <EmptyRow locale={locale} /> : null}
-        </div>
-      </section>
-    );
+    return <StudentAnalysisOverview locale={locale} taskId={taskId} model={model} />;
   }
 
   const isReports = section === "reports";
@@ -507,10 +487,6 @@ function Metric({ value, label, tone }: { value: string; label: string; tone: "p
   );
 }
 
-function EmptyRow({ locale }: { locale: Locale }) {
-  return <div className="px-4 py-8 text-center text-[13px] text-muted-foreground">{tx(locale, "当前版本没有可展示的数据。", "No displayable data is available in this version.")}</div>;
-}
-
 function WorkspaceState({ locale, loading = false, onRetry }: { locale: Locale; loading?: boolean; onRetry?: () => void }) {
   return (
     <div className="flex min-h-[420px] flex-col items-center justify-center rounded-[10px] border bg-card px-6 text-center">
@@ -527,12 +503,6 @@ function sectionFromPath(pathname: string): WorkspaceSection {
   if (pathname.endsWith("/visualizations")) return "visualizations";
   if (pathname.endsWith("/reports")) return "reports";
   return "overview";
-}
-
-function effectiveScore(correction: Correction): number {
-  return typeof correction.teacher_score === "number" && Number.isFinite(correction.teacher_score)
-    ? correction.teacher_score
-    : Number(correction.score) || 0;
 }
 
 function analysisStatusLabel(locale: Locale, status: TaskFinalizationResponse["analysis_status"]): string {
