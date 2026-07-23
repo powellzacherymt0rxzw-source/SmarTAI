@@ -142,7 +142,7 @@ export function AddSubmissionsPage() {
       return;
     }
     if (isRecognitionRunning) {
-      navigate(`/tasks/${taskId}/upload/submissions`);
+      navigate(`/tasks/${taskId}/submissions/progress`);
       return;
     }
     if (disabledReason) {
@@ -166,10 +166,11 @@ export function AddSubmissionsPage() {
       });
       if (response.status === "already_done") {
         toast.info(t("submissionUploadViewProgress"));
+        navigate(`/tasks/${taskId}/upload/submissions`);
       } else {
         toast.success(t("submissionUploadStarted"));
+        navigate(`/tasks/${taskId}/submissions/progress`);
       }
-      navigate(`/tasks/${taskId}/upload/submissions`);
     } catch (error) {
       setFormError(localizeSubmissionError(error, t));
     }

@@ -3120,6 +3120,11 @@ async def _run_parse(
             return
         if old_grading_job_id:
             job_store.discard(old_grading_job_id)
+        await reporter.set_current_step(
+            "completed",
+            message="Submission recognition completed.",
+        )
+        await reporter.set_phase("done")
         logger.info(
             "[task:%s] submission parse done, %s students",
             task_id,

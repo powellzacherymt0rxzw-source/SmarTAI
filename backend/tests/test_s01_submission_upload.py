@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.models import Task, TaskGradingSetup
+from backend.progress.tracker import get_reporter
 from backend.state import get_task_store
 
 
@@ -148,6 +149,11 @@ async def test_roster_mode_is_forwarded_and_saved_without_credentials(client, mo
     assert observed["roster_entries"] == [{"stu_id": "PB20111600", "stu_name": "Kate"}]
     assert observed["provider_id"] == PROVIDER_ID
     assert "api_key" not in response.text
+    reporter = get_reporter(response.json()["job_id"])
+    assert reporter is not None
+    progress = await reporter.snapshot()
+    assert progress.phase == "done"
+    assert progress.current_step == "completed"
 
 
 @pytest.mark.asyncio

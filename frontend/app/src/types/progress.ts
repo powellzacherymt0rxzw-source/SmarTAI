@@ -37,4 +37,5 @@ export interface JobProgress {
   current_step?: string | null;
   total_steps?: number | null;
   completed_steps?: number | null;
+  stage_metrics?: Record<string, number>;
 }

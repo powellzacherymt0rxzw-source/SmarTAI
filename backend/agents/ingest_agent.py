@@ -227,6 +227,23 @@ async def parse_student_answers(
     if reporter:
         await reporter.set_phase("parsing")
         await reporter.set_totals(students=len(files_data), questions=len(problems_data))
+        await reporter.set_stage_metrics(
+            files_total=len(files_data),
+            files_processed=0,
+            submissions_recognized=0,
+            identities_matched=0,
+            identities_needing_review=0,
+            answers_split=0,
+            parse_failures=0,
+        )
+        await reporter.set_current_step(
+            "preparing_submission_files",
+            message="Submission files prepared.",
+        )
+        await reporter.set_current_step(
+            "recognizing_submissions",
+            message="Submission recognition started.",
+        )
 
     # Build simplified problem data for the prompt
     prob_for_prompt = []
@@ -270,12 +287,16 @@ async def parse_student_answers(
             filename = file_info.get("filename", "")
             content = file_info.get("content", "")
             if not filename or not content:
-                logger.warning(f"Skipping empty file: {filename}")
+                logger.warning("Skipping one empty submission file")
                 if reporter:
+                    await reporter.increment_stage_metrics(
+                        files_processed=1,
+                        parse_failures=1,
+                    )
                     await reporter.increment_completed()
                 return None, None
 
-            logger.info(f"parse_student_answers: processing {filename}")
+            logger.info("parse_student_answers: processing one submission")
             user_msg = (
                 f"**[Filename]**: {filename}\n\n"
                 f"**[Identity Matching Rule]**: {identity_instruction}\n\n"
@@ -287,10 +308,7 @@ async def parse_student_answers(
             try:
                 response = await ainvoke_with_retry(provider, messages)
                 parsed = extract_and_parse_json(response.content, StudentSubmission)
-                logger.info(f"parse_student_answers: done {filename} -> {parsed.stu_name}")
-                if reporter:
-                    await reporter._emit_message(f"Parsed {filename} → {parsed.stu_name}")
-                    await reporter.increment_completed()
+                logger.info("parse_student_answers: finished one submission")
                 payload = parsed.model_dump()
                 payload["source_filename"] = filename
                 payload["identity_match_method"] = identity_mode
@@ -308,17 +326,34 @@ async def parse_student_answers(
                     unknown_name = payload.get("stu_name") in {"", "[Unknown Student]"}
                     fallback_id = str(payload.get("stu_id") or "").strip() in {"", filename}
                     payload["identity_status"] = "needs_review" if unknown_name or fallback_id else "matched"
+                if reporter:
+                    identity_metric = (
+                        "identities_matched"
+                        if payload["identity_status"] == "matched"
+                        else "identities_needing_review"
+                    )
+                    await reporter.increment_stage_metrics(**{
+                        "files_processed": 1,
+                        "submissions_recognized": 1,
+                        identity_metric: 1,
+                        "answers_split": len(payload.get("stu_ans") or []),
+                    })
+                    await reporter._emit_message("Submission recognized.")
+                    await reporter.increment_completed()
                 return payload, None
             except Exception as exc:
                 logger.error(
-                    "Failed to parse submission; filename=%s exception_type=%s",
-                    filename,
+                    "Failed to parse one submission; exception_type=%s",
                     type(exc).__name__,
                 )
                 if reporter:
                     await reporter._emit_message(
-                        f"Failed to parse {filename}. Check the model configuration and retry.",
+                        "A submission could not be recognized. Check the model configuration and retry.",
                         level="warn",
+                    )
+                    await reporter.increment_stage_metrics(
+                        files_processed=1,
+                        parse_failures=1,
                     )
                     await reporter.increment_completed()
                 return None, "submission_parse_failed"
@@ -329,6 +364,12 @@ async def parse_student_answers(
     student_store.clear()
     student_store.update(stu_dict)
     logger.info(f"parse_student_answers: stored {len(stu_dict)} students")
+
+    if reporter:
+        await reporter.set_current_step(
+            "consolidating_submission_results",
+            message="Consolidating recognized submissions.",
+        )
 
     # Surface a clear error when every file failed — otherwise the API silently
     # returns "0 students" and the frontend shows a successful empty result.
@@ -341,9 +382,6 @@ async def parse_student_answers(
         if reporter:
             await reporter.set_error(msg)
         raise RuntimeError(msg)
-
-    if reporter:
-        await reporter.set_phase("done")
 
     return stu_dict
 

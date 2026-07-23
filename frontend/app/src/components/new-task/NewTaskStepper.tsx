@@ -1,4 +1,5 @@
 import { Check } from "lucide-react";
+import { useLayoutEffect, useRef } from "react";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { MessageKey } from "@/i18n/messages";
 
@@ -14,12 +15,26 @@ const STEP_KEYS: MessageKey[] = [
 
 export function NewTaskStepper({ currentStep = 0 }: { currentStep?: number }) {
   const { t } = useI18n();
+  const navRef = useRef<HTMLElement>(null);
+  const currentStepRef = useRef<HTMLLIElement>(null);
+
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    const current = currentStepRef.current;
+    if (!nav || !current || nav.scrollWidth <= nav.clientWidth) return;
+    const centeredLeft = current.offsetLeft + current.offsetWidth / 2 - nav.clientWidth / 2;
+    nav.scrollLeft = Math.max(0, centeredLeft);
+  }, [currentStep]);
 
   return (
-    <nav aria-label={t("newTaskWorkflow")} className="mt-[14px] overflow-x-auto pb-1">
+    <nav ref={navRef} aria-label={t("newTaskWorkflow")} className="mt-[14px] overflow-x-auto pb-1">
       <ol className="flex min-w-[1130px] items-center">
         {STEP_KEYS.map((key, index) => (
-          <li key={key} className={`relative flex shrink-0 items-center ${index < STEP_KEYS.length - 1 ? "w-[176px]" : "w-auto"}`}>
+          <li
+            ref={index === currentStep ? currentStepRef : undefined}
+            key={key}
+            className={`relative flex shrink-0 items-center ${index < STEP_KEYS.length - 1 ? "w-[176px]" : "w-auto"}`}
+          >
             <div className="flex shrink-0 items-center gap-2">
               <span
                 className={`inline-flex h-[26px] w-[26px] items-center justify-center rounded-full text-xs font-semibold ${

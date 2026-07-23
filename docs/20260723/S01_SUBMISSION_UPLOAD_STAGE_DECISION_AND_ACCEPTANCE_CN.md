@@ -11,7 +11,7 @@
 - 当前状态：代码、合同、工程和浏览器验收完成，等待用户视觉确认，因此 tracker 保持 `[~]`
 - 下一阶段：S02 `/tasks/:id/submissions/progress`
 
-S02/S03 尚未重写前，成功启动识别后暂时进入现有 `/tasks/:id/upload/submissions` 工作区；这是明确的过渡连接，不代表遗留页面已通过本轮视觉验收。下一阶段应把进行中状态切到 S02，把识别完成状态切到 S03。
+后续更新：S02 已于 2026-07-23 完成独立重写。成功启动识别及 `already_running` 现在进入 `/tasks/:id/submissions/progress`；只有 S03 尚未实现，识别完成状态暂时进入现有 `/tasks/:id/upload/submissions` 兼容工作区。该过渡连接不代表遗留页面已通过本轮视觉验收。
 
 ## 2. Figma 对齐目标
 
@@ -86,7 +86,7 @@ Figma 文案包含“图片”，但当前后端没有 OCR/vision ingestion。�
 - C01 保存成功后进入 `/tasks/:id/submissions/upload`。
 - 结果页重新上传作答入口进入同一 canonical route。
 - task-flow resolver 在 `problems_ready + grading_setup_configured` 时进入 S01。
-- `parsing_submissions` 与 `submissions_ready` 暂时维持现有工作区，等 S02/S03 建成后再切换，避免给尚不存在的新页面做假跳转。
+- `parsing_submissions` 已统一进入 S02；`submissions_ready` 暂时维持现有工作区，等 S03 建成后切换到 `/tasks/:id/submissions`。
 
 ## 5. 代码范围
 
@@ -137,9 +137,11 @@ Figma 文案包含“图片”，但当前后端没有 OCR/vision ingestion。�
 
 ## 7. 阶段门与下一步
 
-S01 满足进入用户视觉确认的条件，但只有用户明确确认后才把 `[~]` 改为 `[x]`。下一阶段 S02 应继续遵守：
+S01 满足进入用户视觉确认的条件，但只有用户明确确认后才把 `[~]` 改为 `[x]`。以下要求已由后续 S02 实现并记录在 `S02_SUBMISSION_RECOGNITION_PROGRESS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`：
 
 1. 独立短页，只显示识别事实步骤、进度、最近事件、后台离开和恢复动作。
 2. 没有可信页数或 ETA 时显示 `—`，不伪造百分比。
 3. 成功后进入 S03 学生×题目矩阵；失败留在 S02 给出可恢复动作。
-4. 完成 S02 后再更新 tracker、截图、提交和推送，不把多个未验收页面合成一个阶段。
+4. 完成 S02 后更新 tracker、截图、提交和推送，不把多个未验收页面合成一个阶段。
+
+下一阶段现为 S03 作答校对总览；S01 与 S02 各自保持独立用户验收状态。

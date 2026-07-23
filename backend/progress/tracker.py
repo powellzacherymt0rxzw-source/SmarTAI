@@ -89,6 +89,40 @@ class ProgressReporter:
         if message:
             await self._emit(ProgressEvent(message=message))
 
+    async def set_current_step(
+        self,
+        current_step: str,
+        *,
+        message: Optional[str] = None,
+    ) -> None:
+        """Publish a factual step without inventing a stage percentage."""
+
+        if not current_step:
+            raise ValueError("current_step must not be empty")
+        async with self._lock:
+            if self._progress.started_at is None:
+                self._progress.started_at = time.time()
+            self._progress.current_step = current_step
+        if message:
+            await self._emit(ProgressEvent(message=message))
+
+    async def set_stage_metrics(self, **metrics: int) -> None:
+        """Replace factual workflow counters after validating non-negative ints."""
+
+        normalized = _validated_stage_metrics(metrics)
+        async with self._lock:
+            self._progress.stage_metrics = normalized
+
+    async def increment_stage_metrics(self, **deltas: int) -> None:
+        """Atomically increment factual workflow counters from concurrent work."""
+
+        normalized = _validated_stage_metrics(deltas)
+        async with self._lock:
+            for key, delta in normalized.items():
+                self._progress.stage_metrics[key] = (
+                    self._progress.stage_metrics.get(key, 0) + delta
+                )
+
     async def set_error(self, detail: str) -> None:
         async with self._lock:
             self._progress.phase = "error"
@@ -176,6 +210,15 @@ class ProgressReporter:
             self._subscribers.remove(q)
         except ValueError:
             pass
+
+
+def _validated_stage_metrics(metrics: dict[str, int]) -> dict[str, int]:
+    normalized: dict[str, int] = {}
+    for key, value in metrics.items():
+        if not key or not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError("stage metrics require named non-negative integers")
+        normalized[key] = value
+    return normalized
 
 
 # ─── Job-level progress store (in-memory, maps job_id → reporter) ──────────

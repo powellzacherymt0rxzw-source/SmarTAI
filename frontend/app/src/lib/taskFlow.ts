@@ -316,6 +316,9 @@ function getRecoveryStep(destination: string): TaskWorkflowStepKey {
   if (destination.endsWith("/submissions/upload")) {
     return "submissions";
   }
+  if (destination.endsWith("/submissions/progress")) {
+    return "submissions";
+  }
   return "problems";
 }
 
@@ -342,6 +345,7 @@ export function getTaskDestination(task: TaskDestinationInput): string {
         ? `${taskRoot}/submissions/upload`
         : `${taskRoot}/questions`;
     case "parsing_submissions":
+      return `${taskRoot}/submissions/progress`;
     case "submissions_ready":
       return `${taskRoot}/upload/submissions`;
     case "grading":
@@ -356,7 +360,7 @@ export function getTaskDestination(task: TaskDestinationInput): string {
         return `${taskRoot}/results`;
       }
       if (failedJobId && failedJobId === task.parse_job_id) {
-        return `${taskRoot}/submissions/upload`;
+        return `${taskRoot}/submissions/progress`;
       }
       if (failedJobId && failedJobId === task.extract_job_id) {
         return `${taskRoot}/problems/progress`;
@@ -367,7 +371,10 @@ export function getTaskDestination(task: TaskDestinationInput): string {
       if (task.grading_job_id) {
         return `${taskRoot}/results`;
       }
-      if (task.parse_job_id || task.submission_file_name || (task.student_count ?? 0) > 0) {
+      if (task.parse_job_id) {
+        return `${taskRoot}/submissions/progress`;
+      }
+      if (task.submission_file_name || (task.student_count ?? 0) > 0) {
         return `${taskRoot}/submissions/upload`;
       }
       if ((task.problem_count ?? 0) > 0) {
@@ -436,6 +443,7 @@ export function getTaskNextStep(
   const problemUpload = `/tasks/${taskId}/upload/problems`;
   const problemProgress = `/tasks/${taskId}/problems/progress`;
   const submissionUpload = `/tasks/${taskId}/submissions/upload`;
+  const submissionProgress = `/tasks/${taskId}/submissions/progress`;
   const submissionWorkspace = `/tasks/${taskId}/upload/submissions`;
   const results = `/tasks/${taskId}/results`;
 
@@ -474,7 +482,7 @@ export function getTaskNextStep(
         title: "等待作答识别完成",
         description: "学生作答正在解析，完成后进入作答校对。",
         buttonLabel: "查看进度",
-        to: submissionWorkspace,
+        to: submissionProgress,
       };
     case "submissions_ready":
       return {

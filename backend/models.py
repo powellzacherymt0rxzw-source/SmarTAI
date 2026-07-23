@@ -319,6 +319,10 @@ class JobProgress(BaseModel):
     current_step: Optional[str] = None
     total_steps: Optional[int] = None
     completed_steps: Optional[int] = None
+    stage_metrics: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Factual workflow-specific counters; never estimated values.",
+    )
     active: List[ActiveUnit] = Field(default_factory=list, description="Currently running units")
     messages: List[ProgressEvent] = Field(default_factory=list, description="Ring buffer of last N events")
     error_detail: Optional[str] = None
