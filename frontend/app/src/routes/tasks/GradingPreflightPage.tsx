@@ -65,7 +65,7 @@ export function GradingPreflightPage() {
     try {
       const response = await startGrading.mutateAsync({ taskId });
       if (response.status === "already_done") {
-        navigate(`/tasks/${taskId}/results`, { replace: true });
+        navigate(`/tasks/${taskId}/review`, { replace: true });
         return;
       }
       navigate(`/tasks/${taskId}/grading/progress`, { replace: true });

@@ -46,6 +46,8 @@ class ProgressReporter:
 
     async def set_phase(self, phase: str) -> None:
         async with self._lock:
+            if self._progress.started_at is None:
+                self._progress.started_at = time.time()
             self._progress.phase = phase
         await self._emit(ProgressEvent(message=f"Phase: {phase}"))
 

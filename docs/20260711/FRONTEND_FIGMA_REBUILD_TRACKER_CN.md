@@ -8,7 +8,7 @@
 >
 > R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05 与 C-02 记录位于 `docs/20260724/`。
 >
-> 当前阶段：C-02“批改前确认”已按 Figma 12 完成一屏只读汇总、真实任务级配置、风险、幂等启动、canonical route 迁移及桌面/移动浏览器验收，等待用户视觉确认；下一阶段是 C-03“批改进度”。`auto-research-stateprep-v2` 已完成并空闲；本轮按用户给出的 43% 周额度继续推进，五阶段后复核平均消耗并保留约 15%+。S-01 至 S-05、C-01 与 canonical task entry 纠偏的既有等待确认状态不变。
+> 当前阶段：C-03“批改进度”已按 Figma 13 完成事实百分比/ETA、去重队列、后台恢复、失败重试、canonical route 迁移及桌面/移动浏览器验收，等待用户视觉确认；下一阶段是 R-01“待复核结果总览”。`auto-research-stateprep-v2` 已完成并空闲；本轮按用户给出的 43% 周额度继续推进，五阶段后复核平均消耗并保留约 15%+。S-01 至 S-05、C-01/C-02 与 canonical task entry 纠偏的既有等待确认状态不变。
 
 ---
 
@@ -445,7 +445,7 @@
 - [~] S05 单份作答校对支持学生/题目双维独立筛选。工程与浏览器验收完成：2026-07-24；Figma 15 的内容层级、分离导航、完全/相关匹配、方向键、真实答案 CAS、上下文返回和 1440×900/390×844 PNG 均已完成，等待用户视觉确认。
 - [~] C01 批改配置独立页，默认简单、高级折叠。工程与浏览器验收完成：2026-07-20；独立 route、任务级无密钥配置、真实批改消费链、共享池安全边界、桌面/移动截图和保存后进入作答页均已验证；等待用户视觉确认。
 - [~] C02 批改前确认只读汇总，不成为第二个配置页。工程与浏览器验收完成：2026-07-24；Figma 12 精确几何、真实任务/设置摘要、可回跳风险、幂等启动、S03 入口及双尺寸 PNG 已完成，等待用户视觉确认。
-- [ ] C03 批改进度独立页。
+- [~] C03 批改进度独立页。工程与浏览器验收完成：2026-07-24；Figma 13 精确几何、事实题次/ETA/队列、后台恢复、错误重试、graded→review 迁移及双尺寸 PNG 已完成，等待用户视觉确认。
 - [ ] R01 待复核结果总览采用 Figma 14 的热力图、指标和复核队列。
 - [ ] R02 复核详情采用 Figma 15 的内容层级，但重做双维导航。
 
@@ -516,6 +516,17 @@
 - 工程证据：visible-scope audit 扫描 `72` 个文件，lint、TypeScript、Vite production build（`477 modules`）与 `git diff --check` 通过。
 - 浏览器证据：`C02-pre-grading-confirmation-desktop-viewport.png`、`C02-pre-grading-confirmation-mobile.png`；桌面像素几何与 Figma 一致、`scrollHeight=900`，移动 `scrollWidth=390`；启动真实进入 `/grading/progress`，控制台 `0 errors / 0 warnings`，未调用真实 provider。
 - 当前状态：代码、启动合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。下一阶段 C03 必须用 Figma 13 替换临时进度容器。
+
+### 7.7 C-03 批改进度阶段工程记录（2026-07-24）
+
+- 详细决定与验收矩阵：`docs/20260724/C03_GRADING_PROGRESS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
+- Figma 约束：使用 Figma 13（文件 `64TupCQCKXkiT5uxeQY0iH`，节点 `1:929`）；桌面主进度卡 `(250,210,940×220)`、队列表 `(250,470,940×234)`、恢复条 `(250,720,940×74)` 与原稿一致，不显示重复顶栏状态胶囊。
+- 页面职责：canonical route `/tasks/:id/grading/progress`；只展示事实完成/运行/等待/错误数量、百分比、保守 ETA、后台离开和失败恢复，不混入结果内容或学生身份。
+- 进度合同：completed 使用 reporter；active 按学生×题目去重；waiting 由事实差值计算；错误只称最近信号；首次 `set_phase` 写真实 `started_at`。`phase=done + task=grading` 显示结果摘要仍在完成。
+- 路由闭环：`grading` 全部进入 C03，grading error 也在 C03 重试；`graded` 进入 `/review`。S02 和遗留上传页的旧结果跳转同步纠正。
+- 工程证据：C03/Q02-Q03 回归 `5 passed`；visible-scope audit 扫描 `73` 个文件、lint、TypeScript、Vite production build（`479 modules`）与 `git diff --check` 通过。
+- 浏览器证据：`C03-grading-progress-desktop.png`、`C03-grading-progress-mobile.png`；桌面关键坐标完全匹配 Figma，移动 `scrollWidth=390`；错误态重试通过，干净控制台 `0 errors / 0 warnings`，未调用真实 provider。
+- 当前状态：代码、进度合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。下一阶段 R01 必须用 Figma 14 替换 `/review` 临时兼容容器。
 
 ### R02 学生/题目双维导航硬规则
 

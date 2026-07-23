@@ -310,6 +310,9 @@ function getRecoveryStep(destination: string): TaskWorkflowStepKey {
   if (destination.endsWith("/results")) {
     return "results";
   }
+  if (destination.endsWith("/grading/progress")) {
+    return "grading";
+  }
   if (destination.endsWith("/upload/submissions")) {
     return "submissions";
   }
@@ -354,14 +357,14 @@ export function getTaskDestination(task: TaskDestinationInput): string {
     case "grading":
       return `${taskRoot}/grading/progress`;
     case "graded":
-      return `${taskRoot}/results`;
+      return `${taskRoot}/review`;
     case "draft":
       return `${taskRoot}/upload/problems`;
     case "error": {
       const failedJobId = task.last_failed_job_id;
 
       if (failedJobId && failedJobId === task.grading_job_id) {
-        return `${taskRoot}/results`;
+        return `${taskRoot}/grading/progress`;
       }
       if (failedJobId && failedJobId === task.parse_job_id) {
         return `${taskRoot}/submissions/progress`;
@@ -373,7 +376,7 @@ export function getTaskDestination(task: TaskDestinationInput): string {
       // Older task snapshots may not expose last_failed_job_id. Recover to
       // the furthest stage supported by persisted job/file/count evidence.
       if (task.grading_job_id) {
-        return `${taskRoot}/results`;
+        return `${taskRoot}/grading/progress`;
       }
       if (task.parse_job_id) {
         return `${taskRoot}/submissions/progress`;
@@ -450,7 +453,7 @@ export function getTaskNextStep(
   const submissionProgress = `/tasks/${taskId}/submissions/progress`;
   const submissionWorkspace = `/tasks/${taskId}/submissions`;
   const gradingProgress = `/tasks/${taskId}/grading/progress`;
-  const results = `/tasks/${taskId}/results`;
+  const review = `/tasks/${taskId}/review`;
 
   switch (task.status) {
     case "draft":
@@ -508,7 +511,7 @@ export function getTaskNextStep(
         title: "复核批改结果",
         description: "优先处理低置信题次；复核确认后再生成分析和导出。",
         buttonLabel: "复核结果",
-        to: results,
+        to: review,
       };
     case "error":
       return {

@@ -43,8 +43,11 @@ export function SubmissionRecognitionProgressPage() {
   if (taskId && status === "problems_ready") {
     return <Navigate to={`/tasks/${taskId}/submissions/upload`} replace />;
   }
-  if (taskId && (status === "grading" || status === "graded")) {
-    return <Navigate to={`/tasks/${taskId}/results`} replace />;
+  if (taskId && status === "grading") {
+    return <Navigate to={`/tasks/${taskId}/grading/progress`} replace />;
+  }
+  if (taskId && status === "graded") {
+    return <Navigate to={`/tasks/${taskId}/review`} replace />;
   }
   if (taskId && status && FINISHED_SUBMISSION_STATUSES.has(status)) {
     return <Navigate to={`/tasks/${taskId}/submissions`} replace />;

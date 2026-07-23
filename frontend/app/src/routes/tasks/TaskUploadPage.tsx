@@ -322,13 +322,13 @@ export function TaskUploadPage() {
       const response = await startGrading.mutateAsync({ taskId });
       if (response.status === "already_done") {
         toast.success("该任务已完成批改，可进入结果复核。");
-        navigate(`/tasks/${taskId}/results`);
+        navigate(`/tasks/${taskId}/review`);
       } else if (response.status === "already_running") {
         toast.info("批改已在进行中", { description: "已进入批改进度页继续跟进。" });
-        navigate(`/tasks/${taskId}/results`);
+        navigate(`/tasks/${taskId}/grading/progress`);
       } else {
         toast.success("已启动批改", { description: "已进入批改进度页，完成后会显示结果复核。" });
-        navigate(`/tasks/${taskId}/results`);
+        navigate(`/tasks/${taskId}/grading/progress`);
       }
       void progressQuery.refetch();
       void taskQuery.refetch();
@@ -597,7 +597,7 @@ export function TaskUploadPage() {
                 <ChevronRight className="h-4 w-4" />
               </Button>
             ) : currentStatus === "grading" || currentStatus === "graded" ? (
-              <Button type="button" className="w-full sm:w-auto" onClick={() => navigate(`/tasks/${safeTaskId}/results`)}>
+              <Button type="button" className="w-full sm:w-auto" onClick={() => navigate(currentStatus === "graded" ? `/tasks/${safeTaskId}/review` : `/tasks/${safeTaskId}/grading/progress`)}>
                 {currentStatus === "graded" ? "复核结果" : "查看批改进度"}
                 <ChevronRight className="h-4 w-4" />
               </Button>
