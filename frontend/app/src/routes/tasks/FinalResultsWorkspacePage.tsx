@@ -26,6 +26,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import { formatTaskTime, getTaskDestination } from "@/lib/taskFlow";
+import { QuestionAnalysisDetail } from "@/routes/tasks/results/QuestionAnalysisDetail";
 import { QuestionAnalysisOverview } from "@/routes/tasks/results/QuestionAnalysisOverview";
 import type { Correction, TaskFinalizationResponse, TaskResultResponse } from "@/types";
 
@@ -51,7 +52,7 @@ const RESULT_WORKSPACE_STATUSES = new Set(["review_confirmed", "generating_analy
 
 /** A-00: Figma-16 visual language, expanded into the confirmed five-route workspace. */
 export function FinalResultsWorkspacePage() {
-  const { taskId } = useParams();
+  const { taskId, questionId } = useParams();
   const { locale } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
@@ -130,6 +131,7 @@ export function FinalResultsWorkspacePage() {
             locale={locale}
             section={section}
             taskId={taskId}
+            questionId={questionId}
             finalization={finalization}
             result={result}
           />
@@ -192,12 +194,14 @@ function WorkspaceContent({
   locale,
   section,
   taskId,
+  questionId,
   finalization,
   result,
 }: {
   locale: Locale;
   section: WorkspaceSection;
   taskId: string;
+  questionId?: string;
   finalization: TaskFinalizationResponse;
   result?: TaskResultResponse;
 }) {
@@ -209,7 +213,9 @@ function WorkspaceContent({
   }
 
   if (section === "questions") {
-    return <QuestionAnalysisOverview locale={locale} taskId={taskId} model={model} />;
+    return questionId
+      ? <QuestionAnalysisDetail locale={locale} taskId={taskId} questionId={questionId} model={model} />
+      : <QuestionAnalysisOverview locale={locale} taskId={taskId} model={model} />;
   }
 
   if (section === "students") {
@@ -516,7 +522,7 @@ function WorkspaceState({ locale, loading = false, onRetry }: { locale: Locale; 
 }
 
 function sectionFromPath(pathname: string): WorkspaceSection {
-  if (pathname.endsWith("/questions")) return "questions";
+  if (/\/results\/questions(?:\/[^/]+)?\/?$/.test(pathname)) return "questions";
   if (pathname.endsWith("/students")) return "students";
   if (pathname.endsWith("/visualizations")) return "visualizations";
   if (pathname.endsWith("/reports")) return "reports";

@@ -25,9 +25,6 @@ const RegisterPage = React.lazy(() => import("@/routes/RegisterPage").then((modu
 const SettingsPage = React.lazy(() =>
   import("@/routes/SettingsPage").then((module) => ({ default: module.SettingsPage })),
 );
-const TaskQuestionDetailPage = React.lazy(() =>
-  import("@/routes/tasks/TaskQuestionDetailPage").then((module) => ({ default: module.TaskQuestionDetailPage })),
-);
 const FinalResultsWorkspacePage = React.lazy(() =>
   import("@/routes/tasks/FinalResultsWorkspacePage").then((module) => ({ default: module.FinalResultsWorkspacePage })),
 );
@@ -162,8 +159,9 @@ const router = createBrowserRouter([
       { path: "tasks/:taskId/results/students", element: routeElement(<FinalResultsWorkspacePage />) },
       { path: "tasks/:taskId/results/visualizations", element: routeElement(<FinalResultsWorkspacePage />) },
       { path: "tasks/:taskId/results/reports", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/students/:studentId", element: routeElement(<TaskStudentDetailPage />) },
       { path: "tasks/:taskId/results/:studentId", element: routeElement(<TaskStudentDetailPage />) },
-      { path: "tasks/:taskId/results/questions/:questionId", element: routeElement(<TaskQuestionDetailPage />) },
+      { path: "tasks/:taskId/results/questions/:questionId", element: routeElement(<FinalResultsWorkspacePage />) },
       { path: "settings/account", element: routeElement(<SettingsPage />) },
       { path: "settings/byok", element: routeElement(<ExpertsPage />) },
       { path: "experts", element: <Navigate to="/settings/byok" replace /> },

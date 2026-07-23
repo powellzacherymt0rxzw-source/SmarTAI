@@ -1,0 +1,483 @@
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Search, UserRound } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  effectiveCorrectionScore,
+  formatConfidence,
+  formatPercent,
+  formatScore,
+  type QuestionEntry,
+  type QuestionSummary,
+  type ResultsModel,
+} from "@/components/tasks/ResultsLayout";
+import { MarkdownMath } from "@/components/ui/MarkdownMath";
+import type { Locale } from "@/i18n/messages";
+import { cn } from "@/lib/cn";
+import type { Correction, ProblemInfo } from "@/types";
+
+interface QuestionSearchMatch {
+  question: QuestionSummary;
+  exact: boolean;
+}
+
+interface CountedSignal {
+  label: string;
+  count: number;
+}
+
+interface RubricDimension {
+  label: string;
+  attempts: number;
+  correct: number;
+  averageScore: number;
+}
+
+export function QuestionAnalysisDetail({
+  locale,
+  taskId,
+  questionId,
+  model,
+}: {
+  locale: Locale;
+  taskId: string;
+  questionId: string;
+  model: ResultsModel;
+}) {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [query, setQuery] = useState("");
+  const questionIndex = model.questions.findIndex((item) => item.id === questionId);
+  const question = questionIndex >= 0 ? model.questions[questionIndex] : null;
+  const previous = questionIndex > 0 ? model.questions[questionIndex - 1] : null;
+  const next = questionIndex >= 0 && questionIndex < model.questions.length - 1 ? model.questions[questionIndex + 1] : null;
+  const root = `/tasks/${encodeURIComponent(taskId)}/results/questions`;
+  const returnQuery = searchParams.get("return") ?? "";
+  const listHref = returnQuery ? `${root}?${returnQuery}` : root;
+  const detailReturnSuffix = returnQuery ? `?return=${encodeURIComponent(returnQuery)}` : "";
+  const matches = useMemo(() => findQuestionMatches(query, model.questions), [model.questions, query]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) return;
+      if (event.key === "ArrowUp" && previous) {
+        event.preventDefault();
+        navigate(`${root}/${encodeURIComponent(previous.id)}${detailReturnSuffix}`);
+      } else if (event.key === "ArrowDown" && next) {
+        event.preventDefault();
+        navigate(`${root}/${encodeURIComponent(next.id)}${detailReturnSuffix}`);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [detailReturnSuffix, navigate, next, previous, root]);
+
+  if (!question) {
+    return (
+      <section className="rounded-[10px] border bg-card px-6 py-12 text-center">
+        <h2 className="text-[18px] font-bold text-foreground">{tx(locale, "未找到该题", "Question not found")}</h2>
+        <p className="mt-2 text-[13px] text-muted-foreground">{tx(locale, `当前正式结果中没有题目 ${questionId}。`, `Question ${questionId} is not present in this formal result.`)}</p>
+        <Link to={listHref} className="mt-5 inline-flex h-9 items-center gap-2 rounded-[8px] bg-primary px-4 text-[12px] font-semibold text-primary-foreground">
+          <ArrowLeft aria-hidden="true" className="h-4 w-4" />{tx(locale, "返回题目总览", "Back to question overview")}
+        </Link>
+      </section>
+    );
+  }
+
+  const metrics = buildQuestionMetrics(question);
+  const commonFeedback = buildCommonFeedback(question, locale);
+  const rubricDimensions = buildRubricDimensions(question);
+  const reviewSignals = buildReviewSignals(question, locale);
+  const studentPreview = [...question.entries]
+    .sort((left, right) => entryPercent(left) - entryPercent(right) || left.student.name.localeCompare(right.student.name, locale === "en-US" ? "en" : "zh-Hans-CN"))
+    .slice(0, 5);
+
+  const goToQuestion = (targetId: string) => {
+    setQuery("");
+    navigate(`${root}/${encodeURIComponent(targetId)}${detailReturnSuffix}`);
+  };
+
+  return (
+    <section className="rounded-[10px] border bg-card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <Link to={listHref} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:underline">
+            <ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />{tx(locale, "返回题目分析总览", "Back to question overview")}
+          </Link>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <h2 className="text-[22px] font-bold tracking-[-0.01em] text-foreground">{question.label}</h2>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">{question.type || "—"}</span>
+          </div>
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            {tx(locale, `筛选结果中的第 ${questionIndex + 1} / ${model.questions.length} 题`, `Question ${questionIndex + 1} of ${model.questions.length}`)}
+          </p>
+        </div>
+        <QuestionStepButtons locale={locale} previous={previous} next={next} onSelect={goToQuestion} />
+      </div>
+
+      <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(0,1fr)_220px]">
+        <div className="relative">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-[13px] h-4 w-4 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={tx(locale, "输入题号、题干、题型或知识点，例如“积分题”", "Search number, stem, type, or knowledge point")}
+            aria-label={tx(locale, "智能查找题目", "Find a question")}
+            className="h-10 w-full rounded-[8px] border bg-background pl-10 pr-3 text-[12px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+          />
+          {query ? (
+            <div className="mt-2 overflow-hidden rounded-[8px] border bg-background shadow-sm">
+              {matches.length ? matches.slice(0, 6).map((match) => (
+                <button key={match.question.id} type="button" onClick={() => goToQuestion(match.question.id)} className="flex w-full items-center gap-3 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted">
+                  <span className="min-w-12 text-[12px] font-bold text-foreground">{match.question.label}</span>
+                  <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", match.exact ? "bg-emerald-100 text-emerald-700" : "bg-blue-50 text-primary")}>{match.exact ? tx(locale, "完全匹配", "Exact") : tx(locale, "相关匹配", "Related")}</span>
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{match.question.stem || match.question.type || "—"}</span>
+                </button>
+              )) : (
+                <p className="px-3 py-4 text-center text-[11px] text-muted-foreground">{tx(locale, "没有匹配题目；可清空后直接选择。", "No question matched; clear the search to select directly.")}</p>
+              )}
+            </div>
+          ) : null}
+        </div>
+        <label>
+          <span className="sr-only">{tx(locale, "直接选择题目", "Select question directly")}</span>
+          <select value={question.id} onChange={(event) => goToQuestion(event.target.value)} className="h-10 w-full rounded-[8px] border bg-background px-3 text-[12px] font-semibold text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15">
+            {model.questions.map((item) => <option key={item.id} value={item.id}>{item.label} · {item.type || tx(locale, "未标题型", "Unlabelled type")}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <p className="mt-2 text-[10px] text-muted-foreground">
+        {tx(locale, "快捷键：↑ 上一题，↓ 下一题；输入框聚焦时不会触发切换。", "Shortcuts: ↑ previous question, ↓ next question; shortcuts pause while typing.")}
+      </p>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-6">
+        <DetailMetric label={tx(locale, "作答人数", "Responses")} value={String(question.count)} tone="primary" />
+        <DetailMetric label={tx(locale, "平均分", "Mean")} value={`${formatScore(question.avgScore)} / ${formatScore(question.maxScore)}`} tone="accent" />
+        <DetailMetric label={tx(locale, "中位数", "Median")} value={formatScore(metrics.median)} tone="primary" />
+        <DetailMetric label={tx(locale, "最低 / 最高", "Min / max")} value={`${formatScore(question.minScore)} / ${formatScore(question.maxObservedScore)}`} tone="warning" />
+        <DetailMetric label={tx(locale, "平均置信度", "Mean confidence")} value={formatConfidence(metrics.avgConfidence)} tone="accent" />
+        <DetailMetric label={tx(locale, "必审 / 分歧题次", "Review / disagreement")} value={`${metrics.requiredReviewCount} / ${metrics.disagreementCount}`} tone="danger" />
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <MaterialPanel title={tx(locale, "题干", "Question stem")} source={fieldSource(question.problem, "stem", locale)}>
+          {question.stem ? <MarkdownMath className="text-[13px] leading-6 text-foreground">{question.stem}</MarkdownMath> : <MissingText locale={locale} />}
+        </MaterialPanel>
+        <MaterialPanel title={tx(locale, "评分标准", "Rubric")} source={fieldSource(question.problem, "criterion", locale)}>
+          {question.criterion ? <MarkdownMath className="text-[13px] leading-6 text-foreground">{question.criterion}</MarkdownMath> : <MissingText locale={locale} />}
+        </MaterialPanel>
+        <MaterialPanel title={tx(locale, "标答 / 参考答案", "Reference answer")} source={fieldSource(question.problem, "reference_answer", locale)}>
+          {question.problem?.reference_answer ? <MarkdownMath className="text-[13px] leading-6 text-foreground">{question.problem.reference_answer}</MarkdownMath> : <MissingText locale={locale} />}
+        </MaterialPanel>
+        <MaterialPanel title={tx(locale, "代码 / 测试资料", "Code / test materials")} source={fieldSource(question.problem, "test_cases", locale)}>
+          <TestMaterialSummary locale={locale} problem={question.problem} />
+        </MaterialPanel>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-3">
+        <EvidencePanel title={tx(locale, "易错点与常见问题（有据）", "Common issues (evidence-backed)")} subtitle={tx(locale, "按重复评分反馈计数，不由前端生成主题", "Counts repeated grading feedback; no invented topic")}>
+          <SignalList locale={locale} signals={commonFeedback} empty={tx(locale, "没有重复反馈可形成摘要。", "No repeated feedback to summarize.")} />
+        </EvidencePanel>
+        <EvidencePanel title={tx(locale, "Rubric 维度表现", "Rubric-dimension performance")} subtitle={tx(locale, "按批改步骤描述聚合", "Aggregated from grading-step descriptions")}>
+          {rubricDimensions.length ? <div className="mt-3 grid gap-2">{rubricDimensions.slice(0, 4).map((dimension) => (
+            <div key={dimension.label} className="rounded-[7px] bg-muted/60 px-3 py-2">
+              <div className="flex items-center justify-between gap-3 text-[11px]"><strong className="truncate text-foreground">{dimension.label}</strong><span className="shrink-0 font-semibold text-primary">{formatScore(dimension.averageScore)} {tx(locale, "平均分", "mean")}</span></div>
+              <p className="mt-1 text-[10px] text-muted-foreground">{tx(locale, `${dimension.correct}/${dimension.attempts} 次标记为正确`, `${dimension.correct}/${dimension.attempts} marked correct`)}</p>
+            </div>
+          ))}</div> : <PanelEmpty text={tx(locale, "当前结果没有步骤级 rubric 数据。", "No step-level rubric data is available.")} />}
+        </EvidencePanel>
+        <EvidencePanel title={tx(locale, "复核与分歧信号", "Review & disagreement signals")} subtitle={tx(locale, `基于 ${question.count} 份真实作答`, `Based on ${question.count} real responses`)}>
+          <SignalList locale={locale} signals={reviewSignals} empty={tx(locale, "没有正式复核或分歧信号。", "No formal review or disagreement signal.")} />
+        </EvidencePanel>
+      </div>
+
+      <div className="mt-4 rounded-[9px] border">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b px-4 py-3">
+          <div>
+            <h3 className="text-[14px] font-bold text-foreground">{tx(locale, "学生表现摘要", "Student performance preview")}</h3>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">{tx(locale, "得分率从低到高只显示 5 位；完整答案进入学生详情。", "Lowest score rates first; only 5 students shown. Open student detail for full answers.")}</p>
+          </div>
+          <span className="text-[10px] text-muted-foreground">{tx(locale, `共 ${question.entries.length} 位`, `${question.entries.length} students`)}</span>
+        </div>
+        {studentPreview.length ? (
+          <div className="divide-y">
+            {studentPreview.map((entry) => <StudentPreview key={entry.student.id} locale={locale} taskId={taskId} question={question} entry={entry} />)}
+          </div>
+        ) : <PanelEmpty text={tx(locale, "当前题目没有学生结果。", "No student result is available for this question.")} />}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[9px] bg-muted/40 px-3 py-2.5">
+        <Link to={listHref} className="inline-flex h-9 items-center gap-1.5 rounded-[7px] border bg-card px-3 text-[11px] font-semibold text-foreground hover:bg-muted">
+          <ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />{tx(locale, "题目总览", "Question overview")}
+        </Link>
+        <QuestionStepButtons locale={locale} previous={previous} next={next} onSelect={goToQuestion} />
+      </div>
+    </section>
+  );
+}
+
+function QuestionStepButtons({ locale, previous, next, onSelect }: { locale: Locale; previous: QuestionSummary | null; next: QuestionSummary | null; onSelect: (id: string) => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <button type="button" disabled={!previous} onClick={() => previous && onSelect(previous.id)} className="inline-flex h-9 items-center gap-1.5 rounded-[7px] border bg-card px-3 text-[11px] font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-35">
+        <ArrowUp aria-hidden="true" className="h-3.5 w-3.5" />{tx(locale, "上一题", "Previous")}
+      </button>
+      <button type="button" disabled={!next} onClick={() => next && onSelect(next.id)} className="inline-flex h-9 items-center gap-1.5 rounded-[7px] border bg-card px-3 text-[11px] font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-35">
+        {tx(locale, "下一题", "Next")}<ArrowDown aria-hidden="true" className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function DetailMetric({ label, value, tone }: { label: string; value: string; tone: "primary" | "accent" | "warning" | "danger" }) {
+  return (
+    <div className="rounded-[9px] border px-3 py-3">
+      <strong className={cn("text-[18px] leading-6", tone === "primary" && "text-primary", tone === "accent" && "text-teal-500", tone === "warning" && "text-amber-500", tone === "danger" && "text-rose-500")}>{value}</strong>
+      <span className="mt-1 block text-[10px] font-medium text-muted-foreground">{label}</span>
+    </div>
+  );
+}
+
+function MaterialPanel({ title, source, children }: { title: string; source: string; children: ReactNode }) {
+  return (
+    <section className="min-w-0 rounded-[9px] border px-4 py-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-[13px] font-bold text-foreground">{title}</h3>
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{source}</span>
+      </div>
+      <div className="mt-3 max-h-44 overflow-auto rounded-[7px] bg-muted/50 px-3 py-2.5">{children}</div>
+    </section>
+  );
+}
+
+function EvidencePanel({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+  return (
+    <section className="min-w-0 rounded-[9px] border px-4 py-3.5">
+      <h3 className="text-[13px] font-bold text-foreground">{title}</h3>
+      <p className="mt-0.5 text-[10px] text-muted-foreground">{subtitle}</p>
+      {children}
+    </section>
+  );
+}
+
+function SignalList({ signals, empty }: { locale: Locale; signals: CountedSignal[]; empty: string }) {
+  if (!signals.length) return <PanelEmpty text={empty} />;
+  return (
+    <div className="mt-3 grid gap-2">
+      {signals.slice(0, 4).map((signal) => (
+        <div key={signal.label} className="flex items-start justify-between gap-3 rounded-[7px] bg-muted/60 px-3 py-2 text-[11px]">
+          <span className="min-w-0 leading-4 text-foreground">{signal.label}</span>
+          <span className="shrink-0 rounded-full bg-background px-2 py-0.5 font-semibold text-primary">×{signal.count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StudentPreview({ locale, taskId, question, entry }: { locale: Locale; taskId: string; question: QuestionSummary; entry: QuestionEntry }) {
+  const score = effectiveCorrectionScore(entry.correction);
+  const percent = entry.correction.max_score > 0 ? (score / entry.correction.max_score) * 100 : null;
+  const href = `/tasks/${encodeURIComponent(taskId)}/results/students/${encodeURIComponent(entry.student.id)}?question=${encodeURIComponent(question.id)}#question-${encodeURIComponent(question.id)}`;
+  return (
+    <div className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1.4fr)_100px_100px_120px_auto] sm:items-center">
+      <div className="min-w-0">
+        <strong className="block truncate text-[12px] text-foreground">{entry.student.name} · {entry.student.id}</strong>
+        <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{entry.correction.teacher_comment || entry.correction.comment || tx(locale, "暂无评语", "No feedback")}</span>
+      </div>
+      <span className="text-[11px] font-semibold text-primary">{formatScore(score)} / {formatScore(entry.correction.max_score)} · {formatPercent(percent)}</span>
+      <span className="text-[11px] text-muted-foreground">{formatConfidence(entry.correction.confidence)}</span>
+      <span className={cn("w-fit rounded-full px-2.5 py-1 text-[10px] font-semibold", entry.correction.review_status === "confirmed" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600")}>{entry.correction.review_status === "confirmed" ? tx(locale, "已确认", "Confirmed") : tx(locale, "无必审确认", "No required confirmation")}</span>
+      <Link to={href} className="inline-flex h-8 w-fit items-center gap-1.5 rounded-[7px] border bg-card px-3 text-[10px] font-semibold text-foreground hover:bg-muted">
+        <UserRound aria-hidden="true" className="h-3.5 w-3.5" />{tx(locale, "学生详情", "Student detail")}<ArrowRight aria-hidden="true" className="h-3 w-3" />
+      </Link>
+    </div>
+  );
+}
+
+function TestMaterialSummary({ locale, problem }: { locale: Locale; problem?: ProblemInfo }) {
+  const programming = /编程|代码|program|coding/i.test(problem?.type ?? "");
+  const testCases = problem?.test_cases ?? [];
+  if (!programming && !testCases.length) return <p className="text-[12px] text-muted-foreground">{tx(locale, "非编程题，不适用测试样例。", "Not a programming question; test cases do not apply.")}</p>;
+  if (!testCases.length) return <MissingText locale={locale} />;
+  return (
+    <div className="grid gap-2">
+      <p className="text-[11px] font-semibold text-foreground">{tx(locale, `${testCases.length} 个测试样例`, `${testCases.length} test cases`)}</p>
+      {testCases.slice(0, 2).map((testCase, index) => (
+        <div key={`${testCase.input}-${index}`} className="rounded-[6px] border bg-background px-2.5 py-2 text-[10px] text-muted-foreground">
+          <span className="font-semibold text-foreground">#{index + 1}</span> · {tx(locale, "输入", "Input")} {testCase.input || "—"} · {tx(locale, "期望", "Expected")} {testCase.expected_output || "—"}
+        </div>
+      ))}
+      {problem?.solution_code ? <pre className="max-h-20 overflow-auto rounded-[6px] bg-slate-950 p-2 text-[10px] text-slate-100">{problem.solution_code}</pre> : null}
+    </div>
+  );
+}
+
+function MissingText({ locale }: { locale: Locale }) {
+  return <p className="text-[12px] text-muted-foreground">{tx(locale, "当前正式结果未提供该资料。", "This material is not present in the formal result.")}</p>;
+}
+
+function PanelEmpty({ text }: { text: string }) {
+  return <p className="mt-3 flex min-h-14 items-center justify-center rounded-[7px] bg-muted/50 px-3 text-center text-[11px] text-muted-foreground">{text}</p>;
+}
+
+function buildQuestionMetrics(question: QuestionSummary) {
+  const scores = question.entries.map((entry) => effectiveCorrectionScore(entry.correction)).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  const confidences = question.entries.map((entry) => normalizeConfidence(entry.correction.confidence)).filter((value): value is number => value !== null);
+  const requiredReviewCount = question.entries.filter((entry) => correctionNeedsFormalReview(entry.correction)).length;
+  const disagreementCount = question.entries.filter((entry) => correctionHasDisagreement(entry.correction)).length;
+  return {
+    median: median(scores),
+    avgConfidence: averageOrNull(confidences),
+    requiredReviewCount,
+    disagreementCount,
+  };
+}
+
+function buildCommonFeedback(question: QuestionSummary, locale: Locale): CountedSignal[] {
+  const counts = new Map<string, number>();
+  for (const entry of question.entries) {
+    const feedback = String(entry.correction.teacher_comment || entry.correction.comment || "").trim();
+    if (!feedback) continue;
+    counts.set(feedback, (counts.get(feedback) ?? 0) + 1);
+  }
+  return Array.from(counts, ([label, count]) => ({ label, count }))
+    .filter((signal) => signal.count > 1 || counts.size <= 3)
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label, locale === "en-US" ? "en" : "zh-Hans-CN"))
+    .slice(0, 4);
+}
+
+function buildRubricDimensions(question: QuestionSummary): RubricDimension[] {
+  const dimensions = new Map<string, { scores: number[]; correct: number }>();
+  for (const entry of question.entries) {
+    for (const step of entry.correction.steps ?? []) {
+      const label = String(step.desc || `Step ${step.step_no}`).trim();
+      if (!label) continue;
+      const current = dimensions.get(label) ?? { scores: [], correct: 0 };
+      if (Number.isFinite(step.score)) current.scores.push(step.score);
+      if (step.is_correct) current.correct += 1;
+      dimensions.set(label, current);
+    }
+  }
+  return Array.from(dimensions, ([label, value]) => ({
+    label,
+    attempts: value.scores.length,
+    correct: value.correct,
+    averageScore: value.scores.length ? value.scores.reduce((sum, score) => sum + score, 0) / value.scores.length : 0,
+  })).sort((left, right) => left.label.localeCompare(right.label, undefined, { numeric: true }));
+}
+
+function buildReviewSignals(question: QuestionSummary, locale: Locale): CountedSignal[] {
+  const counts = new Map<string, number>();
+  const add = (label: string) => counts.set(label, (counts.get(label) ?? 0) + 1);
+  for (const entry of question.entries) {
+    const confidence = normalizeConfidence(entry.correction.confidence);
+    if (confidence !== null && confidence < 0.65) add(tx(locale, "低置信度", "Low confidence"));
+    if (entry.correction.requires_human_review) add(tx(locale, "后端标记需人工复核", "Backend requested human review"));
+    for (const reason of entry.correction.review_reasons ?? []) {
+      if (reason !== "high_indecisiveness" && reason !== "score_spread_high") add(reviewReasonLabel(reason, locale));
+    }
+    if (correctionHasDisagreement(entry.correction)) add(tx(locale, "专家分歧 / 分差较大", "Expert disagreement / score spread"));
+  }
+  return Array.from(counts, ([label, count]) => ({ label, count })).sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+}
+
+function correctionNeedsFormalReview(correction: Correction): boolean {
+  const confidence = normalizeConfidence(correction.confidence);
+  return (confidence !== null && confidence < 0.65)
+    || correction.requires_human_review
+    || correction.review_reasons?.some((reason) => reason === "high_indecisiveness" || reason === "score_spread_high")
+    || correction.synthesis_method === "all_failed"
+    || correction.synthesis_method === "quota_exhausted"
+    || correctionHasDisagreement(correction);
+}
+
+function correctionHasDisagreement(correction: Correction): boolean {
+  if (correction.review_reasons?.some((reason) => reason === "high_indecisiveness" || reason === "score_spread_high")) return true;
+  const scores = correction.expert_results?.map((result) => Number(result.score)).filter((value) => Number.isFinite(value)) ?? [];
+  return scores.length > 1 && correction.max_score > 0 && Math.max(...scores) - Math.min(...scores) > Math.max(1, correction.max_score * 0.25);
+}
+
+function reviewReasonLabel(reason: string, locale: Locale): string {
+  const labels: Record<string, [string, string]> = {
+    low_confidence: ["低置信度", "Low confidence"],
+    high_indecisiveness: ["专家意见分歧", "Expert disagreement"],
+    score_spread_high: ["专家分差较大", "Large expert score spread"],
+    parse_failed: ["解析失败", "Parsing failed"],
+    quota_exhausted: ["模型额度失败", "Model quota failure"],
+  };
+  const label = labels[reason];
+  return label ? label[locale === "en-US" ? 1 : 0] : reason.replaceAll("_", " ");
+}
+
+function fieldSource(problem: ProblemInfo | undefined, field: "stem" | "criterion" | "reference_answer" | "test_cases", locale: Locale): string {
+  if (!problem) return tx(locale, "未提供", "Unavailable");
+  if (field !== "stem") {
+    const imported = problem.material_provenance?.[field as keyof typeof problem.material_provenance];
+    if (imported?.source_filename) return tx(locale, `资料导入 · ${imported.source_filename}`, `Imported · ${imported.source_filename}`);
+    const generated = problem.ai_completion_provenance?.[field as keyof typeof problem.ai_completion_provenance];
+    if (generated) return tx(locale, "AI 补全 · 教师已确认版本", "AI completion · teacher-confirmed version");
+  }
+  const value = field === "stem" ? problem.stem : field === "criterion" ? problem.criterion : field === "reference_answer" ? problem.reference_answer : problem.test_cases;
+  if (Array.isArray(value) ? value.length > 0 : Boolean(value)) return tx(locale, "题目识别 / 教师维护", "Recognition / teacher maintained");
+  return tx(locale, "未提供", "Unavailable");
+}
+
+function findQuestionMatches(query: string, questions: QuestionSummary[]): QuestionSearchMatch[] {
+  const normalized = normalizeText(query).replace(/题$/, "");
+  if (!normalized) return [];
+  return questions
+    .map((question) => {
+      const candidates = [question.id, question.label, question.problem?.number ?? ""].map(normalizeText);
+      const exact = candidates.some((candidate) => candidate === normalized || candidate.replace(/^q/, "") === normalized.replace(/^q/, ""));
+      const haystack = normalizeText([question.id, question.label, question.type ?? "", question.stem ?? "", ...getKnowledgePoints(question.problem)].join(" "));
+      const related = haystack.includes(normalized)
+        || (normalized.includes("积分") && (haystack.includes("积分") || haystack.includes("\\int") || haystack.includes("integral")))
+        || (normalized.includes("微分") && (haystack.includes("微分") || haystack.includes("导数") || haystack.includes("derivative")))
+        || (normalized.includes("证明") && (haystack.includes("证明") || haystack.includes("proof")))
+        || (normalized.includes("编程") && (haystack.includes("编程") || haystack.includes("代码") || haystack.includes("program")));
+      return exact || related ? { question, exact } : null;
+    })
+    .filter((match): match is QuestionSearchMatch => match !== null)
+    .sort((left, right) => Number(right.exact) - Number(left.exact) || left.question.label.localeCompare(right.question.label, undefined, { numeric: true }));
+}
+
+function getKnowledgePoints(problem?: ProblemInfo): string[] {
+  if (!problem) return [];
+  const record = problem as unknown as Record<string, unknown>;
+  const raw = record.knowledge_points ?? record.knowledgePoints ?? record.knowledge_point ?? record.topic;
+  const values = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[,，;；]/) : [];
+  return Array.from(new Set(values.map((value) => String(value).trim()).filter(Boolean))).slice(0, 6);
+}
+
+function entryPercent(entry: QuestionEntry): number {
+  const max = Number(entry.correction.max_score);
+  return max > 0 ? (effectiveCorrectionScore(entry.correction) / max) * 100 : Number.POSITIVE_INFINITY;
+}
+
+function normalizeConfidence(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value > 1 ? value / 100 : value;
+}
+
+function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const middle = Math.floor(values.length / 2);
+  return values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+}
+
+function averageOrNull(values: number[]): number | null {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function normalizeText(value: string): string {
+  return value.normalize("NFKC").trim().toLocaleLowerCase();
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+}
+
+function tx(locale: Locale, zh: string, en: string): string {
+  return locale === "en-US" ? en : zh;
+}

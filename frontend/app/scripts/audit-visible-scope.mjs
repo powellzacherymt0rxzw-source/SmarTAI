@@ -266,6 +266,7 @@ function auditRouter(content) {
         "tasks/:taskId/students/:studentId",
         "tasks/:taskId/students/:studentId/questions/:questionId",
         "tasks/:taskId/results/students",
+        "tasks/:taskId/results/students/:studentId",
       ].includes(routePath);
       if ((routePath !== "/student" || !hasAllowedStudentRoute) && !isTeacherTaskReviewRoute) {
         findings.push({

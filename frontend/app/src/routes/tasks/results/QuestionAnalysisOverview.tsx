@@ -72,6 +72,7 @@ export function QuestionAnalysisOverview({
   const reviewFilter = normalizeReviewFilter(searchParams.get("review"));
   const sortMode = normalizeSortMode(searchParams.get("sort"));
   const requestedPage = Math.max(1, Number(searchParams.get("page")) || 1);
+  const returnQuery = searchParams.toString();
 
   const rows = useMemo(() => model.questions.map((question) => buildQuestionRow(question, locale)), [locale, model.questions]);
   const semanticPlan = useMemo(() => parseSemanticQuestionQuery(query, locale), [locale, query]);
@@ -207,8 +208,8 @@ export function QuestionAnalysisOverview({
 
       {visibleRows.length ? (
         <>
-          <QuestionDesktopTable locale={locale} taskId={taskId} rows={visibleRows} />
-          <QuestionMobileCards locale={locale} taskId={taskId} rows={visibleRows} />
+          <QuestionDesktopTable locale={locale} taskId={taskId} rows={visibleRows} returnQuery={returnQuery} />
+          <QuestionMobileCards locale={locale} taskId={taskId} rows={visibleRows} returnQuery={returnQuery} />
         </>
       ) : (
         <div className="border-t px-5 py-12 text-center">
@@ -235,7 +236,7 @@ export function QuestionAnalysisOverview({
   );
 }
 
-function QuestionDesktopTable({ locale, taskId, rows }: { locale: Locale; taskId: string; rows: QuestionAnalysisRow[] }) {
+function QuestionDesktopTable({ locale, taskId, rows, returnQuery }: { locale: Locale; taskId: string; rows: QuestionAnalysisRow[]; returnQuery: string }) {
   return (
     <div className="hidden border-t lg:block">
       <table className="w-full table-fixed text-left">
@@ -273,7 +274,7 @@ function QuestionDesktopTable({ locale, taskId, rows }: { locale: Locale; taskId
               <td className="px-3 py-3"><ReviewBadge locale={locale} row={row} /></td>
               <td className="px-3 py-3 text-[11px] leading-4 text-muted-foreground">{row.riskSummary}</td>
               <td className="px-3 py-3 text-right">
-                <Link to={`/tasks/${encodeURIComponent(taskId)}/results/questions/${encodeURIComponent(row.question.id)}`} className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline">
+                <Link to={questionDetailHref(taskId, row.question.id, returnQuery)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline">
                   {tx(locale, "详情", "Details")}<ArrowRight aria-hidden="true" className="h-3 w-3" />
                 </Link>
               </td>
@@ -285,7 +286,7 @@ function QuestionDesktopTable({ locale, taskId, rows }: { locale: Locale; taskId
   );
 }
 
-function QuestionMobileCards({ locale, taskId, rows }: { locale: Locale; taskId: string; rows: QuestionAnalysisRow[] }) {
+function QuestionMobileCards({ locale, taskId, rows, returnQuery }: { locale: Locale; taskId: string; rows: QuestionAnalysisRow[]; returnQuery: string }) {
   return (
     <div className="grid gap-3 border-t p-4 lg:hidden">
       {rows.map((row) => (
@@ -298,7 +299,7 @@ function QuestionMobileCards({ locale, taskId, rows }: { locale: Locale; taskId:
               </div>
               <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{row.stem || "—"}</p>
             </div>
-            <Link to={`/tasks/${encodeURIComponent(taskId)}/results/questions/${encodeURIComponent(row.question.id)}`} className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-primary">
+            <Link to={questionDetailHref(taskId, row.question.id, returnQuery)} className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-primary">
               {tx(locale, "详情", "Details")}<ArrowRight aria-hidden="true" className="h-3 w-3" />
             </Link>
           </div>
@@ -593,6 +594,11 @@ function compareRows(left: QuestionAnalysisRow, right: QuestionAnalysisRow, sort
   if (sort === "confidence_asc") return nullableNumber(left.avgConfidence, Number.POSITIVE_INFINITY) - nullableNumber(right.avgConfidence, Number.POSITIVE_INFINITY) || compareQuestionLabels(left.label, right.label);
   if (sort === "review_desc") return right.requiredReviewCount - left.requiredReviewCount || compareQuestionLabels(left.label, right.label);
   return compareQuestionLabels(left.label, right.label);
+}
+
+function questionDetailHref(taskId: string, questionId: string, returnQuery: string): string {
+  const detail = `/tasks/${encodeURIComponent(taskId)}/results/questions/${encodeURIComponent(questionId)}`;
+  return returnQuery ? `${detail}?return=${encodeURIComponent(returnQuery)}` : detail;
 }
 
 function normalizeScoreFilter(value: string | null): ScoreFilter {
