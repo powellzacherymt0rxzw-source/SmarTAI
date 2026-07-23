@@ -260,7 +260,10 @@ function auditRouter(content) {
       const hasAllowedStudentRoute = /\{\s*path\s*:\s*(["'`])\/student\1\s*,\s*element\s*:\s*<StudentUnavailablePage\s*\/>\s*\}/s.test(
         content,
       );
-      if (routePath !== "/student" || !hasAllowedStudentRoute) {
+      // This nested task route is a teacher-only review surface protected by
+      // RequireTeacherSession, not a student portal or student workspace.
+      const isTeacherTaskReviewRoute = routePath === "tasks/:taskId/students/:studentId";
+      if ((routePath !== "/student" || !hasAllowedStudentRoute) && !isTeacherTaskReviewRoute) {
         findings.push({
           type: "route",
           file: "src/main.tsx",

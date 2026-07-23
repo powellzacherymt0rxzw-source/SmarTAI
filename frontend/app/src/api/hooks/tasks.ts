@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as tasksApi from "@/api/tasks";
 import type { UploadOptions } from "@/api/client";
-import type { TaskHistoryQuery, TaskMetadataPatch, TaskStatus } from "@/types";
+import type { Task, TaskHistoryQuery, TaskMetadataPatch, TaskStatus } from "@/types";
 import { tagKeys, taskKeys } from "./keys";
 
 const ACTIVE_TASK_STATUSES = new Set<TaskStatus>([
@@ -190,6 +190,44 @@ export function useUpdateStudentAnswer() {
       flag?: string[];
     }) => tasksApi.updateStudentAnswer(taskId, studentId, qId, { content, flag }),
     onSuccess: (_data, variables) => {
+      invalidateTask(queryClient, variables.taskId);
+    },
+  });
+}
+
+export function useUpdateStudentIdentity() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      currentStudentId,
+      expectedWorkflowRevision,
+      studentId,
+      studentName,
+    }: {
+      taskId: string;
+      currentStudentId: string;
+      expectedWorkflowRevision: number;
+      studentId: string;
+      studentName: string;
+    }) => tasksApi.updateStudentIdentity(taskId, currentStudentId, {
+      expected_workflow_revision: expectedWorkflowRevision,
+      student_id: studentId,
+      student_name: studentName,
+    }),
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData<Task>(taskKeys.detail(variables.taskId), (current) => {
+        if (!current) return current;
+        const studentData = { ...current.student_data };
+        delete studentData[data.previous_student_id];
+        studentData[data.student.stu_id] = data.student;
+        return {
+          ...current,
+          student_data: studentData,
+          workflow_revision: data.workflow_revision,
+        };
+      });
       invalidateTask(queryClient, variables.taskId);
     },
   });

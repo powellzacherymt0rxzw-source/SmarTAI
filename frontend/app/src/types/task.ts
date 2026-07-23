@@ -80,6 +80,13 @@ export interface StudentSubmission {
   identity_status?: "matched" | "needs_review";
 }
 
+export interface StudentIdentityUpdateResponse {
+  status: "ok";
+  previous_student_id: string;
+  student: StudentSubmission;
+  workflow_revision: number;
+}
+
 export type SubmissionIdentityMode = "filename" | "roster" | "manual_review";
 
 export interface StepScore {

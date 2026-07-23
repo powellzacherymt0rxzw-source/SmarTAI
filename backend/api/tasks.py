@@ -15,6 +15,7 @@ Endpoints:
   POST   /tasks/{task_id}/extract_problems    upload problem file → start extract job
   POST   /tasks/{task_id}/parse_submissions   upload submission archive → start parse job
   POST   /tasks/{task_id}/grade               start batch grading job
+  PUT    /tasks/{task_id}/students/{id}/identity  confirm/correct parsed identity
   GET    /tasks/{task_id}/state               current status + active reporter snapshot
   GET    /tasks/{task_id}/result              graded result
 
@@ -34,6 +35,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 import uuid
 from collections import Counter
 from datetime import datetime
@@ -178,6 +180,14 @@ class UpdateStudentAnswerRequest(BaseModel):
     """
     content: Optional[str] = None
     flag: Optional[List[str]] = None      # pass [] to clear flags
+
+
+class UpdateStudentIdentityRequest(BaseModel):
+    """Confirm or correct one parsed student's identity before grading."""
+
+    expected_workflow_revision: int = Field(ge=0)
+    student_id: str = Field(min_length=1, max_length=160)
+    student_name: str = Field(min_length=1, max_length=160)
 
 
 class UpdateTeacherCommentRequest(BaseModel):
@@ -4169,6 +4179,103 @@ def update_student_answer(
     logger.info(f"[task:{task_id}] student {stu_id} answer for {q_id} edited by {current.id}")
 
     return {"status": "ok", "stu_id": stu_id, "q_id": q_id, "answer": new_answer}
+
+
+# ─── Confirm/correct parsed student identity (S04) ──────────────────────────
+
+@router.put("/{task_id}/students/{stu_id}/identity")
+def update_student_identity(
+    task_id: str,
+    stu_id: str,
+    req: UpdateStudentIdentityRequest,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+):
+    """Correct a parsed identity before grading without touching answers.
+
+    Identity changes are intentionally restricted to ``submissions_ready``.
+    Renaming a student after grading starts could orphan a persisted grading
+    result keyed by the previous student id, so later stages must use a
+    separate versioned correction contract if that capability is needed.
+    """
+
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+
+    if _task_workflow_is_busy(task):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_busy"},
+        )
+    if task.status != "submissions_ready":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "student_identity_edit_unavailable"},
+        )
+    if task.workflow_revision != req.expected_workflow_revision:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed"},
+        )
+
+    student = task.student_data.get(stu_id)
+    if not isinstance(student, dict):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Student not found")
+
+    new_id = unicodedata.normalize("NFKC", req.student_id).strip()
+    new_name = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", req.student_name)).strip()
+    if not new_id or not new_name:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "student_identity_required"},
+        )
+    conflicting_id = next(
+        (
+            existing_id
+            for existing_id in task.student_data
+            if existing_id != stu_id and existing_id.casefold() == new_id.casefold()
+        ),
+        None,
+    )
+    if conflicting_id is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "student_id_conflict"},
+        )
+
+    new_student = dict(student)
+    new_student.update({
+        "stu_id": new_id,
+        "stu_name": new_name,
+        "identity_status": "matched",
+        "identity_match_method": "manual_review",
+    })
+    new_student_data: Dict[str, Dict[str, Any]] = {}
+    for existing_id, existing_student in task.student_data.items():
+        if existing_id == stu_id:
+            new_student_data[new_id] = new_student
+        else:
+            new_student_data[existing_id] = existing_student
+
+    committed_task = task_store.update_workflow_cas(
+        task_id,
+        expected_revision=req.expected_workflow_revision,
+        student_data=new_student_data,
+    )
+    if committed_task is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed"},
+        )
+
+    # Do not emit the old/new student id or name: they are private roster data.
+    logger.info("[task:%s] student identity corrected by %s", task_id, current.id)
+    return {
+        "status": "ok",
+        "previous_student_id": stu_id,
+        "student": new_student,
+        "workflow_revision": committed_task.workflow_revision,
+    }
 
 
 # ─── Teacher comments (manual annotation on AI corrections) ──────────────────

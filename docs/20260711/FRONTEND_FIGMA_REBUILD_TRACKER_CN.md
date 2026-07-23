@@ -6,9 +6,9 @@
 >
 > 视觉与页面结构以 `docs/20260710/figma/` 的 17 张导出图为基准；功能、状态和边界必须同时对照 2026-07-03 计划、2026-07-04 完整设计记录及其附录原话、2026-07-10 最新纠偏基线和 2026-07-11 用户补充。
 >
-> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01、S-02 与 S-03 的阶段决定及验收口径分别见 `docs/20260723/S01_SUBMISSION_UPLOAD_STAGE_DECISION_AND_ACCEPTANCE_CN.md`、`docs/20260723/S02_SUBMISSION_RECOGNITION_PROGRESS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`、`docs/20260723/S03_SUBMISSION_REVIEW_OVERVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
+> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段决定及验收口径见 `docs/20260723/S01_SUBMISSION_UPLOAD_STAGE_DECISION_AND_ACCEPTANCE_CN.md`、`docs/20260723/S02_SUBMISSION_RECOGNITION_PROGRESS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`、`docs/20260723/S03_SUBMISSION_REVIEW_OVERVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`、`docs/20260723/S04_STUDENT_SUBMISSION_OVERVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 >
-> 当前阶段：S-03“作答校对总览”已按 Figma 11 完成四张大号事实指标、独占筛选行、学生 × 题目矩阵、解释性本地智能筛选、统一 canonical 跳转及桌面/移动浏览器验收，等待用户视觉确认；下一阶段是 S-04“学生作答总览”。S-01、S-02、C-01 与 canonical task entry 纠偏的既有等待确认状态不变。
+> 当前阶段：S-04“学生作答总览”已按 Figma 11 的视觉语言完成单学生四项事实指标、独立身份修正、学生/题目快速定位、独占智能筛选行、全部题目长视图及桌面/移动浏览器验收，等待用户视觉确认；下一阶段是 S-05“单份作答校对”。S-01 至 S-03、C-01 与 canonical task entry 纠偏的既有等待确认状态不变。
 
 ---
 
@@ -441,7 +441,7 @@
 - [~] S01 添加学生作答独立页，支持身份匹配设置和条件性覆盖提醒。工程与浏览器验收完成：2026-07-23；Figma 10 的桌面锚点、单焦点页面、三种真实匹配方式、任务级识别模型、双层条件覆盖确认、1440×900/390×844 PNG 和相关回归均已完成，等待用户视觉确认。
 - [~] S02 作答识别进度独立页。工程与浏览器验收完成：2026-07-23；Figma 05 的 `800×430` 单焦点进度卡、真实文件/身份/答案计数、后台恢复、脱敏事件、错误门禁、1440×900/390×844 PNG 和相关回归均已完成，等待用户视觉确认。
 - [~] S03 作答校对总览只显示学生 x 题目矩阵、筛选和分流。工程与浏览器验收完成：2026-07-23；Figma 11 的标题/流程/指标/筛选/矩阵骨架、真实四态单元格、解释性本地筛选、canonical 路由和 1440×900/390×844 PNG 均已完成，等待用户视觉确认。
-- [ ] S04 学生作答总览独立页。
+- [~] S04 学生作答总览独立页。工程与浏览器验收完成：2026-07-23；单学生四指标、上一位/下一位与直选、题目定位、解释性筛选、全部题目长视图、真实身份 CAS、1440×900/390×844 PNG 均已完成，等待用户视觉确认。
 - [ ] S05 单份作答校对支持学生/题目双维独立筛选。
 - [~] C01 批改配置独立页，默认简单、高级折叠。工程与浏览器验收完成：2026-07-20；独立 route、任务级无密钥配置、真实批改消费链、共享池安全边界、桌面/移动截图和保存后进入作答页均已验证；等待用户视觉确认。
 - [ ] C02 批改前确认只读汇总，不成为第二个配置页。
@@ -482,7 +482,19 @@
 - 路由闭环：S01 `already_done`、S02 完成、工作台、历史任务和 canonical task entry 的 `submissions_ready` 全部统一到 S03。单元格在 S05 完成前进入 S04 并携带 `?question=:qId`，不制造死链或伪装单题编辑已完成。
 - 工程证据：visible-scope audit 扫描 `69` 个可见文件、lint、TypeScript、Vite production build（`470 modules`）与 `git diff --check` 通过。
 - 浏览器证据：`S03_submission_review_overview_1440x900.png`、`S03_submission_review_overview_390x844.png`；匿名固定 fixture 覆盖正常、flag、空白、缺失和身份待复核，控制台 `0 errors / 0 warnings`，未调用真实模型或改写用户任务。
-- 当前状态：代码、工程与浏览器验收完成，等待用户视觉确认，故保持 `[~]`。下一阶段 S04 负责身份修正和单个学生全部题目总览；S05 仍是独立的学生 × 题目聚焦编辑页。
+- 当前状态：代码、工程与浏览器验收完成，等待用户视觉确认，故保持 `[~]`。后续 S04 已完成身份修正和单个学生全部题目总览；下一阶段 S05 仍是独立的学生 × 题目聚焦编辑页。
+
+### 7.4 S-04 学生作答总览阶段工程记录（2026-07-23）
+
+- 详细决定与验收矩阵：`docs/20260723/S04_STUDENT_SUBMISSION_OVERVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
+- Figma 组合约束：S04 没有独立 frame，严格复用 Figma 11 的标题/流程、`90px` 大号指标、平面导航、独占搜索行与低卡片密度；身份修正默认收起并与答案列表分离，没有恢复遗留长工作区或提前塞入 S05 编辑器。
+- 页面职责：canonical route 为 `/tasks/:id/students/:studentId`；只负责一个学生的身份、作答覆盖、真实异常、来源和全部题目内容。上一位/下一位与学生直选、题目定位会保留另一个维度的查询上下文。
+- 身份合同：owner + `submissions_ready` + busy gate + NFKC/casefold 重复学号检查 + expected revision/CAS；更换 key 保留答案/flag/来源和顺序，成功标记 `matched / manual_review`，INFO 日志不记录学号姓名。批改后修改明确拒绝，避免孤立 grade result。
+- 智能筛选：当前学生固定，支持题号/题型/题干/作答内容及已识别/flag/空白/缺失；“低置信”只映射真实 flag。输入“积分题”实测只保留 Q4，零 provider 调用。
+- route 边界：visible-scope audit 只精确放行受教师会话保护的 task review route，不开放学生 portal；`/student` 仍是未开放页，其他 student route 继续失败。
+- 工程证据：身份合同与相关活跃工作流回归 `12 passed, 2 warnings`；visible-scope audit 扫描 `70` 个可见文件、lint、TypeScript、Vite production build（`471 modules`）与 `git diff --check` 通过。
+- 浏览器证据：`S04_student_submission_overview_1440x900.png`、`S04_student_submission_overview_390x844.png`；身份改名后 URL replace、状态变为已匹配且 5 个答案保留，桌面/移动均无页面级横向溢出，干净页面控制台 `0 errors / 0 warnings`。
+- 当前状态：代码、合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。S05 才实现单学生 × 单题聚焦编辑、双维智能选择和方向键切换。
 
 ### R02 学生/题目双维导航硬规则
 

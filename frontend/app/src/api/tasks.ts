@@ -3,6 +3,7 @@ import type {
   HistoryInterpretation,
   ProblemInfo,
   StudentAnswerInfo,
+  StudentIdentityUpdateResponse,
   SubmissionIdentityMode,
   Task,
   TaskHistoryQuery,
@@ -159,6 +160,18 @@ export function updateStudentAnswer(
   patch: Pick<Partial<StudentAnswerInfo>, "content" | "flag">,
 ): Promise<{ status: "ok"; stu_id: string; q_id: string; answer: StudentAnswerInfo }> {
   return putJSON(`/tasks/${taskId}/students/${studentId}/answers/${qId}`, patch);
+}
+
+export function updateStudentIdentity(
+  taskId: string,
+  currentStudentId: string,
+  input: {
+    expected_workflow_revision: number;
+    student_id: string;
+    student_name: string;
+  },
+): Promise<StudentIdentityUpdateResponse> {
+  return putJSON(`/tasks/${taskId}/students/${currentStudentId}/identity`, input);
 }
 
 export function setTeacherComment(
