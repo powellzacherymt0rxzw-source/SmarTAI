@@ -363,6 +363,13 @@ class GradingJob(BaseModel):
         ),
     )
     results: Optional[Dict[str, Any]] = None
+    final_result_versions: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Immutable teacher-confirmed result snapshots. Each entry carries "
+            "a monotonically increasing version and the effective grading payload."
+        ),
+    )
     error: Optional[str] = None
 
 
@@ -718,6 +725,9 @@ TaskStatus = Literal[
     "submissions_ready",
     "grading",
     "graded",
+    "review_confirmed",
+    "generating_analysis",
+    "finalized",
     "error",
 ]
 
@@ -731,7 +741,8 @@ class Task(BaseModel):
         draft
           → extracting_problems → problems_ready
           → parsing_submissions → submissions_ready
-          → grading → graded
+          → grading → graded → review_confirmed
+          → generating_analysis → finalized
         any phase → error (recoverable by re-uploading)
     """
     task_id: str
@@ -753,6 +764,22 @@ class Task(BaseModel):
     extract_job_id: Optional[str] = None
     parse_job_id: Optional[str] = None
     grading_job_id: Optional[str] = None
+
+    # A-00 separates mutable teacher review overlays from immutable formal
+    # result versions. Analysis/export freshness is intentionally independent
+    # from the top-level task status: editing a confirmed result marks the
+    # artifacts stale without deleting the last auditable snapshot.
+    final_result_version: int = Field(default=0, ge=0)
+    final_result_fingerprint: Optional[str] = None
+    final_result_updated_at: Optional[float] = None
+    final_result_updated_by: Optional[str] = None
+    final_result_dirty: bool = False
+    analysis_status: Literal[
+        "not_generated", "generating", "ready", "stale"
+    ] = "not_generated"
+    analysis_result_version: Optional[int] = Field(default=None, ge=1)
+    analysis_generated_at: Optional[float] = None
+    analysis_error: Optional[str] = None
 
     # C-01 is the single editable source for task-level grading behavior.
     # It is embedded in the in-memory task so C-02 can later be a read-only
@@ -851,6 +878,13 @@ class Task(BaseModel):
             "extract_job_id": self.extract_job_id,
             "parse_job_id": self.parse_job_id,
             "grading_job_id": self.grading_job_id,
+            "final_result_version": self.final_result_version,
+            "final_result_updated_at": self.final_result_updated_at,
+            "final_result_dirty": self.final_result_dirty,
+            "analysis_status": self.analysis_status,
+            "analysis_result_version": self.analysis_result_version,
+            "analysis_generated_at": self.analysis_generated_at,
+            "analysis_error": self.analysis_error,
             "grading_setup_configured": self.grading_setup is not None,
             "problem_file_name": self.problem_file_name,
             "pending_problem_file_name": self.pending_problem_file_name,
@@ -883,6 +917,8 @@ class Task(BaseModel):
             # The base value remains truthful for state/detail responses.
             "needs_attention": (
                 self.status in {"draft", "problems_ready", "submissions_ready", "graded", "error"}
+                or self.final_result_dirty
+                or self.analysis_status == "stale"
                 or bool(self.error)
             ),
             "created_at": self.created_at,

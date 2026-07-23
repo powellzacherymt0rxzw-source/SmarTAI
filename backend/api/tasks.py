@@ -38,6 +38,7 @@ import time
 import unicodedata
 import uuid
 from collections import Counter
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -212,6 +213,12 @@ class UpdateCorrectionReviewRequest(BaseModel):
     confirm: bool = False
 
 
+class ConfirmFinalResultRequest(BaseModel):
+    """Confirm all required review cells into one immutable result version."""
+
+    expected_workflow_revision: int = Field(ge=0)
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _check_owner(task: Task, user: User) -> None:
@@ -235,6 +242,7 @@ def _task_workflow_is_busy(task: Task) -> bool:
     return bool(
         task.status in {
             "extracting_problems", "parsing_submissions", "grading",
+            "generating_analysis",
         }
         or task.reference_parse_job_id
         or task.test_cases_parse_job_id
@@ -252,7 +260,11 @@ def _get_or_404(task_store: TaskStore, task_id: str) -> Task:
 
 _TASK_STATUSES = {
     "draft", "extracting_problems", "problems_ready", "parsing_submissions",
-    "submissions_ready", "grading", "graded", "error",
+    "submissions_ready", "grading", "graded", "review_confirmed",
+    "generating_analysis", "finalized", "error",
+}
+_RESULT_TASK_STATUSES = {
+    "graded", "review_confirmed", "generating_analysis", "finalized",
 }
 _TASK_SORTS = {
     "updated_desc", "updated_asc", "created_desc", "created_asc",
@@ -414,7 +426,7 @@ def _grading_setup_readiness(
             blocking.append(str(detail.get("code") or "invalid_grading_setup"))
         if task.grading_setup.knowledge_scope == "all_task_docs" and not task.kb_docs:
             warnings.append("task_knowledge_empty")
-    if task.status == "graded":
+    if task.status in _RESULT_TASK_STATUSES:
         blocking.append("grading_setup_locked")
     elif _task_workflow_is_busy(task):
         blocking.append("workflow_busy")
@@ -969,13 +981,115 @@ def _validate_tag_ids(
     return unique
 
 
+def _required_result_reviews(results: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return factual review gates shared by R-01 and formal confirmation."""
+
+    required: List[Dict[str, Any]] = []
+    students = results.get("results", []) if isinstance(results, dict) else []
+    if isinstance(students, dict):
+        students = [students]
+    for student in students if isinstance(students, list) else []:
+        if not isinstance(student, dict):
+            continue
+        student_id = str(student.get("student_id") or "")
+        for correction in student.get("corrections", []) or []:
+            if not isinstance(correction, dict):
+                continue
+            reasons: List[str] = []
+            confidence = correction.get("confidence")
+            if isinstance(confidence, (int, float)) and confidence < 0.65:
+                reasons.append("low_confidence")
+            if correction.get("requires_human_review") is True:
+                reasons.append("requires_human_review")
+            review_reasons = correction.get("review_reasons") or []
+            if isinstance(review_reasons, list) and any(
+                reason in {"high_indecisiveness", "score_spread_high"}
+                for reason in review_reasons
+            ):
+                reasons.append("expert_disagreement")
+            if correction.get("synthesis_method") in {
+                "all_failed", "quota_exhausted",
+            }:
+                reasons.append("grading_failure")
+            expert_scores = [
+                item.get("score")
+                for item in correction.get("expert_results", []) or []
+                if isinstance(item, dict)
+                and isinstance(item.get("score"), (int, float))
+            ]
+            max_score = correction.get("max_score")
+            if (
+                len(expert_scores) > 1
+                and isinstance(max_score, (int, float))
+                and max(expert_scores) - min(expert_scores) > max(1, max_score * 0.25)
+            ):
+                reasons.append("expert_disagreement")
+            if not reasons:
+                continue
+            required.append({
+                "student_id": student_id,
+                "q_id": str(correction.get("q_id") or ""),
+                "reasons": list(dict.fromkeys(reasons)),
+                "confirmed": correction.get("review_status") == "confirmed",
+            })
+    return required
+
+
+def _result_fingerprint(results: Dict[str, Any]) -> str:
+    canonical = json.dumps(
+        results,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _finalization_payload(task: Task, job: GradingJob) -> Dict[str, Any]:
+    required = _required_result_reviews(job.results or {})
+    remaining = [item for item in required if not item["confirmed"]]
+    return {
+        "task_id": task.task_id,
+        "task_status": task.status,
+        "workflow_revision": task.workflow_revision,
+        "ready_for_confirmation": not remaining,
+        "required_review_count": len(required),
+        "confirmed_required_count": len(required) - len(remaining),
+        "remaining_review_count": len(remaining),
+        "remaining_reviews": remaining[:20],
+        "final_result_version": task.final_result_version,
+        "final_result_updated_at": task.final_result_updated_at,
+        "final_result_dirty": task.final_result_dirty,
+        "analysis_status": task.analysis_status,
+        "analysis_result_version": task.analysis_result_version,
+        "analysis_generated_at": task.analysis_generated_at,
+        "analysis_error": task.analysis_error,
+        "available_result_versions": len(job.final_result_versions),
+    }
+
+
+def _result_edit_lifecycle_fields(task: Task) -> Dict[str, Any]:
+    """Invalidate only derived/formal state, preserving the last snapshot."""
+
+    return {
+        "status": "graded",
+        "final_result_dirty": task.final_result_version > 0,
+        "analysis_status": (
+            "stale" if task.analysis_result_version is not None else "not_generated"
+        ),
+        "analysis_error": None,
+    }
+
+
 def _task_needs_attention(task: Task, job_store: JobStore) -> bool:
     if task.status == "error" or bool(task.error):
         return True
-    # Paused states require the teacher's next action. `graded` means results
-    # were generated, not that a teacher formally finalized review (that state
-    # does not exist yet), so it remains attention-worthy.
+    # Paused states require the teacher's next action. `graded` means AI results
+    # exist but the teacher has not confirmed the formal result version.
     if task.status in {"draft", "problems_ready", "submissions_ready", "graded"}:
+        return True
+    if task.final_result_dirty or task.analysis_status == "stale":
         return True
     if not task.grading_job_id:
         return False
@@ -1191,10 +1305,8 @@ def list_tasks(
         allowed = set(selected_statuses)
         rows = [item for item in rows if item[0].status in allowed]
     if unfinished is True:
-        # "unfinished" means the automated grading pipeline has not reached
-        # result generation. `graded` is *not* a formal teacher-finalized state;
-        # the lifecycle currently has no review/finalized status.
-        rows = [item for item in rows if item[0].status != "graded"]
+        # Only the formal, analysis/export-ready terminal state is complete.
+        rows = [item for item in rows if item[0].status != "finalized"]
     if needs_attention is not None:
         rows = [
             item for item in rows
@@ -1242,7 +1354,10 @@ def list_tasks(
             "submissions_ready": 4,
             "grading": 5,
             "graded": 6,
-            "error": 7,
+            "review_confirmed": 7,
+            "generating_analysis": 8,
+            "finalized": 9,
+            "error": 10,
         }
         direction = 1 if sort == "stage_asc" else -1
         rows.sort(key=lambda item: (
@@ -1268,7 +1383,8 @@ def list_tasks(
             for item in (
                 "draft", "extracting_problems", "problems_ready",
                 "parsing_submissions", "submissions_ready", "grading",
-                "graded", "error",
+                "graded", "review_confirmed", "generating_analysis",
+                "finalized", "error",
             )
         },
     }
@@ -3809,13 +3925,16 @@ async def task_grade(
             "job_id": t.grading_job_id,
             "task_id": t.task_id,
         }
-    if t.status == "graded" and t.grading_job_id:
+    if t.status in _RESULT_TASK_STATUSES and t.grading_job_id:
         return {
             "status": "already_done",
             "job_id": t.grading_job_id,
             "task_id": t.task_id,
         }
-    if t.status not in {"submissions_ready", "graded", "error"}:
+    if t.status not in {
+        "submissions_ready", "graded", "review_confirmed",
+        "generating_analysis", "finalized", "error",
+    }:
         raise HTTPException(409, detail={"code": "invalid_state"})
     if not t.problem_data or not t.student_data:
         raise HTTPException(409, detail={"code": "invalid_state"})
@@ -3958,7 +4077,7 @@ def task_result(
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
 
-    if t.status != "graded" or not t.grading_job_id:
+    if t.status not in _RESULT_TASK_STATUSES or not t.grading_job_id:
         job = job_store.get(t.grading_job_id) if t.grading_job_id else None
         return {
             "status": t.status,
@@ -3980,6 +4099,126 @@ def task_result(
     return result
 
 
+@router.get("/{task_id}/finalization")
+def get_task_finalization(
+    task_id: str,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    job_store: JobStore = Depends(get_job_store),
+):
+    """Return real review gates and formal-result version freshness."""
+
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    if task.status not in _RESULT_TASK_STATUSES or not task.grading_job_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_result_unavailable", "status": task.status},
+        )
+    job = job_store.get(task.grading_job_id)
+    if job is None or job.results is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Grading result not found")
+    return _finalization_payload(task, job)
+
+
+@router.post("/{task_id}/finalization/confirm")
+def confirm_task_finalization(
+    task_id: str,
+    req: ConfirmFinalResultRequest,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    job_store: JobStore = Depends(get_job_store),
+):
+    """Create one immutable teacher-confirmed result version.
+
+    This does not claim that analysis or export artifacts already exist. Those
+    later stages advance the task to ``generating_analysis`` and ``finalized``.
+    """
+
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    if task.status not in _RESULT_TASK_STATUSES or not task.grading_job_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_result_unavailable", "status": task.status},
+        )
+    if task.status == "generating_analysis":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "analysis_generation_running"},
+        )
+    job = job_store.get(task.grading_job_id)
+    if job is None or job.results is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Grading result not found")
+
+    current_payload = _finalization_payload(task, job)
+    if not current_payload["ready_for_confirmation"]:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "required_reviews_remaining",
+                "remaining_review_count": current_payload["remaining_review_count"],
+                "remaining_reviews": current_payload["remaining_reviews"],
+            },
+        )
+
+    fingerprint = _result_fingerprint(job.results)
+    if (
+        task.final_result_version > 0
+        and task.final_result_fingerprint == fingerprint
+        and not task.final_result_dirty
+    ):
+        return {"status": "ok", "unchanged": True, **current_payload}
+
+    now = time.time()
+    next_version = task.final_result_version + 1
+    next_analysis_status = (
+        "stale" if task.analysis_result_version is not None else "not_generated"
+    )
+    committed_task = task_store.update_workflow_cas(
+        task_id,
+        expected_revision=req.expected_workflow_revision,
+        status="review_confirmed",
+        final_result_version=next_version,
+        final_result_fingerprint=fingerprint,
+        final_result_updated_at=now,
+        final_result_updated_by=current.id,
+        final_result_dirty=False,
+        analysis_status=next_analysis_status,
+        analysis_error=None,
+        error=None,
+    )
+    if committed_task is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed"},
+        )
+
+    snapshot = {
+        "version": next_version,
+        "created_at": now,
+        "created_by": current.id,
+        "workflow_revision": committed_task.workflow_revision,
+        "fingerprint": fingerprint,
+        "payload": deepcopy(job.results),
+    }
+    if not job_store.append_final_result_version(task.grading_job_id, snapshot):
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "final_result_snapshot_failed"},
+        )
+    logger.info(
+        "[task:%s] formal result version %s confirmed",
+        task_id,
+        next_version,
+    )
+    return {
+        "status": "ok",
+        "unchanged": False,
+        **_finalization_payload(committed_task, job),
+    }
+
+
 # ─── Edit problem (manual stem / rubric refinement) ──────────────────────────
 
 @router.put("/{task_id}/problems/{q_id}")
@@ -3992,7 +4231,9 @@ def update_problem(
 ):
     """Update one stem/content state and/or independently reviewed material slots.
 
-    Allowed in any post-extract status (problems_ready through graded). The
+    Allowed after extraction and before grading results exist. Once a grading
+    result exists, source/rubric edits require a new grading run rather than
+    silently changing an already-versioned result.
     new text is stored verbatim — math delimiters / markdown are preserved
     so the teacher can re-read their edits without re-conversion.
 
@@ -4009,6 +4250,11 @@ def update_problem(
         )
     if t.status in ("draft", "extracting_problems"):
         raise HTTPException(409, detail="Problems not extracted yet")
+    if t.status in _RESULT_TASK_STATUSES:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "graded_problem_source_locked"},
+        )
 
     if q_id not in t.problem_data:
         raise HTTPException(404, detail=f"Problem {q_id} not found")
@@ -4346,10 +4592,15 @@ def update_correction_review(
     """
     task = _get_or_404(task_store, task_id)
     _check_owner(task, current)
-    if task.status != "graded" or not task.grading_job_id:
+    if task.status not in _RESULT_TASK_STATUSES or not task.grading_job_id:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail={"code": "task_not_graded", "status": task.status},
+        )
+    if task.status == "generating_analysis":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "analysis_generation_running"},
         )
 
     job = job_store.get(task.grading_job_id)
@@ -4384,6 +4635,7 @@ def update_correction_review(
     committed_task = task_store.update_workflow_cas(
         task_id,
         expected_revision=req.expected_workflow_revision,
+        **_result_edit_lifecycle_fields(task),
     )
     if committed_task is None:
         raise HTTPException(
@@ -4451,7 +4703,7 @@ def set_teacher_comment(
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
 
-    if t.status != "graded" or not t.grading_job_id:
+    if t.status not in _RESULT_TASK_STATUSES or not t.grading_job_id:
         raise HTTPException(409, detail=f"Task not graded yet (status={t.status})")
 
     job = job_store.get(t.grading_job_id)
@@ -4485,6 +4737,7 @@ def set_teacher_comment(
     committed_task = task_store.update_workflow_cas(
         task_id,
         expected_revision=t.workflow_revision,
+        **_result_edit_lifecycle_fields(t),
     )
     if committed_task is None:
         raise HTTPException(
@@ -4525,7 +4778,7 @@ def list_teacher_comments(
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
 
-    if t.status != "graded" or not t.grading_job_id:
+    if t.status not in _RESULT_TASK_STATUSES or not t.grading_job_id:
         return {"comments": {}}
 
     job = job_store.get(t.grading_job_id)

@@ -1,7 +1,7 @@
 import type { TaskLite, TaskStatus } from "@/types";
 import type { MessageKey } from "@/i18n/messages";
 
-export type TaskDisplayStatus = TaskStatus | "completed" | "not_found" | "review_confirmed" | "generating_analysis" | "finalized";
+export type TaskDisplayStatus = TaskStatus | "completed" | "not_found";
 
 export type TaskStatusTone = "neutral" | "primary" | "accent" | "warning" | "danger";
 export type TaskWorkflowStepKey = "setup" | "problems" | "submissions" | "grading" | "results";
@@ -358,6 +358,10 @@ export function getTaskDestination(task: TaskDestinationInput): string {
       return `${taskRoot}/grading/progress`;
     case "graded":
       return `${taskRoot}/review`;
+    case "review_confirmed":
+    case "generating_analysis":
+    case "finalized":
+      return `${taskRoot}/results`;
     case "draft":
       return `${taskRoot}/upload/problems`;
     case "error": {
@@ -413,7 +417,7 @@ export function getTaskActionLabel(status: TaskDisplayStatus | TaskStatus | stri
     case "completed":
       return "复核结果";
     case "review_confirmed":
-      return "生成分析";
+      return "查看正式结果";
     case "generating_analysis":
       return "查看分析进度";
     case "finalized":
@@ -454,6 +458,7 @@ export function getTaskNextStep(
   const submissionWorkspace = `/tasks/${taskId}/submissions`;
   const gradingProgress = `/tasks/${taskId}/grading/progress`;
   const review = `/tasks/${taskId}/review`;
+  const results = `/tasks/${taskId}/results`;
 
   switch (task.status) {
     case "draft":
@@ -512,6 +517,27 @@ export function getTaskNextStep(
         description: "优先处理低置信题次；复核确认后再生成分析和导出。",
         buttonLabel: "复核结果",
         to: review,
+      };
+    case "review_confirmed":
+      return {
+        title: "查看正式结果",
+        description: "教师复核版本已保存，可以进入结果工作区继续分析和导出。",
+        buttonLabel: "查看结果",
+        to: results,
+      };
+    case "generating_analysis":
+      return {
+        title: "分析生成中",
+        description: "正式结果版本保持不变，分析和导出正在生成。",
+        buttonLabel: "查看进度",
+        to: results,
+      };
+    case "finalized":
+      return {
+        title: "查看完成结果",
+        description: "复核、分析和导出均已完成，可随时回到结果工作区复看。",
+        buttonLabel: "查看结果",
+        to: results,
       };
     case "error":
       return {

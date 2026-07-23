@@ -141,7 +141,9 @@ def _require_task_llm_principal(task: Task, user: User) -> None:
 
 
 def _get_results_payload(task: Task, job_store: JobStore) -> Dict[str, Any]:
-    if task.status != "graded" or not task.grading_job_id:
+    if task.status not in {
+        "graded", "review_confirmed", "generating_analysis", "finalized",
+    } or not task.grading_job_id:
         raise HTTPException(409, detail=f"Task not graded yet (status={task.status})")
     job = job_store.get(task.grading_job_id)
     if job is None or job.results is None:
@@ -261,7 +263,9 @@ async def per_question(
                 if (
                     expected_grading_job_id
                     and latest_task is not None
-                    and latest_task.status == "graded"
+                    and latest_task.status in {
+                        "graded", "review_confirmed", "generating_analysis", "finalized",
+                    }
                     and latest_task.grading_job_id == expected_grading_job_id
                 ):
                     cache_task_common_mistakes(

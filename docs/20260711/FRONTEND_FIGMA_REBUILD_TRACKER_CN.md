@@ -6,9 +6,9 @@
 >
 > 视觉与页面结构以 `docs/20260710/figma/` 的 17 张导出图为基准；功能、状态和边界必须同时对照 2026-07-03 计划、2026-07-04 完整设计记录及其附录原话、2026-07-10 最新纠偏基线和 2026-07-11 用户补充。
 >
-> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01 与 R-02 记录位于 `docs/20260724/`。
+> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02 与 A-00 记录位于 `docs/20260724/`。
 >
-> 当前阶段：R-02“学生 × 题目复核详情”已按 Figma 15 与用户导航纠正完成双维筛选、方向键、单题/全部题目视图、真实教师覆盖层及桌面/移动浏览器验收，等待用户视觉确认；下一阶段先做 A-00 正式结果状态/版本壳，再做 A-01 最终结果总览。`auto-research-stateprep-v2` 已完成并空闲；本轮按用户给出的 43% 周额度继续推进，累计五阶段后复核平均消耗并保留约 15%+。S-01 至 S-05、C-01/C-02/C-03/R-01 与 canonical task entry 纠偏的既有等待确认状态不变。
+> 当前阶段：A-00 已建立真实任务级复核门禁、不可变 final result 版本、stale 规则和 Figma 16 视觉语言下的五入口结果工作区壳，桌面/移动浏览器及整库回归完成，等待用户视觉确认；下一阶段 A-01 在该壳内完成简洁最终结果总览。`auto-research-stateprep-v2` 已完成并空闲；A-00 是从 43% 周额度起点计算的累计第五阶段，提交推送后读取真实额度并按 15%+ 保留线决定是否继续。S-01 至 S-05、C-01/C-02/C-03/R-01/R-02 与 canonical task entry 纠偏的既有等待确认状态不变。
 
 ---
 
@@ -177,14 +177,14 @@
 - [!] BE-META-05 课程与标签按用户隔离并持久化，重启不丢失。阻断：2026-07-13 17:34 UTC+8；owner 隔离已实现，但 Task/Course/Tag 仍使用进程内存，重启会丢失；需 PostgreSQL/repository 迁移后才能完成。
 - [~] BE-META-06 提供课程/标签分页搜索、完全匹配、模糊匹配、语义候选和新建前二次查重。工程进展：2026-07-16；owner-scoped 分页搜索、NFKC/casefold 精确匹配、确定性词法相近候选、结构化 409 和“仍然新建”已完成；BYOK 已按 owner 隔离并有安全限额，但拼音与真实语义模型匹配仍未完成，不会伪装为已支持。
 - [~] BE-META-07 课程填写后自动生成课程系统标签，不与同名用户标签重复。工程完成：2026-07-15；Task 只保存真实 `course_id`，History 以课程系统标签展示，不复制同名用户标签；等待 R1-D 用户验收。
-- [~] BE-META-08 任务列表支持按学期、课程、标签、状态、是否未完成、更新时间筛选排序。进展：2026-07-13 17:34 UTC+8；真实 `/tasks/` 查询已支持分页、这些过滤项及名称/阶段/需处理等排序；当前 `unfinished` 只按已有批改流水线状态判断，因为尚无 `finalized` 正式完成状态。
+- [~] BE-META-08 任务列表支持按学期、课程、标签、状态、是否未完成、更新时间筛选排序。进展：2026-07-24；真实 `/tasks/` 查询已支持分页、全部新增结果状态、这些过滤项及名称/阶段/需处理等排序；`unfinished=true` 现在只排除真实 `finalized`。存储仍为内存，故保持 `[~]`。
 - [~] BE-META-09 智能筛选返回结构化条件、排序、解释和真实对象 ID，不直接执行任意 SQL。进展：2026-07-16；确定性解释器始终可用并只输出白名单查询条件，Agent -> Skill -> Tool -> Provider 可选路径已接入但默认关闭；用户 BYOK 隔离及进程内按用户每日 provider-call/估算 token 硬限额已完成，仍待多进程持久限额、审计与真实语义契约成熟后再开放共享模型路径。
 
 #### 3.1.1 History 阶段后端边界记录
 
 - `GET /tasks/` 无查询参数时继续返回旧字典响应，避免破坏现有调用；带任一 History 查询参数时返回 `items / total / page / page_size / available_facets / facets` 分页结构。
 - `POST /tasks/query/interpret` 位于动态 `/{task_id}` route 之前；确定性解析不依赖 key，LLM 只可从共享默认 provider 候选中选择且默认关闭，解析结果仍需由普通 `GET /tasks/` 执行。
-- `graded` 目前只表示“结果已生成、等待教师复核”，不表示正式完成；本阶段没有创建或伪造 `finalized` 状态。
+- `graded` 只表示“结果已生成、等待教师复核”，不表示正式完成；A00 后由 `review_confirmed / generating_analysis / finalized` 继续表达正式生命周期。
 - 标签、任务元数据、智能查询限额计数均为进程内存；本阶段适合本地/隔离测试，不满足重启保留、多进程一致性或生产数据持久化要求。
 
 #### 3.1.2 New Task 阶段后端边界记录
@@ -196,10 +196,10 @@
 
 ### 3.2 Task 状态与工作台
 
-- [ ] BE-STATE-01 补充 `graded_pending_review`、`review_confirmed`、`analysis_generating`、`finalized`、`stale` 等真实状态。
+- [~] BE-STATE-01 补充 `graded_pending_review`、`review_confirmed`、`analysis_generating`、`finalized`、`stale` 等真实状态。工程完成：2026-07-24 05:52 UTC+8；沿用 `graded` 表示待复核，新增 `review_confirmed / generating_analysis / finalized`，并将 `not_generated / generating / ready / stale` 作为独立 artifact 状态；仍为内存存储，等待持久化和用户验收。
 - [ ] BE-STATE-02 工作台 API 返回需要处理、运行中、待复核、待导出和最近完成的优先级信息。
 - [ ] BE-STATE-03 支持多任务并行进度、ETA 和可恢复错误摘要。
-- [ ] BE-STATE-04 正式完成任务默认进入最终结果与分析 `/results`；待复核任务进入 `/review`。
+- [~] BE-STATE-04 正式完成任务默认进入最终结果与分析 `/results`；待复核任务进入 `/review`。工程完成：`graded → /review`，`review_confirmed / generating_analysis / finalized → /results`；工作台、历史任务和 task entry 使用同一 destination，等待用户验收。
 
 ### 3.3 BYOK 与模型信息
 
@@ -215,7 +215,7 @@
 - [ ] BE-AI-02 覆盖历史、题目、作答、复核、学生分析、题目分析和可视化页面。
 - [ ] BE-AI-03 学生与题目筛选分别维护，不因一维查询清空另一维选择。
 - [ ] BE-AI-04 查询覆盖全量或服务端聚合数据，不只取前 50 名学生。
-- [~] BE-AI-05 保存教师 final result overlay、复核状态、审计信息和版本。进展：2026-07-24；R02 已以 owner + workflow revision/CAS + 幂等合同保存逐格 `teacher_score/teacher_comment/review_status/reviewed_at`，保留 AI 原始记录；仍为进程内存，且尚无任务级 final result 版本、冻结人或 stale 版本，因此保持 `[~]`。
+- [~] BE-AI-05 保存教师 final result overlay、复核状态、审计信息和版本。进展：2026-07-24；R02 逐格覆盖与 A00 任务级 `final_result_version/fingerprint/updated_by/dirty`、不可变快照和 stale 规则均已完成；仍为进程内存且缺数据库事务/持久审计，因此保持 `[~]`。
 - [ ] BE-AI-06 教师确认后生成正式分析/报告；之后修改 final result 会使产物标记 stale。
 - [ ] BE-AI-07 扩展安全 ChartOutput；heatmap 使用明确 `x/y/z` schema，不开放任意 Plotly JSON。
 
@@ -295,7 +295,7 @@
 - [~] G02-05 支持自然语言智能筛选并将结果转成可见筛选条件。工程进展：2026-07-16；确定性自然语言解析、条件 chips、歧义和逐项清除已实现；用户 BYOK 隔离及进程内按用户每日 provider-call/估算 token 硬限额已完成，可选 LLM 路径仍默认关闭，待多进程持久限额、审计与真实语义契约成熟后再开放。等待用户阶段验收。
 - [~] G02-06 过滤器可清空，URL/返回导航可恢复筛选状态。工程进展：2026-07-13 17:34 UTC+8；关键词、结构化条件、排序、页码与页大小写入 URL；清除智能条件可恢复执行前的手动条件，等待用户阶段验收。
 - [~] G02-07 大量任务使用分页或虚拟列表，不一次渲染全部。工程进展：2026-07-13 17:34 UTC+8；服务端分页默认 25，支持 25/50/100，32 条真实内存任务数据态已验证，等待用户阶段验收。
-- [~] G02-08 点击任务进入真实当前阶段；正式完成进入最终结果与分析。工程进展：2026-07-13 17:34 UTC+8；现有任务按真实状态进入当前可用 route；后端没有 `finalized` 正式完成状态，因此本阶段不声称、也不伪造正式完成跳转。等待用户阶段验收。
+- [~] G02-08 点击任务进入真实当前阶段；正式完成进入最终结果与分析。工程进展更新：2026-07-24；统一 destination 已覆盖新增结果状态，`graded` 进入 `/review`，`review_confirmed / generating_analysis / finalized` 进入 `/results`；等待用户阶段验收。
 
 ### 5.3 G-02 阶段实现与工程验收记录
 
@@ -305,7 +305,7 @@
 - 测试证据：History/task/registry 目标后端测试共 `32 passed`；`npm run lint`、`npm run typecheck`、Vite production build 和 `git diff --check` 通过。
 - 视觉证据：对照 `docs/20260710/figma/02 History 网盘式任务列表.png`；`1440x900` 数据态截图 `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/history-data-1440x900-review.png`；`390x844` 数据态截图 `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/history-data-390x844-review.png`；桌面空态截图 `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/history-empty-1440x900.png`。移动端 `documentElement.scrollWidth === clientWidth`，无页面级横向溢出。
 - 浏览器边界：本轮前段已用真实 32 条任务数据验证表格、分页/筛选呈现和部分真实交互；后段因本地浏览器自动化权限被系统限制，少数交互无法在最终代码上逐项重跑，相关写入和查询仍由契约测试覆盖。该限制不写成“完整浏览器流程已全部通过”。
-- 数据边界：Task/Course/Tag/智能查询限额仍为进程内存；LLM 智能查询默认关闭；没有 `finalized` 正式完成状态；无可靠 ETA 时显示 `—`。
+- 数据边界：Task/Course/Tag/正式结果版本/智能查询限额仍为进程内存；LLM 智能查询默认关闭；已具备 `finalized` 状态但尚无持久 artifact；无可靠 ETA 时显示 `—`。
 - 独立终审：无 P0/P1；两个已知 P2 为移动端结构化筛选条使用局部横向滚动，以及 `page_size=100` 且大量任务同时运行时逐行 progress 轮询可能放大请求，后续应合并为列表级批量进度或共享轮询。
 - 用户验收：2026-07-15 用户明确要求按 Figma 标准继续下一阶段；以该指令作为进入 G-03 的阶段授权。
 - 偏差说明：为了容纳真实筛选，Figma 单行筛选区扩为两行；桌面将学期、课程、标签收在任务主列以保持 1080px 网盘式主体；移动端保留同一行语义而不是改成卡片瀑布流；颜色比原稿克制。
@@ -533,7 +533,7 @@
 - 详细决定与验收矩阵：`docs/20260724/R01_REVIEW_OVERVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 - Figma 约束：使用 Figma 14（文件 `64TupCQCKXkiT5uxeQY0iH`，节点 `1:1009`）；标题 `(70,105)`、四张 `250×90` 指标卡、`1300×48` 筛选行、`820×308` 热力图和 `438×308` 队列均达到 0–1px 对照，不恢复旧结果页横向五块 tab 或长内容。
 - 页面职责：canonical route `/tasks/:id/review`；只显示平均得分率、低置信、专家分歧、教师批注、学生 × 题目矩阵、4 条优先队列和进入详情的精确链接。`grading` 返回 C03，其他状态使用统一 destination。
-- 真实边界：结果、置信度、专家结果、复核原因与教师批注全部来自现有 owner-scoped API；“已批注”不冒充“已复核”。后端尚无 review/finalized 状态，因此没有开放虚假确认完成按钮。
+- 真实边界：结果、置信度、专家结果、复核原因与教师批注全部来自现有 owner-scoped API；“已批注”不冒充“已复核”。R01 交付当时未开放虚假确认按钮；A00 现已用真实 review/finalized 生命周期替换该缺口。
 - 智能筛选：学生/题目、低置信、专家分歧、待复核、批注及低于 N 分均为确定性本地解释规则，零 provider 调用；真正语义/拼音/服务端大数据筛选仍待后续。
 - 工程证据：visible-scope audit 扫描 `74` 个文件、lint、TypeScript、Vite production build（`482 modules`）与浏览器 route 回落通过。
 - 浏览器证据：`R01-review-overview-desktop-viewport.png`、`R01-review-overview-mobile.png`；桌面 `scrollWidth=1440 / scrollHeight=900`，移动 `scrollWidth=390`，矩阵内部滚动；主 CTA 真实进入精确学生/题目 URL，未调用 provider 或修改用户数据。
@@ -572,12 +572,23 @@
 
 ### A-00 最终结果工作区壳
 
-- [ ] A00-01 正式完成任务默认进入 `/tasks/:id/results`。
-- [ ] A00-02 保留全局顶部导航和任务上下文栏。
-- [ ] A00-03 内容区使用局部左侧导航：总览、题目分析、学生分析、可视化分析、报告与下载。
-- [ ] A00-04 局部左侧栏只负责结果工作区切换，主内容仍是单一纵向焦点。
-- [ ] A00-05 移动端把局部侧栏折叠为下拉或横向 tabs。
-- [ ] A00-06 所有子页显示 final result 版本、生成时间和 stale 状态。
+- [~] A00-01 正式完成任务默认进入 `/tasks/:id/results`。工程完成：正式结果三种状态均由统一 destination 进入 `/results`，`graded` 仍进入 `/review`；等待用户验收。
+- [~] A00-02 保留全局顶部导航和任务上下文栏。工程完成：复用 70px Figma 顶栏、1300px 版心、任务名/版本和七步流程，不恢复旧全局侧栏。
+- [~] A00-03 内容区使用局部左侧导航：总览、题目分析、学生分析、可视化分析、报告与下载。工程完成：五个 canonical route 均可直接访问。
+- [~] A00-04 局部左侧栏只负责结果工作区切换，主内容仍是单一纵向焦点。工程完成：每个 route 只渲染一个主内容面板，无横向大 tab 和卡片套卡片。
+- [~] A00-05 移动端把局部侧栏折叠为下拉或横向 tabs。工程完成：390×844 使用单一下拉，主内容无页面级横向溢出。
+- [~] A00-06 所有子页显示 final result 版本、生成时间和 stale 状态。工程完成：共用版本横幅展示版本、确认时间和 artifact 状态；教师改分后保留上一版本并回到待复核，分析状态按事实变 stale。
+
+### 8.1 A-00 最终结果生命周期与工作区壳阶段工程记录（2026-07-24）
+
+- 详细决定与验收矩阵：`docs/20260724/A00_FINAL_RESULTS_WORKSPACE_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
+- Figma 约束：只调用一次 Figma 16 节点 `1:1260` 并缓存上下文；保留 1300px 内容、七步流程、浅色完成态横幅、低饱和指标卡和大留白。按用户覆盖将单页扩成局部左侧五入口，不复制旧全局侧栏或横向大 tab。
+- 生命周期合同：新增 `GET /tasks/:id/finalization` 与幂等 `POST /tasks/:id/finalization/confirm`；只有低置信、后端复核标记、专家分歧或 grading failure 等真实门禁全部确认后才创建不可变版本。AI 原始值与教师覆盖同时保留。
+- 版本与 stale：任务级 `final_result_version/fingerprint/dirty` 与 artifact `analysis_status/result_version` 分离；确认后改分回到 `graded`，上一版快照不删除，已有分析按事实标 stale；不会自动触发昂贵重算。
+- 路由与页面：`graded → /review`；确认后进入 `/results`。五个 route 为 `/results`、`/questions`、`/students`、`/visualizations`、`/reports`；A00 只建立真实壳和事实空态，详细总览/分析按 A01-A07 继续。
+- 工程证据：后端整库 `213 passed, 1 skipped`；新增回归同时锁定“已有批改结果后不可原地静默改写题干/评分资料”的版本一致性边界；visible-scope audit、TypeScript、lint、Vite production build（`481 modules`）与 `git diff --check` 通过。
+- 浏览器证据：`A00-results-workspace-desktop.png`、`A00-results-workspace-mobile.png`；桌面 1440×900、移动 390×844，五个 route 均加载同一版本上下文；匿名 fixture，未调用 provider 或修改用户数据。
+- 当前状态：代码、真实合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。A01 不得重新引入 R01 热力复核或旧长页，只补简洁摘要与分流。
 
 ### A-01 总览 `/tasks/:id/results`
 

@@ -143,7 +143,9 @@ export function ReviewDetailPage() {
   }, [allQuestions, goTo, nextQuestion, nextStudent, previousQuestion, previousStudent, questionId, studentId]);
 
   if (taskId && taskQuery.data?.status === "grading") return <Navigate replace to={`/tasks/${taskId}/grading/progress`} />;
-  if (taskId && taskQuery.data && taskQuery.data.status !== "graded") return <Navigate replace to={getTaskDestination(taskQuery.data)} />;
+  if (taskId && taskQuery.data && ![
+    "graded", "review_confirmed", "generating_analysis", "finalized",
+  ].includes(taskQuery.data.status)) return <Navigate replace to={getTaskDestination(taskQuery.data)} />;
 
   const loading = taskQuery.isLoading || resultQuery.isLoading;
   const failed = taskQuery.isError || resultQuery.isError;

@@ -14,6 +14,7 @@ import { useTaskProgress } from "@/hooks/useTaskProgress";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { MessageKey } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
+import { getTaskDestination } from "@/lib/taskFlow";
 import type { JobProgress, ProgressEvent, TaskStatus } from "@/types";
 
 type RecognitionStepState = "done" | "active" | "pending";
@@ -48,6 +49,9 @@ export function SubmissionRecognitionProgressPage() {
   }
   if (taskId && status === "graded") {
     return <Navigate to={`/tasks/${taskId}/review`} replace />;
+  }
+  if (taskId && taskQuery.data && ["review_confirmed", "generating_analysis", "finalized"].includes(status ?? "")) {
+    return <Navigate to={getTaskDestination(taskQuery.data)} replace />;
   }
   if (taskId && status && FINISHED_SUBMISSION_STATUSES.has(status)) {
     return <Navigate to={`/tasks/${taskId}/submissions`} replace />;

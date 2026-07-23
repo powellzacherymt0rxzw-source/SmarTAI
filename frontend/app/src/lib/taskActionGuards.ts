@@ -32,6 +32,10 @@ export function getModelReadiness({
 
 export type UploadKind = "problems" | "submissions";
 
+const RESULT_STATUSES = new Set<TaskStatus>([
+  "graded", "review_confirmed", "generating_analysis", "finalized",
+]);
+
 export interface UploadGuard {
   disabled: boolean;
   reason: string | null;
@@ -77,7 +81,7 @@ export function getUploadGuard({
   }
 
   if (kind === "problems" && (task.problem_file_name || task.problem_count > 0)) {
-    const hasDownstreamData = task.student_count > 0 || task.status === "graded" || task.status === "grading";
+    const hasDownstreamData = task.student_count > 0 || RESULT_STATUSES.has(task.status) || task.status === "grading";
     return {
       disabled: false,
       reason: null,
@@ -91,14 +95,18 @@ export function getUploadGuard({
 
   if (kind === "submissions" && (task.submission_file_name || task.student_count > 0)) {
     return {
-      disabled: task.status === "grading",
-      reason: task.status === "grading" ? "批改正在进行中，不能替换学生作答。" : null,
+      disabled: task.status === "grading" || task.status === "generating_analysis",
+      reason: task.status === "grading"
+        ? "批改正在进行中，不能替换学生作答。"
+        : task.status === "generating_analysis"
+          ? "分析正在生成中，不能替换学生作答。"
+          : null,
       confirmTitle: "确认替换学生作答？",
       confirmMessage:
-        task.status === "graded"
+        RESULT_STATUSES.has(task.status)
           ? "替换学生作答会覆盖已识别的作答，并使已有批改结果需要重新生成。若只是想批改另一批学生，建议新建任务。"
           : "替换学生作答会覆盖当前已识别的作答内容。确认继续上传新文件吗？",
-      suggestNewTask: task.status === "graded",
+      suggestNewTask: RESULT_STATUSES.has(task.status),
     };
   }
 
@@ -148,7 +156,7 @@ export function getGradingGuard({
     if (status === "grading") {
       return { disabled: true, reason: "批改已经在进行中。" };
     }
-    if (status === "graded") {
+    if (RESULT_STATUSES.has(status)) {
       return { disabled: true, reason: "批改已完成，请进入结果复核。" };
     }
     return { disabled: true, reason: "请先完成题目和作答校对，再开始批改。" };

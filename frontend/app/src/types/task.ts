@@ -10,6 +10,9 @@ export type TaskStatus =
   | "submissions_ready"
   | "grading"
   | "graded"
+  | "review_confirmed"
+  | "generating_analysis"
+  | "finalized"
   | "error";
 
 export interface TestCase {
@@ -151,6 +154,13 @@ export interface TaskLite {
   extract_job_id?: string | null;
   parse_job_id?: string | null;
   grading_job_id?: string | null;
+  final_result_version?: number;
+  final_result_updated_at?: number | null;
+  final_result_dirty?: boolean;
+  analysis_status?: "not_generated" | "generating" | "ready" | "stale";
+  analysis_result_version?: number | null;
+  analysis_generated_at?: number | null;
+  analysis_error?: string | null;
   last_failed_job_id?: string | null;
   problem_file_name?: string | null;
   submission_file_name?: string | null;
@@ -233,4 +243,32 @@ export interface CorrectionReviewResponse {
   q_id: string;
   correction: Correction;
   workflow_revision: number;
+}
+
+export interface RequiredResultReview {
+  student_id: string;
+  q_id: string;
+  reasons: string[];
+  confirmed: boolean;
+}
+
+export interface TaskFinalizationResponse {
+  status?: "ok";
+  unchanged?: boolean;
+  task_id: string;
+  task_status: TaskStatus;
+  workflow_revision: number;
+  ready_for_confirmation: boolean;
+  required_review_count: number;
+  confirmed_required_count: number;
+  remaining_review_count: number;
+  remaining_reviews: RequiredResultReview[];
+  final_result_version: number;
+  final_result_updated_at?: number | null;
+  final_result_dirty: boolean;
+  analysis_status: "not_generated" | "generating" | "ready" | "stale";
+  analysis_result_version?: number | null;
+  analysis_generated_at?: number | null;
+  analysis_error?: string | null;
+  available_result_versions: number;
 }

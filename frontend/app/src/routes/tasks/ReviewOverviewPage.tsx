@@ -1,7 +1,7 @@
 import { AlertTriangle, ArrowRight, CheckCircle2, LoaderCircle, Search } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
-import { useTask, useTaskResult, useTeacherComments } from "@/api/hooks/tasks";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { useConfirmTaskFinalization, useTask, useTaskFinalization, useTaskResult, useTeacherComments } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { buildResultsModel, effectiveCorrectionScore, formatConfidence, formatPercent, type QuestionSummary, type ResultsModel, type StudentSummary } from "@/components/tasks/ResultsLayout";
 import { collectResultReviewItems, type ReviewItem } from "@/components/tasks/resultsReviewModel";
@@ -16,10 +16,13 @@ import type { Correction } from "@/types";
 /** R01: compact Figma-14 review overview backed only by persisted grading results. */
 export function ReviewOverviewPage() {
   const { taskId } = useParams();
+  const navigate = useNavigate();
   const { locale } = useI18n();
   const taskQuery = useTask(taskId);
   const resultQuery = useTaskResult(taskId);
   const commentsQuery = useTeacherComments(taskId);
+  const finalizationQuery = useTaskFinalization(taskId);
+  const confirmFinalization = useConfirmTaskFinalization();
   const [draftQuery, setDraftQuery] = useState("");
   const [query, setQuery] = useState("");
   const task = taskQuery.data;
@@ -62,6 +65,18 @@ export function ReviewOverviewPage() {
     (total, student) => total + student.corrections.filter(isExpertDisagreement).length,
     0,
   );
+  const remainingReviewCount = finalizationQuery.data?.remaining_review_count ?? pendingReviewItems.length;
+  const readyForConfirmation = finalizationQuery.data?.ready_for_confirmation === true;
+
+  function confirmReviewComplete() {
+    if (!taskId || !readyForConfirmation || confirmFinalization.isPending) return;
+    confirmFinalization.mutate({
+      taskId,
+      expectedWorkflowRevision: finalizationQuery.data?.workflow_revision ?? task?.workflow_revision ?? 0,
+    }, {
+      onSuccess: () => navigate(`/tasks/${taskId}/results`),
+    });
+  }
 
   function submitFilter(event: FormEvent) {
     event.preventDefault();
@@ -95,16 +110,36 @@ export function ReviewOverviewPage() {
             <MetricCard value={String(model.lowConfidenceCount)} label={copy(locale, "lowConfidence")} tone="warning" />
             <MetricCard value={String(disagreementCount)} label={copy(locale, "disagreement")} tone="primary" />
             <MetricCard value={`${confirmedKeys.size}/${correctionCount}`} label={copy(locale, "annotated")} tone="accent" />
-            {targetHref ? (
+            {remainingReviewCount > 0 && targetHref ? (
               <Link
                 to={targetHref}
                 className="col-span-2 inline-flex h-10 items-center justify-center gap-2 self-center rounded-[8px] bg-primary px-5 text-center text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 xl:-ml-[30px] xl:w-[240px] xl:shrink-0"
               >
-                {copy(locale, pendingReviewItems.length ? "startReview" : "viewResult")}
+                {copy(locale, "startReview")}
                 <ArrowRight aria-hidden="true" className="h-4 w-4" />
               </Link>
-            ) : null}
+            ) : (
+              <button
+                type="button"
+                disabled={!readyForConfirmation || confirmFinalization.isPending}
+                onClick={confirmReviewComplete}
+                className="col-span-2 inline-flex h-10 items-center justify-center gap-2 self-center rounded-[8px] bg-primary px-5 text-center text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 xl:-ml-[30px] xl:w-[240px] xl:shrink-0"
+              >
+                {confirmFinalization.isPending
+                  ? (locale === "en-US" ? "Confirming…" : "正在确认…")
+                  : (locale === "en-US" ? "Confirm review complete" : "确认复核完成")}
+                {confirmFinalization.isPending
+                  ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />
+                  : <CheckCircle2 aria-hidden="true" className="h-4 w-4" />}
+              </button>
+            )}
           </div>
+
+          {confirmFinalization.isError ? (
+            <p role="alert" className="mt-3 text-sm font-medium text-destructive">
+              {locale === "en-US" ? "The task changed. Refresh the review state and try again." : "任务状态已变化，请刷新复核状态后重试。"}
+            </p>
+          ) : null}
 
           <form onSubmit={submitFilter} role="search" className="mt-6">
             <label className="relative block">

@@ -13,12 +13,14 @@ const PROCESSING_STATUSES = new Set<TaskStatus>([
   "extracting_problems",
   "parsing_submissions",
   "grading",
+  "generating_analysis",
 ]);
 
 const ACTION_STATUSES = new Set<TaskStatus>([
   "draft",
   "problems_ready",
   "submissions_ready",
+  "graded",
   "error",
 ]);
 
@@ -31,6 +33,9 @@ const STATUS_PRIORITY: Record<TaskStatus, number> = {
   parsing_submissions: 2,
   grading: 2,
   graded: 3,
+  review_confirmed: 4,
+  generating_analysis: 2,
+  finalized: 5,
 };
 
 const STAGE_KEYS: Record<TaskStatus, MessageKey> = {
@@ -41,6 +46,9 @@ const STAGE_KEYS: Record<TaskStatus, MessageKey> = {
   submissions_ready: "dashboardStageSubmissionsReady",
   grading: "dashboardStageGrading",
   graded: "dashboardStageGraded",
+  review_confirmed: "dashboardStageReviewConfirmed",
+  generating_analysis: "dashboardStageGeneratingAnalysis",
+  finalized: "dashboardStageFinalized",
   error: "dashboardStageError",
 };
 
@@ -52,6 +60,9 @@ const ATTENTION_KEYS: Record<TaskStatus, MessageKey> = {
   submissions_ready: "dashboardAttentionReviewSubmissions",
   grading: "dashboardAttentionGrading",
   graded: "dashboardAttentionReviewResults",
+  review_confirmed: "dashboardAttentionResultReady",
+  generating_analysis: "dashboardAttentionAnalysisGenerating",
+  finalized: "dashboardAttentionFinalized",
   error: "dashboardAttentionResolveError",
 };
 
@@ -63,6 +74,9 @@ const ACTION_KEYS: Record<TaskStatus, MessageKey> = {
   submissions_ready: "dashboardActionReviewSubmissions",
   grading: "dashboardActionViewProgress",
   graded: "dashboardActionViewResults",
+  review_confirmed: "dashboardActionOpenResults",
+  generating_analysis: "dashboardActionOpenResults",
+  finalized: "dashboardActionOpenResults",
   error: "dashboardActionResolveError",
 };
 
@@ -426,7 +440,7 @@ function StatusPill({
         PROCESSING_STATUSES.has(status) && "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-200",
         (status === "draft" || status === "problems_ready" || status === "submissions_ready") &&
           "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200",
-        status === "graded" && "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200",
+        ["graded", "review_confirmed", "finalized"].includes(status) && "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200",
         status === "error" && "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-200",
       )}
     >
@@ -447,8 +461,8 @@ function AttentionPill({
       className={cn(
         "inline-flex h-7 min-w-[112px] max-w-[116px] items-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full px-3 text-[12px] font-semibold xl:text-[13px]",
         status === "error" && "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-200",
-        status !== "error" && status !== "graded" && "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200",
-        status === "graded" && "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200",
+        status !== "error" && !["graded", "review_confirmed", "finalized"].includes(status) && "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200",
+        ["graded", "review_confirmed", "finalized"].includes(status) && "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-200",
       )}
     >
       {children}
@@ -618,7 +632,7 @@ function summarizeTasks(tasks: TaskLite[]): DashboardCounts {
     (counts, task) => {
       if (PROCESSING_STATUSES.has(task.status)) counts.processing += 1;
       if (ACTION_STATUSES.has(task.status)) counts.action += 1;
-      if (task.status === "graded") counts.results += 1;
+      if (["graded", "review_confirmed", "generating_analysis", "finalized"].includes(task.status)) counts.results += 1;
       counts.total += 1;
       return counts;
     },
@@ -646,7 +660,7 @@ function compareExperts(a: ExpertConfig, b: ExpertConfig): number {
 }
 
 function getProgressValue(task: TaskLite, progress: JobProgress | null, percent: number): string {
-  if (task.status === "graded") return "100%";
+  if (["graded", "review_confirmed", "finalized"].includes(task.status)) return "100%";
   if (!isTaskProcessing(task.status) || !progress) return "—";
   return `${percent}%`;
 }

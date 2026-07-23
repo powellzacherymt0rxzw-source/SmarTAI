@@ -202,7 +202,7 @@ function HistoryProgressCell({ task }: { task: TaskLite }) {
   let value = "—";
   if (active && progress.progress) value = `${progress.percent}%`;
   if (task.status === "draft") value = t("historyProgressPending");
-  if (task.status === "graded") value = "100%";
+  if (["graded", "review_confirmed", "finalized"].includes(task.status)) value = "100%";
   return <div role="cell" className="hidden px-[14px] tabular-nums text-muted-foreground md:block">{value}</div>;
 }
 

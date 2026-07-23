@@ -101,6 +101,31 @@ class JobStore:
                 for k, v in fields.items():
                     setattr(job, k, v)
 
+    def append_final_result_version(
+        self,
+        job_id: str,
+        version: Dict[str, Any],
+    ) -> bool:
+        """Append one immutable formal-result snapshot under the job lock.
+
+        Exact retries are idempotent by version/fingerprint. A conflicting
+        payload for an existing version is rejected instead of overwriting the
+        audit record.
+        """
+
+        with self._lock:
+            job = self._active.get(job_id) or self._history.get(job_id)
+            if job is None:
+                return False
+            version_number = int(version.get("version") or 0)
+            fingerprint = str(version.get("fingerprint") or "")
+            for existing in job.final_result_versions:
+                if int(existing.get("version") or 0) != version_number:
+                    continue
+                return str(existing.get("fingerprint") or "") == fingerprint
+            job.final_result_versions.append(deepcopy(version))
+            return True
+
     def complete(self, job_id: str, results: Optional[Dict[str, Any]] = None) -> None:
         with self._lock:
             job = self._active.pop(job_id, None)
@@ -286,6 +311,20 @@ class TaskStore:
             return task
 
     @staticmethod
+    def _reset_final_result_state(task: Task) -> None:
+        """Drop lifecycle pointers when source data invalidates grading."""
+
+        task.final_result_version = 0
+        task.final_result_fingerprint = None
+        task.final_result_updated_at = None
+        task.final_result_updated_by = None
+        task.final_result_dirty = False
+        task.analysis_status = "not_generated"
+        task.analysis_result_version = None
+        task.analysis_generated_at = None
+        task.analysis_error = None
+
+    @staticmethod
     def _has_problem_replacement_artifacts(task: Task) -> bool:
         return bool(
             task.problem_data
@@ -320,11 +359,12 @@ class TaskStore:
             or legacy_same_completed_request
         ) and task.status in {
             "problems_ready", "parsing_submissions", "submissions_ready",
-            "grading", "graded",
+            "grading", "graded", "review_confirmed", "generating_analysis",
+            "finalized",
         }:
             return "already_done"
         if (
-            task.status in {"parsing_submissions", "grading"}
+            task.status in {"parsing_submissions", "grading", "generating_analysis"}
             or task.reference_parse_job_id
             or task.test_cases_parse_job_id
             or task.material_import_job_id
@@ -451,6 +491,7 @@ class TaskStore:
             task.pending_submission_recognition_provider_id = None
             task.parse_job_id = None
             task.grading_job_id = None
+            self._reset_final_result_state(task)
             task.reference_file_hash = None
             task.reference_file_name = None
             task.reference_parse_job_id = None
@@ -525,20 +566,26 @@ class TaskStore:
                 return "different_submission_running", task
             if (
                 task.submission_request_fingerprint == request_fingerprint
-                and task.status in {"submissions_ready", "grading", "graded"}
+                and task.status in {
+                    "submissions_ready", "grading", "graded",
+                    "review_confirmed", "generating_analysis", "finalized",
+                }
             ):
                 return "already_done", task
             if task.workflow_revision != expected_revision:
                 return "stale_revision", task
             if (
-                task.status in {"extracting_problems", "grading"}
+                task.status in {"extracting_problems", "grading", "generating_analysis"}
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
                 or task.material_import_job_id
                 or task.ai_completion_job_id
             ):
                 return "workflow_busy", task
-            if task.status not in {"problems_ready", "submissions_ready", "graded", "error"}:
+            if task.status not in {
+                "problems_ready", "submissions_ready", "graded",
+                "review_confirmed", "generating_analysis", "finalized", "error",
+            }:
                 return "invalid_state", task
             if not task.problem_data:
                 return "invalid_state", task
@@ -594,6 +641,7 @@ class TaskStore:
             task.pending_submission_roster_name = None
             task.pending_submission_recognition_provider_id = None
             task.grading_job_id = None
+            self._reset_final_result_state(task)
             task.status = "submissions_ready"
             task.error = None
             task.last_failed_job_id = None
@@ -1166,7 +1214,9 @@ class TaskStore:
                 return "not_found", None
             if task.status == "grading" and task.grading_job_id:
                 return "already_running", task
-            if task.status == "graded" and task.grading_job_id:
+            if task.status in {
+                "graded", "review_confirmed", "generating_analysis", "finalized",
+            } and task.grading_job_id:
                 return "already_done", task
             if task.workflow_revision != expected_revision:
                 return "stale_revision", task
@@ -1178,7 +1228,10 @@ class TaskStore:
                 or task.ai_completion_job_id
             ):
                 return "workflow_busy", task
-            if task.status not in {"submissions_ready", "graded", "error"}:
+            if task.status not in {
+                "submissions_ready", "graded", "review_confirmed",
+                "generating_analysis", "finalized", "error",
+            }:
                 return "invalid_state", task
             if not task.problem_data or not task.student_data:
                 return "invalid_state", task
@@ -1216,11 +1269,14 @@ class TaskStore:
                 return "unchanged", task
             if task.workflow_revision != expected_revision:
                 return "stale_revision", task
-            if task.status == "graded":
+            if task.status in {
+                "graded", "review_confirmed", "generating_analysis", "finalized",
+            }:
                 return "grading_setup_locked", task
             if (
                 task.status in {
                     "extracting_problems", "parsing_submissions", "grading",
+                    "generating_analysis",
                 }
                 or task.reference_parse_job_id
                 or task.test_cases_parse_job_id
@@ -1253,6 +1309,8 @@ class TaskStore:
             if task is None or task.grading_job_id != job_id:
                 return None
             task.status = "error" if error else "graded"
+            if not error:
+                self._reset_final_result_state(task)
             task.error = error
             task.last_failed_job_id = job_id if error else None
             task.workflow_revision += 1

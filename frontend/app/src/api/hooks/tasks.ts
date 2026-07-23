@@ -8,6 +8,7 @@ const ACTIVE_TASK_STATUSES = new Set<TaskStatus>([
   "extracting_problems",
   "parsing_submissions",
   "grading",
+  "generating_analysis",
 ]);
 
 export function useTasks() {
@@ -64,6 +65,32 @@ export function useTaskResult(taskId?: string) {
     queryKey: taskKeys.result(taskId ?? ""),
     queryFn: () => tasksApi.getTaskResult(taskId as string),
     enabled: Boolean(taskId),
+  });
+}
+
+export function useTaskFinalization(taskId?: string) {
+  return useQuery({
+    queryKey: taskKeys.finalization(taskId ?? ""),
+    queryFn: () => tasksApi.getTaskFinalization(taskId as string),
+    enabled: Boolean(taskId),
+  });
+}
+
+export function useConfirmTaskFinalization() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      expectedWorkflowRevision,
+    }: {
+      taskId: string;
+      expectedWorkflowRevision: number;
+    }) => tasksApi.confirmTaskFinalization(taskId, expectedWorkflowRevision),
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData(taskKeys.finalization(variables.taskId), data);
+      invalidateTask(queryClient, variables.taskId);
+    },
   });
 }
 
@@ -272,6 +299,7 @@ export function useSetTeacherComment() {
     }) => tasksApi.setTeacherComment(taskId, studentId, qId, comment),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: taskKeys.comments(variables.taskId) });
+      queryClient.invalidateQueries({ queryKey: taskKeys.finalization(variables.taskId) });
       queryClient.invalidateQueries({ queryKey: taskKeys.result(variables.taskId) });
     },
   });
@@ -312,6 +340,8 @@ export function useUpdateCorrectionReview() {
         };
       });
       queryClient.invalidateQueries({ queryKey: taskKeys.list() });
+      queryClient.invalidateQueries({ queryKey: taskKeys.detail(variables.taskId) });
+      queryClient.invalidateQueries({ queryKey: taskKeys.state(variables.taskId) });
       queryClient.invalidateQueries({ queryKey: taskKeys.comments(variables.taskId) });
     },
   });
@@ -336,6 +366,7 @@ function invalidateTask(queryClient: ReturnType<typeof useQueryClient>, taskId: 
   queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
   queryClient.invalidateQueries({ queryKey: taskKeys.state(taskId) });
   queryClient.invalidateQueries({ queryKey: taskKeys.result(taskId) });
+  queryClient.invalidateQueries({ queryKey: taskKeys.finalization(taskId) });
 }
 
 function historyQueryKey(query: TaskHistoryQuery): string {

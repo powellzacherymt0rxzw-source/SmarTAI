@@ -9,10 +9,10 @@ export function TaskProgressMini({ task }: { task: TaskLite }) {
   const progress = progressQuery.progress;
   const percent = isProcessing
     ? progress ? progressQuery.percent : null
-    : task.status === "graded" ? 100 : null;
+    : ["graded", "review_confirmed", "finalized"].includes(task.status) ? 100 : null;
   const eta = isProcessing
     ? progress?.phase === "done" ? "即将完成" : "估算中"
-    : task.status === "graded" ? "结果已生成" : "—";
+    : ["graded", "review_confirmed", "finalized"].includes(task.status) ? "结果已生成" : "—";
 
   return (
     <div className="min-w-32">

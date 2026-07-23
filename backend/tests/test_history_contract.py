@@ -255,7 +255,7 @@ def test_paginated_filters_facets_and_default_page_size(client):
     ).json()["items"][0]["task_id"] == "T_graded"
     assert client.get(
         "/tasks/?unfinished=true", headers=HEADERS,
-    ).json()["total"] == 2  # pipeline incomplete; no formal-finalized state yet
+        ).json()["total"] == 3  # graded still awaits formal review/analysis finalization
     attention = client.get(
         "/tasks/?needs_attention=true", headers=HEADERS,
     ).json()
@@ -292,9 +292,8 @@ def test_static_query_route_is_not_captured_and_needs_no_provider(client):
         headers=HEADERS,
         json={"query": "正式完成"},
     ).json()
-    assert formal["filters"].get("statuses", []) == []
-    assert formal["ambiguities"]
-    assert "尚无教师正式复核完成状态" in formal["ambiguities"][0]["message"]
+    assert formal["filters"]["statuses"] == ["finalized"]
+    assert formal["ambiguities"] == []
 
     unfinished = client.post(
         "/tasks/query/interpret",

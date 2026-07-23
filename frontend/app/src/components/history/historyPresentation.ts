@@ -11,6 +11,9 @@ export const HISTORY_STAGE_KEYS: Record<TaskStatus, MessageKey> = {
   submissions_ready: "dashboardStageSubmissionsReady",
   grading: "dashboardStageGrading",
   graded: "dashboardStageGraded",
+  review_confirmed: "dashboardStageReviewConfirmed",
+  generating_analysis: "dashboardStageGeneratingAnalysis",
+  finalized: "dashboardStageFinalized",
   error: "dashboardStageError",
 };
 
@@ -22,6 +25,9 @@ export const HISTORY_ACTION_KEYS: Record<TaskStatus, MessageKey> = {
   submissions_ready: "dashboardActionReviewSubmissions",
   grading: "dashboardActionViewProgress",
   graded: "dashboardActionViewResults",
+  review_confirmed: "dashboardActionOpenResults",
+  generating_analysis: "dashboardActionOpenResults",
+  finalized: "dashboardActionOpenResults",
   error: "dashboardActionResolveError",
 };
 
@@ -63,6 +69,11 @@ export function historyStatusTone(status: TaskStatus): string {
     case "grading":
     case "graded":
       return "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-200";
+    case "generating_analysis":
+      return "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-200";
+    case "review_confirmed":
+    case "finalized":
+      return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-200";
     case "error":
       return "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-200";
     case "draft":

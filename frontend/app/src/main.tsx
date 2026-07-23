@@ -28,8 +28,8 @@ const SettingsPage = React.lazy(() =>
 const TaskQuestionDetailPage = React.lazy(() =>
   import("@/routes/tasks/TaskQuestionDetailPage").then((module) => ({ default: module.TaskQuestionDetailPage })),
 );
-const TaskResultsPage = React.lazy(() =>
-  import("@/routes/tasks/TaskResultsPage").then((module) => ({ default: module.TaskResultsPage })),
+const FinalResultsWorkspacePage = React.lazy(() =>
+  import("@/routes/tasks/FinalResultsWorkspacePage").then((module) => ({ default: module.FinalResultsWorkspacePage })),
 );
 const TaskEntryRedirect = React.lazy(() =>
   import("@/routes/tasks/TaskEntryRedirect").then((module) => ({ default: module.TaskEntryRedirect })),
@@ -157,7 +157,11 @@ const router = createBrowserRouter([
       { path: "tasks/:taskId/grading/progress", element: routeElement(<GradingProgressPage />) },
       { path: "tasks/:taskId/review", element: routeElement(<ReviewOverviewPage />) },
       { path: "tasks/:taskId/review/:studentId/:questionId", element: routeElement(<ReviewDetailPage />) },
-      { path: "tasks/:taskId/results", element: routeElement(<TaskResultsPage />) },
+      { path: "tasks/:taskId/results", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/questions", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/students", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/visualizations", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/reports", element: routeElement(<FinalResultsWorkspacePage />) },
       { path: "tasks/:taskId/results/:studentId", element: routeElement(<TaskStudentDetailPage />) },
       { path: "tasks/:taskId/results/questions/:questionId", element: routeElement(<TaskQuestionDetailPage />) },
       { path: "settings/account", element: routeElement(<SettingsPage />) },

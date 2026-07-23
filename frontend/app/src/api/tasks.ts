@@ -9,6 +9,7 @@ import type {
   Task,
   TaskHistoryQuery,
   TaskHistoryResponse,
+  TaskFinalizationResponse,
   TaskLite,
   TaskListResponse,
   TaskMetadataPatch,
@@ -144,6 +145,20 @@ export function getTaskState(taskId: string): Promise<TaskStateSnapshot> {
 
 export function getTaskResult(taskId: string): Promise<TaskResultResponse> {
   return getJSON<TaskResultResponse>(`/tasks/${taskId}/result`);
+}
+
+export function getTaskFinalization(taskId: string): Promise<TaskFinalizationResponse> {
+  return getJSON<TaskFinalizationResponse>(`/tasks/${encodeURIComponent(taskId)}/finalization`);
+}
+
+export function confirmTaskFinalization(
+  taskId: string,
+  expectedWorkflowRevision: number,
+): Promise<TaskFinalizationResponse> {
+  return postJSON<TaskFinalizationResponse>(
+    `/tasks/${encodeURIComponent(taskId)}/finalization/confirm`,
+    { expected_workflow_revision: expectedWorkflowRevision },
+  );
 }
 
 export function updateProblem(

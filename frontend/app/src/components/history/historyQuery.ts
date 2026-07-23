@@ -31,6 +31,9 @@ const STATUS_VALUES = new Set<TaskStatus>([
   "submissions_ready",
   "grading",
   "graded",
+  "review_confirmed",
+  "generating_analysis",
+  "finalized",
   "error",
 ]);
 
