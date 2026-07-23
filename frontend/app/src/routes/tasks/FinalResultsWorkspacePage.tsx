@@ -28,6 +28,7 @@ import { cn } from "@/lib/cn";
 import { formatTaskTime, getTaskDestination } from "@/lib/taskFlow";
 import { QuestionAnalysisDetail } from "@/routes/tasks/results/QuestionAnalysisDetail";
 import { QuestionAnalysisOverview } from "@/routes/tasks/results/QuestionAnalysisOverview";
+import { StudentAnalysisDetail } from "@/routes/tasks/results/StudentAnalysisDetail";
 import { StudentAnalysisOverview } from "@/routes/tasks/results/StudentAnalysisOverview";
 import type { TaskFinalizationResponse, TaskResultResponse } from "@/types";
 
@@ -53,7 +54,7 @@ const RESULT_WORKSPACE_STATUSES = new Set(["review_confirmed", "generating_analy
 
 /** A-00: Figma-16 visual language, expanded into the confirmed five-route workspace. */
 export function FinalResultsWorkspacePage() {
-  const { taskId, questionId } = useParams();
+  const { taskId, questionId, studentId } = useParams();
   const { locale } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
@@ -133,6 +134,7 @@ export function FinalResultsWorkspacePage() {
             section={section}
             taskId={taskId}
             questionId={questionId}
+            studentId={studentId}
             finalization={finalization}
             result={result}
           />
@@ -196,6 +198,7 @@ function WorkspaceContent({
   section,
   taskId,
   questionId,
+  studentId,
   finalization,
   result,
 }: {
@@ -203,6 +206,7 @@ function WorkspaceContent({
   section: WorkspaceSection;
   taskId: string;
   questionId?: string;
+  studentId?: string;
   finalization: TaskFinalizationResponse;
   result?: TaskResultResponse;
 }) {
@@ -219,7 +223,9 @@ function WorkspaceContent({
   }
 
   if (section === "students") {
-    return <StudentAnalysisOverview locale={locale} taskId={taskId} model={model} />;
+    return studentId
+      ? <StudentAnalysisDetail locale={locale} taskId={taskId} studentId={studentId} model={model} />
+      : <StudentAnalysisOverview locale={locale} taskId={taskId} model={model} />;
   }
 
   const isReports = section === "reports";
@@ -499,7 +505,8 @@ function WorkspaceState({ locale, loading = false, onRetry }: { locale: Locale; 
 
 function sectionFromPath(pathname: string): WorkspaceSection {
   if (/\/results\/questions(?:\/[^/]+)?\/?$/.test(pathname)) return "questions";
-  if (pathname.endsWith("/students")) return "students";
+  if (/\/results\/students(?:\/[^/]+)?\/?$/.test(pathname)) return "students";
+  if (/\/results\/(?!questions$|students$|visualizations$|reports$)[^/]+\/?$/.test(pathname)) return "students";
   if (pathname.endsWith("/visualizations")) return "visualizations";
   if (pathname.endsWith("/reports")) return "reports";
   return "overview";

@@ -52,8 +52,15 @@ export function QuestionAnalysisDetail({
   const next = questionIndex >= 0 && questionIndex < model.questions.length - 1 ? model.questions[questionIndex + 1] : null;
   const root = `/tasks/${encodeURIComponent(taskId)}/results/questions`;
   const returnQuery = searchParams.get("return") ?? "";
+  const studentContext = searchParams.get("student") ?? "";
+  const studentReturnQuery = searchParams.get("student_return") ?? "";
   const listHref = returnQuery ? `${root}?${returnQuery}` : root;
-  const detailReturnSuffix = returnQuery ? `?return=${encodeURIComponent(returnQuery)}` : "";
+  const detailParams = new URLSearchParams();
+  if (returnQuery) detailParams.set("return", returnQuery);
+  if (studentContext) detailParams.set("student", studentContext);
+  if (studentReturnQuery) detailParams.set("student_return", studentReturnQuery);
+  const detailReturnSuffix = detailParams.size ? `?${detailParams.toString()}` : "";
+  const studentContextHref = studentContext ? buildStudentContextHref(taskId, studentContext, questionId, studentReturnQuery) : "";
   const matches = useMemo(() => findQuestionMatches(query, model.questions), [model.questions, query]);
 
   useEffect(() => {
@@ -100,9 +107,12 @@ export function QuestionAnalysisDetail({
     <section className="rounded-[10px] border bg-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Link to={listHref} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:underline">
-            <ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />{tx(locale, "返回题目分析总览", "Back to question overview")}
-          </Link>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <Link to={listHref} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:underline">
+              <ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />{tx(locale, "返回题目分析总览", "Back to question overview")}
+            </Link>
+            {studentContextHref ? <Link to={studentContextHref} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:underline">{tx(locale, "返回当前学生详情", "Back to current student")}</Link> : null}
+          </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <h2 className="text-[22px] font-bold tracking-[-0.01em] text-foreground">{question.label}</h2>
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">{question.type || "—"}</span>
@@ -207,9 +217,12 @@ export function QuestionAnalysisDetail({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[9px] bg-muted/40 px-3 py-2.5">
-        <Link to={listHref} className="inline-flex h-9 items-center gap-1.5 rounded-[7px] border bg-card px-3 text-[11px] font-semibold text-foreground hover:bg-muted">
-          <ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />{tx(locale, "题目总览", "Question overview")}
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to={listHref} className="inline-flex h-9 items-center gap-1.5 rounded-[7px] border bg-card px-3 text-[11px] font-semibold text-foreground hover:bg-muted">
+            <ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />{tx(locale, "题目总览", "Question overview")}
+          </Link>
+          {studentContextHref ? <Link to={studentContextHref} className="inline-flex h-9 items-center rounded-[7px] border bg-card px-3 text-[11px] font-semibold text-primary hover:bg-muted">{tx(locale, "当前学生详情", "Current student")}</Link> : null}
+        </div>
         <QuestionStepButtons locale={locale} previous={previous} next={next} onSelect={goToQuestion} />
       </div>
     </section>
@@ -439,6 +452,13 @@ function findQuestionMatches(query: string, questions: QuestionSummary[]): Quest
     })
     .filter((match): match is QuestionSearchMatch => match !== null)
     .sort((left, right) => Number(right.exact) - Number(left.exact) || left.question.label.localeCompare(right.question.label, undefined, { numeric: true }));
+}
+
+function buildStudentContextHref(taskId: string, studentId: string, questionId: string, serialized: string): string {
+  const params = new URLSearchParams(serialized);
+  if (!params.has("question")) params.set("question", questionId);
+  const query = params.toString();
+  return `/tasks/${encodeURIComponent(taskId)}/results/students/${encodeURIComponent(studentId)}${query ? `?${query}` : ""}#question-${encodeURIComponent(questionId)}`;
 }
 
 function getKnowledgePoints(problem?: ProblemInfo): string[] {

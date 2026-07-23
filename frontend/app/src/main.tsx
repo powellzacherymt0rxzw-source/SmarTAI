@@ -34,9 +34,6 @@ const TaskEntryRedirect = React.lazy(() =>
 const TaskMaterialsPage = React.lazy(() =>
   import("@/routes/tasks/TaskMaterialsPage").then((module) => ({ default: module.TaskMaterialsPage })),
 );
-const TaskStudentDetailPage = React.lazy(() =>
-  import("@/routes/tasks/TaskStudentDetailPage").then((module) => ({ default: module.TaskStudentDetailPage })),
-);
 const TaskUploadPage = React.lazy(() =>
   import("@/routes/tasks/TaskUploadPage").then((module) => ({ default: module.TaskUploadPage })),
 );
@@ -159,8 +156,8 @@ const router = createBrowserRouter([
       { path: "tasks/:taskId/results/students", element: routeElement(<FinalResultsWorkspacePage />) },
       { path: "tasks/:taskId/results/visualizations", element: routeElement(<FinalResultsWorkspacePage />) },
       { path: "tasks/:taskId/results/reports", element: routeElement(<FinalResultsWorkspacePage />) },
-      { path: "tasks/:taskId/results/students/:studentId", element: routeElement(<TaskStudentDetailPage />) },
-      { path: "tasks/:taskId/results/:studentId", element: routeElement(<TaskStudentDetailPage />) },
+      { path: "tasks/:taskId/results/students/:studentId", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/:studentId", element: routeElement(<FinalResultsWorkspacePage />) },
       { path: "tasks/:taskId/results/questions/:questionId", element: routeElement(<FinalResultsWorkspacePage />) },
       { path: "settings/account", element: routeElement(<SettingsPage />) },
       { path: "settings/byok", element: routeElement(<ExpertsPage />) },
