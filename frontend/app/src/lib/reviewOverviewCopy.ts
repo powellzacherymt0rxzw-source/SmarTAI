@@ -1,0 +1,40 @@
+import type { Locale } from "@/i18n/messages";
+
+const copy = {
+  title: ["结果总览", "Results Overview"],
+  average: ["平均得分率", "Average score"],
+  lowConfidence: ["低置信题次", "Low-confidence responses"],
+  disagreement: ["专家分歧大", "High expert disagreement"],
+  annotated: ["已批注", "Teacher annotated"],
+  startReview: ["开始优先复核", "Start priority review"],
+  viewResult: ["查看任一结果", "View a result"],
+  searchPlaceholder: ["智能筛选：低置信、低于 60 分、专家分歧、学生姓名或 Q2…", "Smart filter: low confidence, below 60, disagreement, student, or Q2…"],
+  searchLabel: ["智能筛选批改结果", "Smart-filter grading results"],
+  heatmap: ["学生 × 题目复核热力图", "Student × problem review heatmap"],
+  queue: ["复核队列", "Review queue"],
+  review: ["复核", "Review"],
+  low: ["低", "Low"],
+  ok: ["OK", "OK"],
+  commented: ["批注", "Note"],
+  noQueue: ["当前没有低置信、专家分歧或后端复核标记。", "No low-confidence, disagreement, or backend review flags were found."],
+  noMatch: ["没有符合当前筛选条件的题次。清空输入可恢复全部结果。", "No responses match this filter. Clear it to restore all results."],
+  clear: ["清空筛选", "Clear filter"],
+  loadError: ["暂时无法读取批改结果", "Grading results could not be loaded"],
+  loadErrorDescription: ["任务数据没有被修改。请刷新后重试，或从历史任务重新进入。", "Task data was not changed. Refresh or reopen it from History."],
+  retry: ["重新读取", "Retry"],
+  missingTask: ["缺少任务信息，请从工作台或历史任务重新进入。", "Task information is missing. Reopen it from Workspace or History."],
+  loading: ["正在读取批改结果…", "Loading grading results…"],
+  empty: ["当前任务没有可显示的批改结果。", "This task has no grading results to display."],
+  viewHistory: ["查看历史任务", "View History"],
+  lowReason: ["作答低置信", "Low-confidence response"],
+  disagreementReason: ["专家分歧", "Expert disagreement"],
+  anomalyReason: ["分数异常", "Score anomaly"],
+  reviewReason: ["需要人工确认", "Needs teacher review"],
+  filtered: ["筛选后 {students} 位学生 · {questions} 道题 · {cells} 个题次", "Filtered to {students} students · {questions} problems · {cells} responses"],
+} as const;
+
+export type ReviewOverviewCopyKey = keyof typeof copy;
+
+export function reviewOverviewText(locale: Locale, key: ReviewOverviewCopyKey): string {
+  return copy[key][locale === "en-US" ? 1 : 0];
+}

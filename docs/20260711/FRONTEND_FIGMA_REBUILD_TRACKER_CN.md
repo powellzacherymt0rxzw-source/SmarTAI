@@ -8,7 +8,7 @@
 >
 > R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05 与 C-02 记录位于 `docs/20260724/`。
 >
-> 当前阶段：C-03“批改进度”已按 Figma 13 完成事实百分比/ETA、去重队列、后台恢复、失败重试、canonical route 迁移及桌面/移动浏览器验收，等待用户视觉确认；下一阶段是 R-01“待复核结果总览”。`auto-research-stateprep-v2` 已完成并空闲；本轮按用户给出的 43% 周额度继续推进，五阶段后复核平均消耗并保留约 15%+。S-01 至 S-05、C-01/C-02 与 canonical task entry 纠偏的既有等待确认状态不变。
+> 当前阶段：R-01“待复核结果总览”已按 Figma 14 完成真实指标、热力矩阵、优先复核队列、可解释本地智能筛选及桌面/移动浏览器验收，等待用户视觉确认；下一阶段是 R-02“学生 × 题目复核详情”。`auto-research-stateprep-v2` 已完成并空闲；本轮按用户给出的 43% 周额度继续推进，累计五阶段后复核平均消耗并保留约 15%+。S-01 至 S-05、C-01/C-02/C-03 与 canonical task entry 纠偏的既有等待确认状态不变。
 
 ---
 
@@ -446,7 +446,7 @@
 - [~] C01 批改配置独立页，默认简单、高级折叠。工程与浏览器验收完成：2026-07-20；独立 route、任务级无密钥配置、真实批改消费链、共享池安全边界、桌面/移动截图和保存后进入作答页均已验证；等待用户视觉确认。
 - [~] C02 批改前确认只读汇总，不成为第二个配置页。工程与浏览器验收完成：2026-07-24；Figma 12 精确几何、真实任务/设置摘要、可回跳风险、幂等启动、S03 入口及双尺寸 PNG 已完成，等待用户视觉确认。
 - [~] C03 批改进度独立页。工程与浏览器验收完成：2026-07-24；Figma 13 精确几何、事实题次/ETA/队列、后台恢复、错误重试、graded→review 迁移及双尺寸 PNG 已完成，等待用户视觉确认。
-- [ ] R01 待复核结果总览采用 Figma 14 的热力图、指标和复核队列。
+- [~] R01 待复核结果总览采用 Figma 14 的热力图、指标和复核队列。工程与浏览器验收完成：2026-07-24；Figma 14 精确几何、真实结果/批注、可解释筛选、短队列、精确复核入口及双尺寸 PNG 已完成，等待用户视觉确认。
 - [ ] R02 复核详情采用 Figma 15 的内容层级，但重做双维导航。
 
 ### 7.1 S-01 添加学生作答阶段工程记录（2026-07-23）
@@ -527,6 +527,17 @@
 - 工程证据：C03/Q02-Q03 回归 `5 passed`；visible-scope audit 扫描 `73` 个文件、lint、TypeScript、Vite production build（`479 modules`）与 `git diff --check` 通过。
 - 浏览器证据：`C03-grading-progress-desktop.png`、`C03-grading-progress-mobile.png`；桌面关键坐标完全匹配 Figma，移动 `scrollWidth=390`；错误态重试通过，干净控制台 `0 errors / 0 warnings`，未调用真实 provider。
 - 当前状态：代码、进度合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。下一阶段 R01 必须用 Figma 14 替换 `/review` 临时兼容容器。
+
+### 7.8 R-01 结果总览与复核热力图阶段工程记录（2026-07-24）
+
+- 详细决定与验收矩阵：`docs/20260724/R01_REVIEW_OVERVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
+- Figma 约束：使用 Figma 14（文件 `64TupCQCKXkiT5uxeQY0iH`，节点 `1:1009`）；标题 `(70,105)`、四张 `250×90` 指标卡、`1300×48` 筛选行、`820×308` 热力图和 `438×308` 队列均达到 0–1px 对照，不恢复旧结果页横向五块 tab 或长内容。
+- 页面职责：canonical route `/tasks/:id/review`；只显示平均得分率、低置信、专家分歧、教师批注、学生 × 题目矩阵、4 条优先队列和进入详情的精确链接。`grading` 返回 C03，其他状态使用统一 destination。
+- 真实边界：结果、置信度、专家结果、复核原因与教师批注全部来自现有 owner-scoped API；“已批注”不冒充“已复核”。后端尚无 review/finalized 状态，因此没有开放虚假确认完成按钮。
+- 智能筛选：学生/题目、低置信、专家分歧、待复核、批注及低于 N 分均为确定性本地解释规则，零 provider 调用；真正语义/拼音/服务端大数据筛选仍待后续。
+- 工程证据：visible-scope audit 扫描 `74` 个文件、lint、TypeScript、Vite production build（`482 modules`）与浏览器 route 回落通过。
+- 浏览器证据：`R01-review-overview-desktop-viewport.png`、`R01-review-overview-mobile.png`；桌面 `scrollWidth=1440 / scrollHeight=900`，移动 `scrollWidth=390`，矩阵内部滚动；主 CTA 真实进入精确学生/题目 URL，未调用 provider 或修改用户数据。
+- 当前状态：代码、工程与浏览器验收完成，等待用户视觉确认，故保持 `[~]`。R02 将替换精确 URL 当前的兼容学生详情回落页，并完成两维独立导航和复核编辑。
 
 ### R02 学生/题目双维导航硬规则
 
