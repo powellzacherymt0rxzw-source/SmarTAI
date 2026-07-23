@@ -368,6 +368,7 @@ export function StudentSubmissionOverviewPage() {
                     question={question}
                     answer={answers.get(question.id)}
                     selected={question.id === selectedQuestionId}
+                    reviewHref={answerReviewPath(taskId, student.stu_id, question.id, filterQuery)}
                     t={t}
                   />
                 ))}
@@ -404,11 +405,13 @@ function AnswerSection({
   question,
   answer,
   selected,
+  reviewHref,
   t,
 }: {
   question: SubmissionQuestion;
   answer?: StudentAnswerInfo;
   selected: boolean;
+  reviewHref: string;
   t: (key: MessageKey) => string;
 }) {
   const state = getAnswerState(answer);
@@ -425,7 +428,16 @@ function AnswerSection({
           </div>
           {question.stem ? <MarkdownMath className="mt-1 line-clamp-2 text-xs text-muted-foreground">{question.stem}</MarkdownMath> : null}
         </div>
-        <AnswerStateBadge state={state} t={t} />
+        <div className="flex shrink-0 items-center gap-2">
+          <AnswerStateBadge state={state} t={t} />
+          <Link
+            to={reviewHref}
+            className="inline-flex h-7 items-center justify-center rounded-[7px] border bg-card px-3 text-[11px] font-semibold text-primary outline-none hover:bg-primary/5 focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {t("studentSubmissionReviewAnswer")}
+            <ArrowRight aria-hidden="true" className="ml-1 h-3.5 w-3.5" />
+          </Link>
+        </div>
       </div>
       <div className="mt-3 rounded-[8px] bg-slate-50 px-4 py-3 dark:bg-slate-900/45">
         {answer?.content?.trim() ? (
@@ -590,6 +602,12 @@ function questionDomId(questionId: string) {
 
 function studentPath(taskId: string, targetStudentId: string) {
   return `/tasks/${encodeURIComponent(taskId)}/students/${encodeURIComponent(targetStudentId)}`;
+}
+
+function answerReviewPath(taskId: string, studentId: string, questionId: string, overviewFilter: string) {
+  const params = new URLSearchParams({ from: "student" });
+  if (overviewFilter) params.set("overviewFilter", overviewFilter);
+  return `${studentPath(taskId, studentId)}/questions/${encodeURIComponent(questionId)}?${params.toString()}`;
 }
 
 function compareStudents(a: StudentSubmission, b: StudentSubmission) {

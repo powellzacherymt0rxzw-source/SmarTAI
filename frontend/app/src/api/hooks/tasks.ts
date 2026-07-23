@@ -180,16 +180,38 @@ export function useUpdateStudentAnswer() {
       taskId,
       studentId,
       qId,
+      expectedWorkflowRevision,
       content,
       flag,
     }: {
       taskId: string;
       studentId: string;
       qId: string;
+      expectedWorkflowRevision?: number;
       content?: string;
       flag?: string[];
-    }) => tasksApi.updateStudentAnswer(taskId, studentId, qId, { content, flag }),
-    onSuccess: (_data, variables) => {
+    }) => tasksApi.updateStudentAnswer(taskId, studentId, qId, {
+      expected_workflow_revision: expectedWorkflowRevision,
+      content,
+      flag,
+    }),
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData<Task>(taskKeys.detail(variables.taskId), (current) => {
+        const student = current?.student_data[variables.studentId];
+        if (!current || !student) return current;
+        const answers = [...student.stu_ans];
+        const answerIndex = answers.findIndex((answer) => answer.q_id === variables.qId);
+        if (answerIndex >= 0) answers[answerIndex] = data.answer;
+        else answers.push(data.answer);
+        return {
+          ...current,
+          workflow_revision: data.workflow_revision,
+          student_data: {
+            ...current.student_data,
+            [variables.studentId]: { ...student, stu_ans: answers },
+          },
+        };
+      });
       invalidateTask(queryClient, variables.taskId);
     },
   });

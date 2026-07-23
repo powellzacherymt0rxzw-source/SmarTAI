@@ -58,6 +58,9 @@ const SubmissionReviewOverviewPage = React.lazy(() =>
 const StudentSubmissionOverviewPage = React.lazy(() =>
   import("@/routes/tasks/StudentSubmissionOverviewPage").then((module) => ({ default: module.StudentSubmissionOverviewPage })),
 );
+const StudentAnswerReviewPage = React.lazy(() =>
+  import("@/routes/tasks/StudentAnswerReviewPage").then((module) => ({ default: module.StudentAnswerReviewPage })),
+);
 const ProblemRecognitionProgressPage = React.lazy(() =>
   import("@/routes/tasks/ProblemRecognitionProgressPage").then((module) => ({ default: module.ProblemRecognitionProgressPage })),
 );
@@ -125,6 +128,7 @@ const router = createBrowserRouter([
       { path: "tasks/:taskId/submissions/progress", element: routeElement(<SubmissionRecognitionProgressPage />) },
       { path: "tasks/:taskId/submissions", element: routeElement(<SubmissionReviewOverviewPage />) },
       { path: "tasks/:taskId/students/:studentId", element: routeElement(<StudentSubmissionOverviewPage />) },
+      { path: "tasks/:taskId/students/:studentId/questions/:questionId", element: routeElement(<StudentAnswerReviewPage />) },
       { path: "tasks/:taskId/upload/submissions", element: routeElement(<TaskEntryRedirect />) },
       { path: "tasks/:taskId/upload/:kind", element: routeElement(<TaskUploadPage />) },
       { path: "tasks/:taskId/problems/progress", element: routeElement(<ProblemRecognitionProgressPage />) },

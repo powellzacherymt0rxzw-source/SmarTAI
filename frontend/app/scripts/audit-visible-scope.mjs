@@ -262,7 +262,10 @@ function auditRouter(content) {
       );
       // This nested task route is a teacher-only review surface protected by
       // RequireTeacherSession, not a student portal or student workspace.
-      const isTeacherTaskReviewRoute = routePath === "tasks/:taskId/students/:studentId";
+      const isTeacherTaskReviewRoute = [
+        "tasks/:taskId/students/:studentId",
+        "tasks/:taskId/students/:studentId/questions/:questionId",
+      ].includes(routePath);
       if ((routePath !== "/student" || !hasAllowedStudentRoute) && !isTeacherTaskReviewRoute) {
         findings.push({
           type: "route",

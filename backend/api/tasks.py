@@ -178,6 +178,7 @@ class UpdateStudentAnswerRequest(BaseModel):
     OCR / segmentation error and wants to fix the recognized content (or
     clear the recognition flag) before grading runs.
     """
+    expected_workflow_revision: Optional[int] = Field(default=None, ge=0)
     content: Optional[str] = None
     flag: Optional[List[str]] = None      # pass [] to clear flags
 
@@ -4126,6 +4127,18 @@ def update_student_answer(
     _check_owner(t, current)
     base_workflow_revision = t.workflow_revision
 
+    # S05 sends the revision it rendered so two teacher tabs cannot silently
+    # overwrite each other.  The field remains optional for the legacy upload
+    # preview while that surface is being retired.
+    if (
+        req.expected_workflow_revision is not None
+        and req.expected_workflow_revision != base_workflow_revision
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed"},
+        )
+
     if _task_workflow_is_busy(t):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -4149,17 +4162,35 @@ def update_student_answer(
             target_idx = i
             break
     if target_idx is None:
-        raise HTTPException(404, detail=f"No answer for q_id={q_id} on student {stu_id}")
-
-    # Patch — copy-on-write so TaskStore's update detects the change
-    new_answer = dict(answers[target_idx])
+        problem = t.problem_data.get(q_id)
+        if not isinstance(problem, dict):
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail={"code": "answer_question_not_found"},
+            )
+        # A matrix cell may legitimately be missing.  S05 can create only a
+        # record for a real task question; question metadata is copied from the
+        # task instead of trusting client-supplied labels.
+        new_answer = {
+            "q_id": q_id,
+            "number": str(problem.get("number") or q_id),
+            "type": str(problem.get("type") or ""),
+            "content": "",
+            "flag": [],
+        }
+    else:
+        # Patch — copy-on-write so TaskStore's update detects the change.
+        new_answer = dict(answers[target_idx])
     if req.content is not None:
         new_answer["content"] = req.content
     if req.flag is not None:
         new_answer["flag"] = list(req.flag)
 
     new_answers = list(answers)
-    new_answers[target_idx] = new_answer
+    if target_idx is None:
+        new_answers.append(new_answer)
+    else:
+        new_answers[target_idx] = new_answer
 
     new_student = dict(student)
     new_student["stu_ans"] = new_answers
@@ -4176,9 +4207,17 @@ def update_student_answer(
             status.HTTP_409_CONFLICT,
             detail={"code": "task_workflow_changed"},
         )
-    logger.info(f"[task:{task_id}] student {stu_id} answer for {q_id} edited by {current.id}")
+    # Student IDs, names, question IDs and recognized answer text are omitted
+    # from INFO logs because they may contain personal or assessment data.
+    logger.info("[task:%s] parsed answer corrected by %s", task_id, current.id)
 
-    return {"status": "ok", "stu_id": stu_id, "q_id": q_id, "answer": new_answer}
+    return {
+        "status": "ok",
+        "stu_id": stu_id,
+        "q_id": q_id,
+        "answer": new_answer,
+        "workflow_revision": committed_task.workflow_revision,
+    }
 
 
 # ─── Confirm/correct parsed student identity (S04) ──────────────────────────

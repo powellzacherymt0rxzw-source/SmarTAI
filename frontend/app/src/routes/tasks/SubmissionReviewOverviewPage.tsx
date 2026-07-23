@@ -187,6 +187,7 @@ export function SubmissionReviewOverviewPage() {
               students={selection.students}
               questions={selection.questions}
               taskId={taskId}
+              returnSearch={searchParams.toString()}
               t={t}
             />
           )}
@@ -220,11 +221,13 @@ function SubmissionMatrix({
   students,
   questions,
   taskId,
+  returnSearch,
   t,
 }: {
   students: StudentSubmission[];
   questions: SubmissionQuestion[];
   taskId: string;
+  returnSearch: string;
   t: (key: MessageKey) => string;
 }) {
   if (students.length === 0 || questions.length === 0) {
@@ -282,7 +285,7 @@ function SubmissionMatrix({
                   <td key={question.id} className="px-3 text-center">
                     <AnswerStatusLink
                       answer={answers.get(question.id)}
-                      to={`${studentPath(taskId, student.stu_id)}?question=${encodeURIComponent(question.id)}`}
+                      to={answerReviewPath(taskId, student.stu_id, question.id, returnSearch)}
                       t={t}
                     />
                   </td>
@@ -416,4 +419,10 @@ function normalizeSort(value: string | null): SubmissionReviewSort {
 
 function studentPath(taskId: string, studentId: string) {
   return `/tasks/${encodeURIComponent(taskId)}/students/${encodeURIComponent(studentId)}`;
+}
+
+function answerReviewPath(taskId: string, studentId: string, questionId: string, returnSearch: string) {
+  const params = new URLSearchParams({ from: "matrix" });
+  if (returnSearch) params.set("returnParams", returnSearch);
+  return `${studentPath(taskId, studentId)}/questions/${encodeURIComponent(questionId)}?${params.toString()}`;
 }

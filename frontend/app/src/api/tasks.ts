@@ -157,8 +157,8 @@ export function updateStudentAnswer(
   taskId: string,
   studentId: string,
   qId: string,
-  patch: Pick<Partial<StudentAnswerInfo>, "content" | "flag">,
-): Promise<{ status: "ok"; stu_id: string; q_id: string; answer: StudentAnswerInfo }> {
+  patch: Pick<Partial<StudentAnswerInfo>, "content" | "flag"> & { expected_workflow_revision?: number },
+): Promise<{ status: "ok"; stu_id: string; q_id: string; answer: StudentAnswerInfo; workflow_revision: number }> {
   return putJSON(`/tasks/${taskId}/students/${studentId}/answers/${qId}`, patch);
 }
 
