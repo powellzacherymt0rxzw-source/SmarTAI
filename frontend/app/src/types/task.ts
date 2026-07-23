@@ -272,3 +272,38 @@ export interface TaskFinalizationResponse {
   analysis_error?: string | null;
   available_result_versions: number;
 }
+
+export type ResultArtifactStatus = "not_generated" | "ready" | "stale" | "historical";
+
+export interface ResultArtifactFile {
+  artifact_id: "grades_csv" | "learning_report_md" | "published_answers_md" | "published_answers_tex" | "formal_result_json";
+  title: string;
+  title_en: string;
+  filename: string;
+  media_type: string;
+  size_bytes: number;
+  sha256: string;
+}
+
+export interface ResultArtifactVersion {
+  version: number;
+  current: boolean;
+  status: ResultArtifactStatus;
+  confirmed_at?: number | null;
+  generated_at?: number | null;
+  files: ResultArtifactFile[];
+}
+
+export interface ResultArtifactIndex {
+  task_id: string;
+  current_result_version: number;
+  analysis_status: TaskFinalizationResponse["analysis_status"];
+  analysis_result_version?: number | null;
+  versions: ResultArtifactVersion[];
+}
+
+export interface GenerateResultArtifactsResponse extends Omit<TaskFinalizationResponse, "status"> {
+  status: "ok" | "already_done";
+  unchanged: boolean;
+  artifacts: ResultArtifactIndex;
+}

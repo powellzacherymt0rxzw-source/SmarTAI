@@ -10,6 +10,7 @@ export const taskKeys = {
   state: (taskId: string) => ["tasks", "state", taskId] as const,
   result: (taskId: string) => ["tasks", "result", taskId] as const,
   finalization: (taskId: string) => ["tasks", "finalization", taskId] as const,
+  artifacts: (taskId: string) => ["tasks", "artifacts", taskId] as const,
   comments: (taskId: string) => ["tasks", "comments", taskId] as const,
 };
 

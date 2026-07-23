@@ -76,6 +76,26 @@ export function useTaskFinalization(taskId?: string) {
   });
 }
 
+export function useTaskResultArtifacts(taskId?: string) {
+  return useQuery({
+    queryKey: taskKeys.artifacts(taskId ?? ""),
+    queryFn: () => tasksApi.getTaskResultArtifacts(taskId as string),
+    enabled: Boolean(taskId),
+  });
+}
+
+export function useGenerateTaskResultArtifacts() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, expectedWorkflowRevision }: { taskId: string; expectedWorkflowRevision: number }) =>
+      tasksApi.generateTaskResultArtifacts(taskId, expectedWorkflowRevision),
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData(taskKeys.artifacts(variables.taskId), data.artifacts);
+      invalidateTask(queryClient, variables.taskId);
+    },
+  });
+}
+
 export function useConfirmTaskFinalization() {
   const queryClient = useQueryClient();
 
@@ -367,6 +387,7 @@ function invalidateTask(queryClient: ReturnType<typeof useQueryClient>, taskId: 
   queryClient.invalidateQueries({ queryKey: taskKeys.state(taskId) });
   queryClient.invalidateQueries({ queryKey: taskKeys.result(taskId) });
   queryClient.invalidateQueries({ queryKey: taskKeys.finalization(taskId) });
+  queryClient.invalidateQueries({ queryKey: taskKeys.artifacts(taskId) });
 }
 
 function historyQueryKey(query: TaskHistoryQuery): string {

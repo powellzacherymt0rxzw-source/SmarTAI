@@ -43,7 +43,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field, ValidationError
 
 from backend.auth import require_teacher
@@ -90,6 +90,12 @@ from backend.rag.embedder import pick_embedder
 from backend.rag.store import InMemoryTaskRetriever
 from backend.progress.tracker import (
     ProgressReporter, get_or_create_reporter, get_reporter, remove_reporter,
+)
+from backend.services.result_artifacts import (
+    artifact_fingerprint,
+    build_artifact_bundle,
+    build_artifact_files,
+    build_artifact_manifest,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,6 +221,12 @@ class UpdateCorrectionReviewRequest(BaseModel):
 
 class ConfirmFinalResultRequest(BaseModel):
     """Confirm all required review cells into one immutable result version."""
+
+    expected_workflow_revision: int = Field(ge=0)
+
+
+class GenerateResultArtifactsRequest(BaseModel):
+    """Generate deterministic downloads for the latest formal result only."""
 
     expected_workflow_revision: int = Field(ge=0)
 
@@ -1067,6 +1079,61 @@ def _finalization_payload(task: Task, job: GradingJob) -> Dict[str, Any]:
         "analysis_error": task.analysis_error,
         "available_result_versions": len(job.final_result_versions),
     }
+
+
+def _artifact_index_payload(task: Task, job: GradingJob) -> Dict[str, Any]:
+    versions = []
+    for snapshot in sorted(
+        job.final_result_versions,
+        key=lambda item: int(item.get("version") or 0),
+        reverse=True,
+    ):
+        version_number = int(snapshot.get("version") or 0)
+        manifest = job.result_artifacts.get(str(version_number))
+        current = version_number == task.final_result_version
+        if manifest is None:
+            artifact_status = "not_generated"
+        elif current and (
+            task.final_result_dirty
+            or task.analysis_result_version != version_number
+            or task.analysis_status == "stale"
+        ):
+            artifact_status = "stale"
+        elif current:
+            artifact_status = "ready"
+        else:
+            artifact_status = "historical"
+        versions.append({
+            "version": version_number,
+            "current": current,
+            "status": artifact_status,
+            "confirmed_at": snapshot.get("created_at"),
+            "generated_at": manifest.get("generated_at") if manifest else None,
+            "files": deepcopy(manifest.get("files") or []) if manifest else [],
+        })
+    return {
+        "task_id": task.task_id,
+        "current_result_version": task.final_result_version,
+        "analysis_status": task.analysis_status,
+        "analysis_result_version": task.analysis_result_version,
+        "versions": versions,
+    }
+
+
+def _artifact_snapshot_or_404(
+    task: Task,
+    job_store: JobStore,
+    version_number: int,
+) -> Dict[str, Any]:
+    if not task.grading_job_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Grading result not found")
+    snapshot = job_store.get_final_result_version(task.grading_job_id, version_number)
+    if snapshot is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "formal_result_version_not_found", "version": version_number},
+        )
+    return snapshot
 
 
 def _result_edit_lifecycle_fields(task: Task) -> Dict[str, Any]:
@@ -4217,6 +4284,180 @@ def confirm_task_finalization(
         "unchanged": False,
         **_finalization_payload(committed_task, job),
     }
+
+
+@router.get("/{task_id}/artifacts")
+def list_task_result_artifacts(
+    task_id: str,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    job_store: JobStore = Depends(get_job_store),
+):
+    """List current and historical export versions without generating files."""
+
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    if task.final_result_version < 1 or not task.grading_job_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "formal_result_not_confirmed"},
+        )
+    job = job_store.get(task.grading_job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Grading result not found")
+    return _artifact_index_payload(task, job)
+
+
+@router.post("/{task_id}/artifacts/generate")
+def generate_task_result_artifacts(
+    task_id: str,
+    req: GenerateResultArtifactsRequest,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    job_store: JobStore = Depends(get_job_store),
+):
+    """Materialize one idempotent manifest for the latest formal result.
+
+    Files are deterministic and contain no provider-generated narrative. Their
+    bytes are rebuilt from the immutable snapshot only when downloaded.
+    """
+
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    if task.final_result_version < 1 or not task.grading_job_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "formal_result_not_confirmed"},
+        )
+    if task.final_result_dirty:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "formal_result_dirty"},
+        )
+    if task.status == "generating_analysis":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "analysis_generation_running"},
+        )
+    job = job_store.get(task.grading_job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Grading result not found")
+    version_number = task.final_result_version
+    snapshot = _artifact_snapshot_or_404(task, job_store, version_number)
+    expected_fingerprint = artifact_fingerprint(snapshot, task.name)
+    existing = job_store.get_result_artifact_manifest(task.grading_job_id, version_number)
+    if (
+        existing is not None
+        and existing.get("artifact_fingerprint") == expected_fingerprint
+        and task.analysis_status == "ready"
+        and task.analysis_result_version == version_number
+    ):
+        return {
+            "status": "already_done",
+            "unchanged": True,
+            **_finalization_payload(task, job),
+            "artifacts": _artifact_index_payload(task, job),
+        }
+
+    generated_at = time.time()
+    manifest = build_artifact_manifest(
+        task_id=task.task_id,
+        task_name=task.name,
+        snapshot=snapshot,
+        generated_at=generated_at,
+    )
+    committed_task = task_store.update_workflow_cas(
+        task_id,
+        expected_revision=req.expected_workflow_revision,
+        status="finalized",
+        analysis_status="ready",
+        analysis_result_version=version_number,
+        analysis_generated_at=generated_at,
+        analysis_error=None,
+        error=None,
+    )
+    if committed_task is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed"},
+        )
+    if not job_store.set_result_artifact_manifest(task.grading_job_id, version_number, manifest):
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "artifact_manifest_store_failed"},
+        )
+    logger.info(
+        "[task:%s] deterministic result artifacts ready for version %s",
+        task_id,
+        version_number,
+    )
+    return {
+        "status": "ok",
+        "unchanged": False,
+        **_finalization_payload(committed_task, job),
+        "artifacts": _artifact_index_payload(committed_task, job),
+    }
+
+
+@router.get("/{task_id}/artifacts/{version_number}/{artifact_id}")
+def download_task_result_artifact(
+    task_id: str,
+    version_number: int,
+    artifact_id: str,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    job_store: JobStore = Depends(get_job_store),
+):
+    """Download one explicitly selected version; never fall back to another."""
+
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    if not task.grading_job_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Grading result not found")
+    snapshot = _artifact_snapshot_or_404(task, job_store, version_number)
+    manifest = job_store.get_result_artifact_manifest(task.grading_job_id, version_number)
+    if manifest is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "artifact_version_not_generated", "version": version_number},
+        )
+    files = build_artifact_files(
+        task_id=task.task_id,
+        task_name=str(manifest.get("task_name") or task.name),
+        snapshot=snapshot,
+        generated_at=float(manifest.get("generated_at") or 0),
+    )
+    if artifact_id == "bundle":
+        content = build_artifact_bundle(files, manifest)
+        filename = f"smartai_{task.task_id}_v{version_number}_reports.zip"
+        media_type = "application/zip"
+    else:
+        artifact = next((item for item in files if item.artifact_id == artifact_id), None)
+        metadata = next(
+            (item for item in manifest.get("files") or [] if item.get("artifact_id") == artifact_id),
+            None,
+        )
+        if artifact is None or metadata is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail={"code": "artifact_not_found", "artifact_id": artifact_id},
+            )
+        if artifact.metadata()["sha256"] != metadata.get("sha256"):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "artifact_content_mismatch", "artifact_id": artifact_id},
+            )
+        content = artifact.content
+        filename = artifact.filename
+        media_type = artifact.media_type
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-SmarTAI-Result-Version": str(version_number),
+        },
+    )
 
 
 # ─── Edit problem (manual stem / rubric refinement) ──────────────────────────

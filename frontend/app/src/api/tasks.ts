@@ -1,8 +1,10 @@
-import { deleteJSON, getJSON, postJSON, postMultipart, putJSON, type UploadOptions } from "./client";
+import { deleteJSON, getBlob, getJSON, postJSON, postMultipart, putJSON, type UploadOptions } from "./client";
 import type {
-  HistoryInterpretation,
   CorrectionReviewResponse,
+  GenerateResultArtifactsResponse,
+  HistoryInterpretation,
   ProblemInfo,
+  ResultArtifactIndex,
   StudentAnswerInfo,
   StudentIdentityUpdateResponse,
   SubmissionIdentityMode,
@@ -159,6 +161,28 @@ export function confirmTaskFinalization(
     `/tasks/${encodeURIComponent(taskId)}/finalization/confirm`,
     { expected_workflow_revision: expectedWorkflowRevision },
   );
+}
+
+export function getTaskResultArtifacts(taskId: string): Promise<ResultArtifactIndex> {
+  return getJSON<ResultArtifactIndex>(`/tasks/${encodeURIComponent(taskId)}/artifacts`);
+}
+
+export function generateTaskResultArtifacts(
+  taskId: string,
+  expectedWorkflowRevision: number,
+): Promise<GenerateResultArtifactsResponse> {
+  return postJSON<GenerateResultArtifactsResponse>(
+    `/tasks/${encodeURIComponent(taskId)}/artifacts/generate`,
+    { expected_workflow_revision: expectedWorkflowRevision },
+  );
+}
+
+export function getTaskResultArtifactBlob(
+  taskId: string,
+  version: number,
+  artifactId: string,
+): Promise<Blob> {
+  return getBlob(`/tasks/${encodeURIComponent(taskId)}/artifacts/${version}/${encodeURIComponent(artifactId)}`);
 }
 
 export function updateProblem(

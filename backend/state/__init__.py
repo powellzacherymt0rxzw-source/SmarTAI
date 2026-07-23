@@ -126,6 +126,51 @@ class JobStore:
             job.final_result_versions.append(deepcopy(version))
             return True
 
+    def get_final_result_version(
+        self,
+        job_id: str,
+        version_number: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Return a copy of one immutable formal-result snapshot."""
+
+        with self._lock:
+            job = self._active.get(job_id) or self._history.get(job_id)
+            if job is None:
+                return None
+            for version in job.final_result_versions:
+                if int(version.get("version") or 0) == version_number:
+                    return deepcopy(version)
+            return None
+
+    def get_result_artifact_manifest(
+        self,
+        job_id: str,
+        version_number: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Return a copy so callers cannot mutate version metadata unlocked."""
+
+        with self._lock:
+            job = self._active.get(job_id) or self._history.get(job_id)
+            if job is None:
+                return None
+            manifest = job.result_artifacts.get(str(version_number))
+            return deepcopy(manifest) if manifest is not None else None
+
+    def set_result_artifact_manifest(
+        self,
+        job_id: str,
+        version_number: int,
+        manifest: Dict[str, Any],
+    ) -> bool:
+        """Store metadata for one result version under the job lock."""
+
+        with self._lock:
+            job = self._active.get(job_id) or self._history.get(job_id)
+            if job is None:
+                return False
+            job.result_artifacts[str(version_number)] = deepcopy(manifest)
+            return True
+
     def complete(self, job_id: str, results: Optional[Dict[str, Any]] = None) -> None:
         with self._lock:
             job = self._active.pop(job_id, None)

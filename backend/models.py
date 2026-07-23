@@ -370,6 +370,13 @@ class GradingJob(BaseModel):
             "a monotonically increasing version and the effective grading payload."
         ),
     )
+    result_artifacts: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Version-keyed metadata for deterministic result exports. File bytes "
+            "are rebuilt from the immutable snapshot and are never stored here."
+        ),
+    )
     error: Optional[str] = None
 
 

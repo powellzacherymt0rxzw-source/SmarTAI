@@ -4,13 +4,12 @@ import {
   BarChart3,
   CheckCircle2,
   FileDown,
-  FileText,
   LayoutDashboard,
   ListChecks,
   LoaderCircle,
   Users,
 } from "lucide-react";
-import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, type ComponentType, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTask, useTaskFinalization, useTaskResult } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
@@ -33,6 +32,7 @@ import { StudentAnalysisOverview } from "@/routes/tasks/results/StudentAnalysisO
 import type { TaskFinalizationResponse, TaskResultResponse } from "@/types";
 
 const VisualizationAnalysisPage = lazy(() => import("@/routes/tasks/results/VisualizationAnalysisPage").then((module) => ({ default: module.VisualizationAnalysisPage })));
+const ReportsDownloadsPage = lazy(() => import("@/routes/tasks/results/ReportsDownloadsPage").then((module) => ({ default: module.ReportsDownloadsPage })));
 
 type WorkspaceSection = "overview" | "questions" | "students" | "visualizations" | "reports";
 
@@ -65,6 +65,10 @@ export function FinalResultsWorkspacePage() {
   const finalizationQuery = useTaskFinalization(taskId);
   const task = taskQuery.data;
   const section = sectionFromPath(location.pathname);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [section]);
 
   if (taskId && task?.status === "grading") return <Navigate replace to={`/tasks/${taskId}/grading/progress`} />;
   if (taskId && task?.status === "graded") return <Navigate replace to={`/tasks/${taskId}/review`} />;
@@ -135,6 +139,7 @@ export function FinalResultsWorkspacePage() {
             locale={locale}
             section={section}
             taskId={taskId}
+            taskName={task.name}
             questionId={questionId}
             studentId={studentId}
             finalization={finalization}
@@ -199,6 +204,7 @@ function WorkspaceContent({
   locale,
   section,
   taskId,
+  taskName,
   questionId,
   studentId,
   finalization,
@@ -207,6 +213,7 @@ function WorkspaceContent({
   locale: Locale;
   section: WorkspaceSection;
   taskId: string;
+  taskName: string;
   questionId?: string;
   studentId?: string;
   finalization: TaskFinalizationResponse;
@@ -233,31 +240,7 @@ function WorkspaceContent({
   if (section === "visualizations") {
     return <Suspense fallback={<section className="flex min-h-64 items-center justify-center rounded-[10px] border bg-card"><LoaderCircle aria-hidden="true" className="h-7 w-7 animate-spin text-primary" /></section>}><VisualizationAnalysisPage locale={locale} taskId={taskId} version={finalization.final_result_version} model={model} /></Suspense>;
   }
-
-  const isReports = section === "reports";
-  return (
-    <section className="rounded-[10px] border bg-card p-5">
-      <SectionHeading
-        locale={locale}
-        title={isReports ? "报告与下载" : "可视化分析"}
-        titleEn={isReports ? "Reports & downloads" : "Visual analysis"}
-        description={isReports ? "报告文件按正式结果版本生成并保留版本关系。" : "图表只基于已确认的正式结果版本生成。"}
-        descriptionEn={isReports ? "Report files are generated against a formal result version." : "Charts are generated only from a confirmed formal result version."}
-      />
-      <div className="mt-5 flex min-h-[220px] flex-col items-center justify-center rounded-[9px] border border-dashed bg-muted/30 px-6 text-center">
-        {isReports ? <FileText aria-hidden="true" className="h-8 w-8 text-muted-foreground" /> : <BarChart3 aria-hidden="true" className="h-8 w-8 text-muted-foreground" />}
-        <p className="mt-3 text-[15px] font-bold text-foreground">{analysisStatusTitle(locale, finalization.analysis_status, isReports)}</p>
-        <p className="mt-1 max-w-lg text-[13px] leading-5 text-muted-foreground">
-          {tx(locale, "当前没有可下载或可展示的派生文件；原始批改结果与正式版本不会因此丢失。", "No derived artifact is available yet; the grading result and formal version remain preserved.")}
-        </p>
-        {finalization.final_result_dirty ? (
-          <Link to={`/tasks/${encodeURIComponent(taskId)}/review`} className="mt-4 text-[13px] font-semibold text-primary hover:underline">
-            {tx(locale, "返回复核并重新确认", "Return to review and reconfirm")}
-          </Link>
-        ) : null}
-      </div>
-    </section>
-  );
+  return <Suspense fallback={<section className="flex min-h-64 items-center justify-center rounded-[10px] border bg-card"><LoaderCircle aria-hidden="true" className="h-7 w-7 animate-spin text-primary" /></section>}><ReportsDownloadsPage locale={locale} taskId={taskId} taskName={taskName} finalization={finalization} /></Suspense>;
 }
 
 function ResultsOverview({
@@ -384,8 +367,8 @@ function ResultsOverview({
             />
             <StatusLine
               label={tx(locale, "报告下载", "Report downloads")}
-              value={tx(locale, "尚未生成，进入报告页查看", "Not generated; see report page")}
-              tone="neutral"
+              value={finalization.analysis_status === "ready" && finalization.analysis_result_version === finalization.final_result_version ? tx(locale, `v${finalization.final_result_version} 可下载`, `v${finalization.final_result_version} ready`) : tx(locale, "尚未生成，进入报告页查看", "Not generated; see report page")}
+              tone={finalization.analysis_status === "ready" ? "primary" : "neutral"}
             />
           </div>
         </OverviewPanel>
@@ -526,13 +509,6 @@ function analysisStatusLabel(locale: Locale, status: TaskFinalizationResponse["a
     stale: ["分析已过期", "Analysis stale"],
   } as const;
   return labels[status][locale === "en-US" ? 1 : 0];
-}
-
-function analysisStatusTitle(locale: Locale, status: TaskFinalizationResponse["analysis_status"], reports: boolean): string {
-  if (status === "generating") return tx(locale, "正在生成，请稍后查看", "Generation in progress");
-  if (status === "stale") return tx(locale, "已有内容与当前结果版本不一致", "Existing artifacts are stale");
-  if (status === "ready") return reports ? tx(locale, "报告索引准备中", "Report index is being prepared") : tx(locale, "分析内容准备中", "Analysis view is being prepared");
-  return reports ? tx(locale, "尚未生成正式报告", "Formal reports not generated") : tx(locale, "尚未生成可视化分析", "Visual analysis not generated");
 }
 
 function tx(locale: Locale, zh: string, en: string): string {

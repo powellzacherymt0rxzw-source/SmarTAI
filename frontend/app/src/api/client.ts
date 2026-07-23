@@ -83,6 +83,15 @@ export async function getJSON<T>(path: string, config?: AxiosRequestConfig): Pro
   }
 }
 
+export async function getBlob(path: string, config?: AxiosRequestConfig): Promise<Blob> {
+  try {
+    const response = await apiClient.get<Blob>(path, { ...config, responseType: "blob" });
+    return response.data;
+  } catch (error) {
+    throw normalizeAPIError(error);
+  }
+}
+
 export async function postJSON<TResponse, TBody = unknown>(
   path: string,
   body?: TBody,
