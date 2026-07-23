@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowRight,
   BarChart3,
   CheckCircle2,
   FileDown,
@@ -9,10 +10,18 @@ import {
   LoaderCircle,
   Users,
 } from "lucide-react";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTask, useTaskFinalization, useTaskResult } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
+import {
+  buildResultsModel,
+  clampPercent,
+  formatPercent,
+  type QuestionSummary,
+  type ResultsModel,
+  type StudentSummary,
+} from "@/components/tasks/ResultsLayout";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
@@ -193,25 +202,10 @@ function WorkspaceContent({
 }) {
   const questions = Object.values(result?.problem_data ?? {});
   const students = result?.results ?? [];
-  const corrections = students.flatMap((student) => student.corrections ?? []);
-  const classAverage = corrections.length
-    ? corrections.reduce((sum, correction) => sum + correctionPercent(correction), 0) / corrections.length
-    : null;
+  const model = buildResultsModel(undefined, result);
 
   if (section === "overview") {
-    return (
-      <section className="rounded-[10px] border bg-card p-5">
-        <SectionHeading locale={locale} title="结果总览" titleEn="Results overview" description="先确认版本与数据范围；详细分析分别进入左侧页面。" descriptionEn="Confirm the version and data scope, then use the focused pages for details." />
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
-          <Metric value={String(students.length)} label={tx(locale, "学生", "Students")} tone="primary" />
-          <Metric value={String(questions.length)} label={tx(locale, "题目", "Questions")} tone="accent" />
-          <Metric value={classAverage === null ? "—" : `${Math.round(classAverage)}%`} label={tx(locale, "题次平均得分率", "Mean item score")} tone="warning" />
-        </div>
-        <div className="mt-5 rounded-[9px] bg-muted px-4 py-3 text-[13px] text-muted-foreground">
-          {tx(locale, "本页只保留班级概览；题目、学生、图表和报告分别在独立页面展开。", "This page stays concise; questions, students, charts, and reports each have a focused page.")}
-        </div>
-      </section>
-    );
+    return <ResultsOverview locale={locale} taskId={taskId} finalization={finalization} model={model} />;
   }
 
   if (section === "questions") {
@@ -282,6 +276,227 @@ function WorkspaceContent({
   );
 }
 
+function ResultsOverview({
+  locale,
+  taskId,
+  finalization,
+  model,
+}: {
+  locale: Locale;
+  taskId: string;
+  finalization: TaskFinalizationResponse;
+  model: ResultsModel;
+}) {
+  const root = `/tasks/${encodeURIComponent(taskId)}/results`;
+  const scoreDistribution = buildScoreDistribution(model.students);
+  const strongestBucket = Math.max(1, ...scoreDistribution.map((bucket) => bucket.count));
+  const weakQuestions = [...model.questions]
+    .filter((question) => question.avgPercent !== null)
+    .sort((left, right) => (left.avgPercent ?? 0) - (right.avgPercent ?? 0))
+    .slice(0, 3);
+  const studentPreview = [...model.students]
+    .sort((left, right) => (left.percent ?? Number.POSITIVE_INFINITY) - (right.percent ?? Number.POSITIVE_INFINITY))
+    .slice(0, 3);
+  const validStudentPercents = model.students
+    .map((student) => student.percent)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const passCount = validStudentPercents.filter((value) => value >= 60).length;
+  const passRate = validStudentPercents.length ? (passCount / validStudentPercents.length) * 100 : null;
+  const reviewConclusion = finalization.required_review_count
+    ? tx(
+        locale,
+        `${finalization.confirmed_required_count}/${finalization.required_review_count} 项已确认`,
+        `${finalization.confirmed_required_count}/${finalization.required_review_count} confirmed`,
+      )
+    : tx(locale, "无强制复核项", "No required reviews");
+
+  return (
+    <section className="rounded-[10px] border bg-card p-5">
+      <SectionHeading
+        locale={locale}
+        title="结果总览"
+        titleEn="Results overview"
+        description="正式结果的简洁班级摘要；详细信息分别进入独立分析页面。"
+        descriptionEn="A concise class summary of the formal result, with focused pages for details."
+      />
+
+      <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <Metric value={String(model.students.length)} label={tx(locale, "学生数", "Students")} tone="primary" />
+        <Metric value={String(model.questions.length)} label={tx(locale, "题目数", "Questions")} tone="accent" />
+        <Metric value={formatPercent(model.classAveragePercent)} label={tx(locale, "班级平均得分率", "Class mean score")} tone="warning" />
+        <Metric value={formatPercent(passRate)} label={tx(locale, "及格率（≥60%）", "Pass rate (≥60%)")} tone="primary" />
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <OverviewPanel
+          title={tx(locale, "分数分布", "Score distribution")}
+          subtitle={tx(locale, "按学生总得分率分桶", "Students grouped by total score rate")}
+          href={`${root}/visualizations`}
+          linkLabel={tx(locale, "查看可视化", "View visualizations")}
+        >
+          {validStudentPercents.length ? (
+            <div className="flex h-[118px] items-end justify-between gap-3 pt-3" aria-label={tx(locale, "学生分数分布", "Student score distribution")}>
+              {scoreDistribution.map((bucket) => (
+                <div key={bucket.label} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1.5">
+                  <span className="text-[11px] font-semibold text-muted-foreground">{bucket.count}</span>
+                  <span
+                    className="w-full max-w-10 rounded-t-[6px] bg-primary"
+                    style={{ height: `${Math.max(5, (bucket.count / strongestBucket) * 76)}px` }}
+                    title={`${bucket.label}: ${bucket.count}`}
+                  />
+                  <span className="whitespace-nowrap text-[10px] text-muted-foreground">{bucket.label}</span>
+                </div>
+              ))}
+            </div>
+          ) : <CompactEmpty locale={locale} />}
+        </OverviewPanel>
+
+        <OverviewPanel
+          title={tx(locale, "薄弱题目预览", "Lowest-scoring questions")}
+          subtitle={tx(locale, "按平均得分率从低到高", "Ordered by mean score rate")}
+          href={`${root}/questions`}
+          linkLabel={tx(locale, "查看题目分析", "View questions")}
+        >
+          {weakQuestions.length ? (
+            <div className="mt-3 grid gap-3">
+              {weakQuestions.map((question) => (
+                <QuestionPreviewRow key={question.id} locale={locale} question={question} />
+              ))}
+            </div>
+          ) : <CompactEmpty locale={locale} />}
+        </OverviewPanel>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <OverviewPanel
+          title={tx(locale, "学生表现预览", "Student performance preview")}
+          subtitle={tx(locale, "低得分率优先，仅显示 3 位", "Lowest score rates first; 3 students shown")}
+          href={`${root}/students`}
+          linkLabel={tx(locale, "查看学生分析", "View students")}
+        >
+          {studentPreview.length ? (
+            <div className="mt-2 divide-y">
+              {studentPreview.map((student) => <StudentPreviewRow key={student.id} locale={locale} student={student} />)}
+            </div>
+          ) : <CompactEmpty locale={locale} />}
+        </OverviewPanel>
+
+        <OverviewPanel
+          title={tx(locale, "复核与产物", "Review & artifacts")}
+          subtitle={reviewConclusion}
+          href={`${root}/reports`}
+          linkLabel={tx(locale, "查看报告状态", "View report status")}
+        >
+          <div className="mt-3 grid gap-2 text-[12px]">
+            <StatusLine
+              label={tx(locale, "正式结果", "Formal result")}
+              value={`v${finalization.final_result_version}`}
+              tone="primary"
+            />
+            <StatusLine
+              label={tx(locale, "分析状态", "Analysis status")}
+              value={analysisStatusLabel(locale, finalization.analysis_status)}
+              tone={finalization.analysis_status === "stale" ? "warning" : "neutral"}
+            />
+            <StatusLine
+              label={tx(locale, "报告下载", "Report downloads")}
+              value={tx(locale, "尚未生成，进入报告页查看", "Not generated; see report page")}
+              tone="neutral"
+            />
+          </div>
+        </OverviewPanel>
+      </div>
+    </section>
+  );
+}
+
+function OverviewPanel({
+  title,
+  subtitle,
+  href,
+  linkLabel,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  href: string;
+  linkLabel: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="min-w-0 rounded-[9px] border px-4 py-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-[14px] font-bold text-foreground">{title}</h3>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{subtitle}</p>
+        </div>
+        <Link to={href} className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-primary hover:underline">
+          {linkLabel}
+          <ArrowRight aria-hidden="true" className="h-3 w-3" />
+        </Link>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function QuestionPreviewRow({ locale, question }: { locale: Locale; question: QuestionSummary }) {
+  const percent = clampPercent(question.avgPercent);
+  return (
+    <div className="grid grid-cols-[minmax(72px,0.8fr)_minmax(120px,1.4fr)_38px] items-center gap-3">
+      <span className="truncate text-[12px] font-semibold text-foreground">{question.label}</span>
+      <span className="h-2 overflow-hidden rounded-full bg-muted">
+        <span className="block h-full rounded-full bg-amber-400" style={{ width: `${percent}%` }} />
+      </span>
+      <span className="text-right text-[11px] font-semibold text-muted-foreground">{formatPercent(question.avgPercent)}</span>
+      <span className="col-span-3 -mt-2 truncate text-[10px] text-muted-foreground">
+        {question.stem || tx(locale, "暂无题干摘要", "No stem preview")}
+      </span>
+    </div>
+  );
+}
+
+function StudentPreviewRow({ locale, student }: { locale: Locale; student: StudentSummary }) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 py-2 first:pt-1 last:pb-0">
+      <span className="truncate text-[12px] font-semibold text-foreground">{student.name} · {student.id}</span>
+      <span className="text-[11px] text-muted-foreground">
+        {student.lowConfidenceCount ? tx(locale, `${student.lowConfidenceCount} 个低置信题次`, `${student.lowConfidenceCount} low-confidence`) : tx(locale, "无低置信题次", "No low-confidence items")}
+      </span>
+      <span className="min-w-10 text-right text-[12px] font-bold text-primary">{formatPercent(student.percent)}</span>
+    </div>
+  );
+}
+
+function StatusLine({ label, value, tone }: { label: string; value: string; tone: "primary" | "warning" | "neutral" }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-[7px] bg-muted/60 px-3 py-2">
+      <span className="font-medium text-muted-foreground">{label}</span>
+      <span className={cn("text-right font-semibold", tone === "primary" && "text-primary", tone === "warning" && "text-amber-600", tone === "neutral" && "text-foreground")}>{value}</span>
+    </div>
+  );
+}
+
+function CompactEmpty({ locale }: { locale: Locale }) {
+  return <p className="flex min-h-[82px] items-center justify-center text-[12px] text-muted-foreground">{tx(locale, "当前版本没有可统计的数据。", "No statistical data is available in this version.")}</p>;
+}
+
+function buildScoreDistribution(students: StudentSummary[]) {
+  const buckets = [
+    { label: "<60", min: Number.NEGATIVE_INFINITY, max: 60, count: 0 },
+    { label: "60–69", min: 60, max: 70, count: 0 },
+    { label: "70–79", min: 70, max: 80, count: 0 },
+    { label: "80–89", min: 80, max: 90, count: 0 },
+    { label: "90–100", min: 90, max: Number.POSITIVE_INFINITY, count: 0 },
+  ];
+  for (const student of students) {
+    if (student.percent === null || !Number.isFinite(student.percent)) continue;
+    const bucket = buckets.find((candidate) => student.percent! >= candidate.min && student.percent! < candidate.max);
+    if (bucket) bucket.count += 1;
+  }
+  return buckets;
+}
+
 function SectionHeading({ locale, title, titleEn, description, descriptionEn }: { locale: Locale; title: string; titleEn: string; description: string; descriptionEn: string }) {
   return (
     <div>
@@ -326,10 +541,6 @@ function effectiveScore(correction: Correction): number {
   return typeof correction.teacher_score === "number" && Number.isFinite(correction.teacher_score)
     ? correction.teacher_score
     : Number(correction.score) || 0;
-}
-
-function correctionPercent(correction: Correction): number {
-  return correction.max_score > 0 ? (effectiveScore(correction) / correction.max_score) * 100 : 0;
 }
 
 function analysisStatusLabel(locale: Locale, status: TaskFinalizationResponse["analysis_status"]): string {
