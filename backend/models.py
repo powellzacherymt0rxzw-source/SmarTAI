@@ -511,12 +511,17 @@ class CourseMaterial(BaseModel):
     material_id: str
     owner_id: str
     course_id: Optional[str] = None
+    group_id: Optional[str] = None
     filename: str
+    category: Literal["textbook", "answer", "lecture", "rubric", "other"] = "other"
+    labels: List[str] = Field(default_factory=list, max_length=20)
     content_type: str = "application/octet-stream"
     size_bytes: int
     sha256: str
     text: str = Field(repr=False)
     resident_bytes: int = 0
+    task_ids: List[str] = Field(default_factory=list, max_length=500)
+    last_used_at: Optional[float] = None
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
 
@@ -524,10 +529,37 @@ class CourseMaterial(BaseModel):
         return {
             "material_id": self.material_id,
             "course_id": self.course_id,
+            "group_id": self.group_id,
             "filename": self.filename,
+            "category": self.category,
+            "labels": self.labels,
             "content_type": self.content_type,
             "size_bytes": self.size_bytes,
             "sha256": self.sha256,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "last_used_at": self.last_used_at,
+            "task_reference_count": len(self.task_ids),
+            "parse_status": "ready",
+        }
+
+
+class CourseMaterialGroup(BaseModel):
+    """Teacher-owned folder-like grouping for course-library materials."""
+
+    group_id: str
+    owner_id: str
+    name: str
+    course_id: Optional[str] = None
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+    def public(self, *, material_count: int = 0) -> Dict[str, Any]:
+        return {
+            "group_id": self.group_id,
+            "name": self.name,
+            "course_id": self.course_id,
+            "material_count": material_count,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

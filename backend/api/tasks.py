@@ -1568,6 +1568,7 @@ def delete_task(
     source_draft_store: ProblemSourceDraftStore = Depends(get_problem_source_draft_store),
     import_store: MaterialImportStore = Depends(get_material_import_store),
     ai_completion_store: AICompletionStore = Depends(get_ai_completion_store),
+    material_store: CourseMaterialStore = Depends(get_course_material_store),
 ):
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
@@ -1597,6 +1598,7 @@ def delete_task(
     source_draft_store.delete_for_task(task_id)
     import_store.delete_for_task(task_id)
     ai_completion_store.delete_for_task(task_id)
+    material_store.unmark_task_references(t.owner_id, t.task_id)
     task_store.delete(task_id)
     return {"status": "success"}
 
@@ -1749,6 +1751,8 @@ async def preflight_problem_source(
             exc.status_code,
             detail={"code": exc.code},
         ) from exc
+    if material_id is not None:
+        material_store.mark_used(material_id, task.owner_id, task.task_id)
     matched = [item for item in candidates if item["match_kind"] == "matched"]
     possible = [item for item in candidates if item["match_kind"] == "possible_match"]
     response: Dict[str, Any] = {
@@ -1985,6 +1989,8 @@ async def preflight_material_import(
         if saved_material_created and saved_material is not None:
             material_store.delete_for_owner(saved_material.material_id, task.owner_id)
         raise HTTPException(exc.status_code, detail={"code": exc.code}) from exc
+    if material_id is not None:
+        material_store.mark_used(material_id, task.owner_id, task.task_id)
 
     response: Dict[str, Any] = {
         "status": "ready",

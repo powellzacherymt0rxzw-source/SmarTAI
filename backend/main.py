@@ -69,6 +69,7 @@ def create_app() -> FastAPI:
     from backend.api.students import router as students_router
     from backend.api.tasks import router as tasks_router
     from backend.api.tags import router as tags_router
+    from backend.api.materials import router as materials_router
     from backend.api.analytics import router as analytics_router
 
     app.include_router(prob_router)
@@ -83,9 +84,10 @@ def create_app() -> FastAPI:
     app.include_router(students_router)
     app.include_router(tasks_router)
     app.include_router(tags_router)
+    app.include_router(materials_router)
     app.include_router(analytics_router)
 
-    logger.info("V2 routers loaded: prob_preview, hw_preview, ai_grading, experts, human_edit, auth, users, courses, assignments, students, tasks, tags, analytics")
+    logger.info("V2 routers loaded: prob_preview, hw_preview, ai_grading, experts, human_edit, auth, users, courses, assignments, students, tasks, tags, course-materials, analytics")
 
     # ─── CORS ─────────────────────────────────────────────────────────────
     origins = settings.frontend_urls.split(",")

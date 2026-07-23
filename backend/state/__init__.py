@@ -19,6 +19,7 @@ from backend.models import (
     AICompletionFieldProvenance,
     AICompletionJob,
     CourseMaterial,
+    CourseMaterialGroup,
     GradingJob,
     MaterialImportCandidate,
     MaterialImportDraft,
@@ -1464,9 +1465,11 @@ class CourseMaterialStore:
     MAX_MATERIALS_PER_OWNER = 50
     MAX_RESIDENT_BYTES = 128 * 1024 * 1024
     MAX_RESIDENT_BYTES_PER_OWNER = 20 * 1024 * 1024
+    MAX_GROUPS_PER_OWNER = 50
 
     def __init__(self) -> None:
         self._materials: OrderedDict[str, CourseMaterial] = OrderedDict()
+        self._groups: OrderedDict[str, CourseMaterialGroup] = OrderedDict()
         self._lock = RLock()
 
     def create_or_get(self, material: CourseMaterial) -> tuple[CourseMaterial, bool]:
@@ -1511,6 +1514,48 @@ class CourseMaterialStore:
             self._materials.pop(material_id, None)
             return True
 
+    def update_for_owner(
+        self,
+        material_id: str,
+        owner_id: str,
+        **fields: Any,
+    ) -> Optional[CourseMaterial]:
+        with self._lock:
+            material = self._materials.get(material_id)
+            if material is None or material.owner_id != owner_id:
+                return None
+            for key, value in fields.items():
+                setattr(material, key, value)
+            material.updated_at = time.time()
+            return material
+
+    def mark_used(
+        self,
+        material_id: str,
+        owner_id: str,
+        task_id: str,
+    ) -> Optional[CourseMaterial]:
+        with self._lock:
+            material = self._materials.get(material_id)
+            if material is None or material.owner_id != owner_id:
+                return None
+            material.task_ids = list(dict.fromkeys([*material.task_ids, task_id]))[-500:]
+            material.last_used_at = time.time()
+            return material
+
+    def unmark_task_references(self, owner_id: str, task_id: str) -> int:
+        """Detach a deleted task from every owner-scoped material reference."""
+
+        with self._lock:
+            affected = 0
+            for material in self._materials.values():
+                if material.owner_id != owner_id or task_id not in material.task_ids:
+                    continue
+                material.task_ids = [item for item in material.task_ids if item != task_id]
+                material.updated_at = time.time()
+                affected += 1
+            return affected
+
     def list_for_owner(
         self,
         owner_id: str,
@@ -1531,9 +1576,59 @@ class CourseMaterialStore:
                 ]
             return sorted(rows, key=lambda item: (-item.updated_at, item.filename.casefold(), item.material_id))
 
+    def create_group(self, group: CourseMaterialGroup) -> CourseMaterialGroup:
+        with self._lock:
+            owner_groups = [item for item in self._groups.values() if item.owner_id == group.owner_id]
+            if len(owner_groups) >= self.MAX_GROUPS_PER_OWNER:
+                raise ResourceQuotaError("course_material_group_owner_count_limit", 429)
+            self._groups[group.group_id] = group
+            return group
+
+    def get_group_for_owner(self, group_id: str, owner_id: str) -> Optional[CourseMaterialGroup]:
+        with self._lock:
+            group = self._groups.get(group_id)
+            return group if group is not None and group.owner_id == owner_id else None
+
+    def list_groups_for_owner(self, owner_id: str) -> List[CourseMaterialGroup]:
+        with self._lock:
+            groups = [item for item in self._groups.values() if item.owner_id == owner_id]
+            return sorted(groups, key=lambda item: (item.name.casefold(), item.group_id))
+
+    def update_group_for_owner(
+        self,
+        group_id: str,
+        owner_id: str,
+        **fields: Any,
+    ) -> Optional[CourseMaterialGroup]:
+        with self._lock:
+            group = self._groups.get(group_id)
+            if group is None or group.owner_id != owner_id:
+                return None
+            for key, value in fields.items():
+                setattr(group, key, value)
+            group.updated_at = time.time()
+            return group
+
+    def delete_group_for_owner(self, group_id: str, owner_id: str) -> Optional[int]:
+        """Delete a folder and atomically move its files to ungrouped."""
+
+        with self._lock:
+            group = self._groups.get(group_id)
+            if group is None or group.owner_id != owner_id:
+                return None
+            affected = 0
+            for material in self._materials.values():
+                if material.owner_id == owner_id and material.group_id == group_id:
+                    material.group_id = None
+                    material.updated_at = time.time()
+                    affected += 1
+            self._groups.pop(group_id, None)
+            return affected
+
     def clear(self) -> None:
         with self._lock:
             self._materials.clear()
+            self._groups.clear()
 
 
 class ProblemSourceDraftStore:
