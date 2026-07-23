@@ -26,6 +26,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import { formatTaskTime, getTaskDestination } from "@/lib/taskFlow";
+import { QuestionAnalysisOverview } from "@/routes/tasks/results/QuestionAnalysisOverview";
 import type { Correction, TaskFinalizationResponse, TaskResultResponse } from "@/types";
 
 type WorkspaceSection = "overview" | "questions" | "students" | "visualizations" | "reports";
@@ -200,7 +201,6 @@ function WorkspaceContent({
   finalization: TaskFinalizationResponse;
   result?: TaskResultResponse;
 }) {
-  const questions = Object.values(result?.problem_data ?? {});
   const students = result?.results ?? [];
   const model = buildResultsModel(undefined, result);
 
@@ -209,21 +209,7 @@ function WorkspaceContent({
   }
 
   if (section === "questions") {
-    return (
-      <section className="rounded-[10px] border bg-card p-5">
-        <SectionHeading locale={locale} title="题目分析" titleEn="Question analysis" description={`当前正式版本包含 ${questions.length} 道题。`} descriptionEn={`The current formal version contains ${questions.length} questions.`} />
-        <div className="mt-4 divide-y rounded-[9px] border">
-          {questions.slice(0, 6).map((question, index) => (
-            <div key={question.q_id ?? index} className="grid gap-1 px-4 py-3 sm:grid-cols-[90px_120px_minmax(0,1fr)] sm:items-center">
-              <strong className="text-[13px] text-foreground">{question.number || question.q_id || `Q${index + 1}`}</strong>
-              <span className="text-[12px] text-muted-foreground">{question.type || "—"}</span>
-              <span className="truncate text-[13px] text-foreground">{question.stem || "—"}</span>
-            </div>
-          ))}
-          {!questions.length ? <EmptyRow locale={locale} /> : null}
-        </div>
-      </section>
-    );
+    return <QuestionAnalysisOverview locale={locale} taskId={taskId} model={model} />;
   }
 
   if (section === "students") {
