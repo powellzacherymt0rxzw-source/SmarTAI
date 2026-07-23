@@ -88,6 +88,9 @@ const QuestionAICompletionProgressPage = React.lazy(() =>
 const GradingSetupPage = React.lazy(() =>
   import("@/routes/tasks/GradingSetupPage").then((module) => ({ default: module.GradingSetupPage })),
 );
+const GradingPreflightPage = React.lazy(() =>
+  import("@/routes/tasks/GradingPreflightPage").then((module) => ({ default: module.GradingPreflightPage })),
+);
 
 function RouteFallback() {
   const { t } = useI18n();
@@ -141,6 +144,8 @@ const router = createBrowserRouter([
       { path: "tasks/:taskId/questions/:questionId", element: <Navigate to="content" replace /> },
       { path: "tasks/:taskId/questions/:questionId/:section", element: routeElement(<QuestionPreparationDetailPage />) },
       { path: "tasks/:taskId/grading-setup", element: routeElement(<GradingSetupPage />) },
+      { path: "tasks/:taskId/grading/preflight", element: routeElement(<GradingPreflightPage />) },
+      { path: "tasks/:taskId/grading/progress", element: routeElement(<TaskResultsPage />) },
       { path: "tasks/:taskId/results", element: routeElement(<TaskResultsPage />) },
       { path: "tasks/:taskId/results/:studentId", element: routeElement(<TaskStudentDetailPage />) },
       { path: "tasks/:taskId/results/questions/:questionId", element: routeElement(<TaskQuestionDetailPage />) },

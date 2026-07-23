@@ -35,7 +35,7 @@ const EXPLANATION_KEYS: Record<SubmissionReviewSelection["explanation"], Message
 export function SubmissionReviewOverviewPage() {
   const { taskId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const taskQuery = useTask(taskId);
   const query = searchParams.get("q") ?? "";
   const deferredQuery = useDeferredValue(query);
@@ -200,15 +200,23 @@ export function SubmissionReviewOverviewPage() {
                 {t("submissionReviewShowingStudentsSuffix")} · {selection.questions.length}/{questions.length}
                 {t("submissionReviewShowingQuestionsSuffix")}
               </p>
-              {firstAttentionStudent ? (
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                {firstAttentionStudent ? (
+                  <Link
+                    to={studentPath(taskId, firstAttentionStudent.stu_id)}
+                    className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto"
+                  >
+                    {t("submissionReviewOpenStudent")}
+                  </Link>
+                ) : null}
                 <Link
-                  to={studentPath(taskId, firstAttentionStudent.stu_id)}
+                  to={`/tasks/${taskId}/grading/preflight`}
                   className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
                 >
-                  {t("submissionReviewOpenStudent")}
+                  {locale === "en-US" ? "Pre-Grading Confirmation" : "批改前确认"}
                   <ChevronRight aria-hidden="true" className="h-4 w-4" />
                 </Link>
-              ) : null}
+              </div>
             </footer>
           ) : null}
         </div>
@@ -216,6 +224,7 @@ export function SubmissionReviewOverviewPage() {
     </div>
   );
 }
+
 
 function SubmissionMatrix({
   students,

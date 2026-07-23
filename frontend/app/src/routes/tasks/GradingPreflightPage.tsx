@@ -1,0 +1,388 @@
+import { AlertTriangle, CheckCircle2, ChevronRight, LoaderCircle } from "lucide-react";
+import { useMemo, type ReactNode } from "react";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { normalizeAPIError } from "@/api/client";
+import { useGradingSetup, useStartGrading, useTask } from "@/api/hooks";
+import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
+import { useI18n } from "@/i18n/I18nProvider";
+import type { Locale } from "@/i18n/messages";
+import { cn } from "@/lib/cn";
+import { gradingPreflightText as copy } from "@/lib/gradingPreflightCopy";
+import { getTaskDestination } from "@/lib/taskFlow";
+import type { GradingFeedbackLength, GradingSetup, ProblemInfo, StudentSubmission } from "@/types";
+
+/** C02: one read-only checkpoint before the idempotent grading mutation. */
+export function GradingPreflightPage() {
+  const { taskId } = useParams();
+  const navigate = useNavigate();
+  const { locale } = useI18n();
+  const taskQuery = useTask(taskId);
+  const setupQuery = useGradingSetup(taskId);
+  const startGrading = useStartGrading();
+
+  const task = taskQuery.data;
+  const setupResponse = setupQuery.data;
+  const setup = setupResponse?.grading_setup ?? null;
+  const problems = useMemo(
+    () => Object.values(task?.problem_data ?? {}).sort(compareProblems),
+    [task?.problem_data],
+  );
+  const students = useMemo(
+    () => Object.values(task?.student_data ?? {}),
+    [task?.student_data],
+  );
+  const summary = useMemo(() => summarizeTask(problems, students), [problems, students]);
+  const selectedExperts = useMemo(() => {
+    if (!setup || !setupResponse) return [];
+    const selected = new Set(setup.selected_provider_ids);
+    return setupResponse.available_experts.filter((expert) => selected.has(expert.provider_id));
+  }, [setup, setupResponse]);
+  const riskItems = useMemo(
+    () => buildRiskItems(summary, setupResponse?.readiness.warnings ?? [], locale),
+    [locale, setupResponse?.readiness.warnings, summary],
+  );
+
+  if (taskQuery.isSuccess && taskId && task && task.status !== "submissions_ready") {
+    if (task.status === "grading") return <Navigate replace to={`/tasks/${taskId}/grading/progress`} />;
+    return <Navigate replace to={getTaskDestination(task)} />;
+  }
+
+  const blockingIssues = setupResponse?.readiness.blocking_issues ?? [];
+  const hasEnabledSelection = selectedExperts.length > 0 && selectedExperts.every((expert) => expert.enabled);
+  const canStart = Boolean(
+    taskId
+    && task?.status === "submissions_ready"
+    && setupResponse?.configured
+    && setup
+    && setupResponse.readiness.ready
+    && hasEnabledSelection
+    && summary.problemCount > 0
+    && summary.studentCount > 0,
+  );
+
+  async function handleStart() {
+    if (!taskId || !canStart) return;
+    try {
+      const response = await startGrading.mutateAsync({ taskId });
+      if (response.status === "already_done") {
+        navigate(`/tasks/${taskId}/results`, { replace: true });
+        return;
+      }
+      navigate(`/tasks/${taskId}/grading/progress`, { replace: true });
+    } catch {
+      // The normalized response is rendered below; task data remains intact.
+    }
+  }
+
+  const isLoading = taskQuery.isLoading || setupQuery.isLoading;
+  const isError = taskQuery.isError || setupQuery.isError;
+  const startError = startGrading.error ? normalizeAPIError(startGrading.error).message : null;
+  const disabledReason = getDisabledReason({
+    locale,
+    configured: setupResponse?.configured ?? false,
+    canStart,
+    blockingIssues,
+    hasEnabledSelection,
+  });
+
+  return (
+    <div className="w-full max-w-[1300px]">
+      <h1 className="min-h-9 text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
+        {copy(locale, "title")}
+      </h1>
+      <NewTaskStepper currentStep={3} />
+
+      {isLoading ? (
+        <PageState title={copy(locale, "loading")} busy />
+      ) : isError ? (
+        <PageState
+          title={copy(locale, "loadError")}
+          action={copy(locale, "retry")}
+          onAction={() => { void taskQuery.refetch(); void setupQuery.refetch(); }}
+        />
+      ) : !taskId || !task ? (
+        <PageState title={copy(locale, "missingTask")} href="/history" action={copy(locale, "retry")} />
+      ) : (
+        <div className="mx-auto mt-[34px] w-full max-w-[1100px]">
+          <section className="min-h-[130px] rounded-[10px] border bg-card px-6 py-5 sm:px-8" aria-labelledby="preflight-task-summary">
+            <h2 id="preflight-task-summary" className="text-[18px] font-bold leading-6 text-foreground">
+              {copy(locale, "taskSummary")}
+            </h2>
+            <div className="mt-5 flex flex-wrap gap-3.5 sm:gap-5">
+              <SummaryChip tone="primary" href={`/tasks/${taskId}/questions`}>
+                {summary.problemCount} {copy(locale, "problems")}
+              </SummaryChip>
+              <SummaryChip tone="primary" href={`/tasks/${taskId}/submissions`}>
+                {summary.studentCount} {copy(locale, "students")}
+              </SummaryChip>
+              <SummaryChip
+                tone={summary.criteriaComplete === summary.problemCount ? "success" : "warning"}
+                href={questionOverviewHref(taskId, summary.criteriaComplete < summary.problemCount ? (locale === "en-US" ? "missing rubric" : "缺评分标准") : "")}
+              >
+                {copy(locale, "criteria")} {summary.criteriaComplete}/{summary.problemCount}
+              </SummaryChip>
+              <SummaryChip
+                tone={summary.answersComplete === summary.problemCount ? "success" : "warning"}
+                href={questionOverviewHref(taskId, summary.answersComplete < summary.problemCount ? (locale === "en-US" ? "missing answer" : "缺标答") : "")}
+              >
+                {copy(locale, "answers")} {summary.answersComplete}/{summary.problemCount}
+              </SummaryChip>
+              <SummaryChip
+                tone={summary.programmingCount === 0 || summary.testsComplete === summary.programmingCount ? "success" : "warning"}
+                href={questionOverviewHref(taskId, summary.testsComplete < summary.programmingCount ? (locale === "en-US" ? "programming" : "编程题") : "")}
+              >
+                {copy(locale, "tests")} {summary.programmingCount === 0 ? copy(locale, "notApplicable") : `${summary.testsComplete}/${summary.programmingCount}`}
+              </SummaryChip>
+            </div>
+          </section>
+
+          <section className="mt-[30px] min-h-[135px] rounded-[10px] border bg-card px-6 py-5 sm:px-8" aria-labelledby="preflight-experts">
+            <div className="flex items-start justify-between gap-4">
+              <h2 id="preflight-experts" className="text-[18px] font-bold leading-6 text-foreground">
+                {copy(locale, "expertCombination")}
+              </h2>
+              <Link to={`/tasks/${taskId}/grading-setup`} className="text-[12px] font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring">
+                {copy(locale, "editSetup")}
+              </Link>
+            </div>
+            <div className="mt-5 flex flex-col gap-4 lg:flex-row lg:items-center">
+              <div className="flex flex-wrap gap-3.5">
+                {selectedExperts.map((expert) => (
+                  <span key={expert.provider_id} className="inline-flex min-h-8 items-center rounded-full bg-blue-100 px-4 text-[13px] font-semibold text-primary dark:bg-blue-950/45">
+                    {expert.display_name?.trim() || expert.model}
+                  </span>
+                ))}
+                {setup ? (
+                  <span className="inline-flex min-h-8 items-center rounded-full bg-teal-100 px-4 text-[13px] font-semibold text-teal-700 dark:bg-teal-950/45 dark:text-teal-300">
+                    {copy(locale, "aggregation")}: {aggregationLabel(setup.aggregation_method, locale)}
+                  </span>
+                ) : null}
+              </div>
+              <p className="min-w-0 text-[12px] leading-5 text-muted-foreground lg:ml-auto lg:max-w-[390px]">
+                {copy(locale, "expertNote")}
+              </p>
+            </div>
+          </section>
+
+          <section className="mt-[30px] min-h-[135px] rounded-[10px] border bg-card px-6 py-5 sm:px-8" aria-labelledby="preflight-strategy">
+            <div className="flex items-start justify-between gap-4">
+              <h2 id="preflight-strategy" className="text-[18px] font-bold leading-6 text-foreground">
+                {copy(locale, "scoringStrategy")}
+              </h2>
+              <span className="text-[11px] text-muted-foreground">{copy(locale, "exactTaskSetup")}</span>
+            </div>
+            {setup ? (
+              <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(260px,1fr)_auto_auto_auto] lg:items-center lg:gap-6">
+                <div className="flex items-center gap-4">
+                  <span className="shrink-0 text-[13px] font-semibold text-foreground">{copy(locale, "strictness")}</span>
+                  <span className="h-2 min-w-[150px] flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" aria-label={`${copy(locale, "strictness")} ${setup.strictness}`}>
+                    <span className="block h-full rounded-full bg-primary" style={{ width: `${setup.strictness}%` }} />
+                  </span>
+                  <span className="text-[12px] font-semibold text-primary">{setup.strictness}</span>
+                </div>
+                <StrategyChip tone={setup.allow_partial_credit ? "success" : "neutral"}>
+                  {copy(locale, setup.allow_partial_credit ? "partialAllowed" : "partialDisabled")}
+                </StrategyChip>
+                <StrategyChip tone="warning">
+                  {copy(locale, "confidence")} {setup.low_confidence_threshold.toFixed(2)}
+                </StrategyChip>
+                <StrategyChip tone="neutral">
+                  {copy(locale, "feedback")}: {copy(locale, feedbackKey(setup.feedback_length))}
+                </StrategyChip>
+              </div>
+            ) : (
+              <p className="mt-5 text-sm text-danger">{copy(locale, "setupRequired")}</p>
+            )}
+          </section>
+
+          <section className={cn(
+            "mt-[30px] flex min-h-[62px] flex-col gap-3 rounded-[10px] border px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8",
+            riskItems.length > 0
+              ? "border-amber-400 bg-amber-50 text-amber-950 dark:bg-amber-950/20 dark:text-amber-100"
+              : "border-teal-200 bg-teal-50 text-teal-950 dark:border-teal-900 dark:bg-teal-950/20 dark:text-teal-100",
+          )} aria-live="polite">
+            <p className="flex min-w-0 items-start gap-2 text-[13px] font-semibold leading-5">
+              {riskItems.length > 0
+                ? <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                : <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-teal-600" />}
+              <span>
+                <span>{copy(locale, "riskLabel")}：</span>
+                {riskItems.length > 0 ? riskItems.join(locale === "en-US" ? "; " : "；") : copy(locale, "readyMessage")}
+              </span>
+            </p>
+            {riskItems.length > 0 ? (
+              <div className="flex shrink-0 gap-4 text-[12px] font-semibold">
+                <Link to={`/tasks/${taskId}/questions`} className="hover:underline">{copy(locale, "editQuestions")}</Link>
+                <Link to={`/tasks/${taskId}/submissions`} className="hover:underline">{copy(locale, "editSubmissions")}</Link>
+              </div>
+            ) : null}
+          </section>
+
+          <div className="mt-[22px] flex flex-col items-stretch gap-2 pb-8 sm:items-end">
+            {disabledReason ? <p className="max-w-[520px] text-right text-[12px] leading-5 text-danger">{disabledReason}</p> : null}
+            {startError ? <p role="alert" className="max-w-[520px] text-right text-[12px] leading-5 text-danger">{startError || copy(locale, "startError")}</p> : null}
+            <button
+              type="button"
+              disabled={!canStart || startGrading.isPending}
+              onClick={() => void handleStart()}
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-6 text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[180px]"
+            >
+              {startGrading.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
+              {copy(locale, startGrading.isPending ? "starting" : "start")}
+              {!startGrading.isPending ? <ChevronRight aria-hidden="true" className="h-4 w-4" /> : null}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type TaskSummary = {
+  problemCount: number;
+  studentCount: number;
+  criteriaComplete: number;
+  answersComplete: number;
+  programmingCount: number;
+  testsComplete: number;
+  flaggedAnswers: number;
+  flaggedIdentities: number;
+};
+
+function summarizeTask(problems: ProblemInfo[], students: StudentSubmission[]): TaskSummary {
+  const programming = problems.filter(isProgrammingProblem);
+  return {
+    problemCount: problems.length,
+    studentCount: students.length,
+    criteriaComplete: problems.filter((problem) => Boolean(problem.criterion?.trim())).length,
+    answersComplete: problems.filter((problem) => Boolean(problem.reference_answer?.trim())).length,
+    programmingCount: programming.length,
+    testsComplete: programming.filter((problem) => (problem.test_cases?.length ?? 0) > 0).length,
+    flaggedAnswers: students.reduce(
+      (count, student) => count + student.stu_ans.filter((answer) => (answer.flag?.length ?? 0) > 0 || !answer.content?.trim()).length,
+      0,
+    ),
+    flaggedIdentities: students.filter((student) => student.identity_status === "needs_review").length,
+  };
+}
+
+function isProgrammingProblem(problem: ProblemInfo): boolean {
+  const type = (problem.type ?? "").toLowerCase();
+  return Boolean(
+    problem.solution_code?.trim()
+    || (problem.test_cases?.length ?? 0) > 0
+    || ["编程", "程序", "代码", "program", "coding", "code"].some((token) => type.includes(token)),
+  );
+}
+
+function buildRiskItems(summary: TaskSummary, warnings: string[], locale: Locale): string[] {
+  const items: string[] = [];
+  const criteriaMissing = summary.problemCount - summary.criteriaComplete;
+  const answersMissing = summary.problemCount - summary.answersComplete;
+  const testsMissing = summary.programmingCount - summary.testsComplete;
+  if (criteriaMissing > 0) items.push(`${criteriaMissing} ${copy(locale, "criteriaMissing")}`);
+  if (answersMissing > 0) items.push(`${answersMissing} ${copy(locale, "answersMissing")}`);
+  if (testsMissing > 0) items.push(`${testsMissing} ${copy(locale, "testsMissing")}`);
+  if (summary.flaggedAnswers > 0) items.push(`${summary.flaggedAnswers} ${copy(locale, "answersFlagged")}`);
+  if (summary.flaggedIdentities > 0) items.push(`${summary.flaggedIdentities} ${copy(locale, "identitiesFlagged")}`);
+  if (warnings.includes("task_knowledge_empty")) items.push(copy(locale, "knowledgeEmpty"));
+  return items;
+}
+
+function getDisabledReason({
+  locale,
+  configured,
+  canStart,
+  blockingIssues,
+  hasEnabledSelection,
+}: {
+  locale: Locale;
+  configured: boolean;
+  canStart: boolean;
+  blockingIssues: string[];
+  hasEnabledSelection: boolean;
+}): string | null {
+  if (canStart) return null;
+  if (!configured || blockingIssues.includes("grading_setup_required")) return copy(locale, "setupRequired");
+  if (!hasEnabledSelection || blockingIssues.includes("provider_required") || blockingIssues.includes("provider_not_enabled")) {
+    return copy(locale, "configureModels");
+  }
+  return copy(locale, "unavailable");
+}
+
+function compareProblems(left: ProblemInfo, right: ProblemInfo): number {
+  return left.number.localeCompare(right.number, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function questionOverviewHref(taskId: string, query: string): string {
+  const base = `/tasks/${taskId}/questions`;
+  return query ? `${base}?q=${encodeURIComponent(query)}` : base;
+}
+
+function aggregationLabel(method: GradingSetup["aggregation_method"], locale: Locale): string {
+  const labels: Record<GradingSetup["aggregation_method"], [string, string]> = {
+    single: ["单专家", "Single expert"],
+    weighted_average: ["置信度加权", "Confidence weighted"],
+    judge_agent: ["裁决专家", "Judge agent"],
+  };
+  return labels[method][locale === "en-US" ? 1 : 0];
+}
+
+function feedbackKey(length: GradingFeedbackLength): "short" | "medium" | "long" {
+  return length;
+}
+
+function SummaryChip({ children, href, tone }: { children: ReactNode; href: string; tone: "primary" | "success" | "warning" }) {
+  return (
+    <Link
+      to={href}
+      className={cn(
+        "inline-flex min-h-8 min-w-[90px] items-center justify-center rounded-full px-4 text-[13px] font-semibold outline-none transition hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring",
+        tone === "primary" && "bg-blue-100 text-primary dark:bg-blue-950/45",
+        tone === "success" && "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/45 dark:text-emerald-300",
+        tone === "warning" && "bg-amber-100 text-amber-700 dark:bg-amber-950/45 dark:text-amber-300",
+      )}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function StrategyChip({ children, tone }: { children: ReactNode; tone: "success" | "warning" | "neutral" }) {
+  return (
+    <span className={cn(
+      "inline-flex min-h-8 items-center justify-center rounded-full px-4 text-[13px] font-semibold",
+      tone === "success" && "bg-teal-100 text-teal-700 dark:bg-teal-950/45 dark:text-teal-300",
+      tone === "warning" && "bg-amber-100 text-amber-700 dark:bg-amber-950/45 dark:text-amber-300",
+      tone === "neutral" && "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+    )}>
+      {children}
+    </span>
+  );
+}
+
+function PageState({
+  title,
+  busy = false,
+  action,
+  href,
+  onAction,
+}: {
+  title: string;
+  busy?: boolean;
+  action?: string;
+  href?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <section className="mx-auto mt-[34px] flex min-h-[360px] w-full max-w-[1100px] flex-col items-center justify-center rounded-[10px] border bg-card px-6 text-center" aria-busy={busy || undefined}>
+      {busy ? <LoaderCircle aria-hidden="true" className="mb-4 h-7 w-7 animate-spin text-primary" /> : null}
+      <h2 className="text-base font-semibold text-foreground">{title}</h2>
+      {action && href ? (
+        <Link to={href} className="mt-5 inline-flex h-9 items-center rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground">{action}</Link>
+      ) : action && onAction ? (
+        <button type="button" onClick={onAction} className="mt-5 h-9 rounded-[7px] border bg-card px-4 text-sm font-semibold hover:bg-muted">{action}</button>
+      ) : null}
+    </section>
+  );
+}

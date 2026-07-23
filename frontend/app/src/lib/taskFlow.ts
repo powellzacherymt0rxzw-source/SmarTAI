@@ -144,7 +144,7 @@ export const TASK_WORKFLOW_STEPS: Array<{
     key: "grading",
     label: "批改确认",
     description: "策略与进度",
-    href: (taskId) => `/tasks/${taskId}/results`,
+    href: (taskId) => `/tasks/${taskId}/grading/preflight`,
   },
   {
     key: "results",
@@ -352,6 +352,7 @@ export function getTaskDestination(task: TaskDestinationInput): string {
     case "submissions_ready":
       return `${taskRoot}/submissions`;
     case "grading":
+      return `${taskRoot}/grading/progress`;
     case "graded":
       return `${taskRoot}/results`;
     case "draft":
@@ -448,6 +449,7 @@ export function getTaskNextStep(
   const submissionUpload = `/tasks/${taskId}/submissions/upload`;
   const submissionProgress = `/tasks/${taskId}/submissions/progress`;
   const submissionWorkspace = `/tasks/${taskId}/submissions`;
+  const gradingProgress = `/tasks/${taskId}/grading/progress`;
   const results = `/tasks/${taskId}/results`;
 
   switch (task.status) {
@@ -499,7 +501,7 @@ export function getTaskNextStep(
         title: "查看批改进度",
         description: "批改正在进行，完成后进入结果复核。",
         buttonLabel: "查看进度",
-        to: results,
+        to: gradingProgress,
       };
     case "graded":
       return {
