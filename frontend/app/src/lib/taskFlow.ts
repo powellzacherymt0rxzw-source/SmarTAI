@@ -319,6 +319,9 @@ function getRecoveryStep(destination: string): TaskWorkflowStepKey {
   if (destination.endsWith("/submissions/progress")) {
     return "submissions";
   }
+  if (destination.endsWith("/submissions")) {
+    return "submissions";
+  }
   return "problems";
 }
 
@@ -347,7 +350,7 @@ export function getTaskDestination(task: TaskDestinationInput): string {
     case "parsing_submissions":
       return `${taskRoot}/submissions/progress`;
     case "submissions_ready":
-      return `${taskRoot}/upload/submissions`;
+      return `${taskRoot}/submissions`;
     case "grading":
     case "graded":
       return `${taskRoot}/results`;
@@ -444,7 +447,7 @@ export function getTaskNextStep(
   const problemProgress = `/tasks/${taskId}/problems/progress`;
   const submissionUpload = `/tasks/${taskId}/submissions/upload`;
   const submissionProgress = `/tasks/${taskId}/submissions/progress`;
-  const submissionWorkspace = `/tasks/${taskId}/upload/submissions`;
+  const submissionWorkspace = `/tasks/${taskId}/submissions`;
   const results = `/tasks/${taskId}/results`;
 
   switch (task.status) {
@@ -486,9 +489,9 @@ export function getTaskNextStep(
       };
     case "submissions_ready":
       return {
-        title: "批改前确认",
-        description: "题目和作答已就绪，下一步确认专家组合、资料范围与评分策略。",
-        buttonLabel: "进入确认",
+        title: "校对学生作答",
+        description: "先从学生 × 题目矩阵检查身份、缺失和识别标记，再进入批改确认。",
+        buttonLabel: "校对作答",
         to: submissionWorkspace,
       };
     case "grading":

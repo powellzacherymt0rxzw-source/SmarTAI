@@ -47,8 +47,7 @@ export function SubmissionRecognitionProgressPage() {
     return <Navigate to={`/tasks/${taskId}/results`} replace />;
   }
   if (taskId && status && FINISHED_SUBMISSION_STATUSES.has(status)) {
-    // S03 will replace this compatibility destination with /submissions.
-    return <Navigate to={`/tasks/${taskId}/upload/submissions`} replace />;
+    return <Navigate to={`/tasks/${taskId}/submissions`} replace />;
   }
 
   const refresh = () => {

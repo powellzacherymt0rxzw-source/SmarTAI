@@ -166,7 +166,7 @@ export function AddSubmissionsPage() {
       });
       if (response.status === "already_done") {
         toast.info(t("submissionUploadViewProgress"));
-        navigate(`/tasks/${taskId}/upload/submissions`);
+        navigate(`/tasks/${taskId}/submissions`);
       } else {
         toast.success(t("submissionUploadStarted"));
         navigate(`/tasks/${taskId}/submissions/progress`);

@@ -6,9 +6,9 @@
 >
 > 视觉与页面结构以 `docs/20260710/figma/` 的 17 张导出图为基准；功能、状态和边界必须同时对照 2026-07-03 计划、2026-07-04 完整设计记录及其附录原话、2026-07-10 最新纠偏基线和 2026-07-11 用户补充。
 >
-> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 与 S-02 的阶段决定及验收口径分别见 `docs/20260723/S01_SUBMISSION_UPLOAD_STAGE_DECISION_AND_ACCEPTANCE_CN.md`、`docs/20260723/S02_SUBMISSION_RECOGNITION_PROGRESS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
+> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01、S-02 与 S-03 的阶段决定及验收口径分别见 `docs/20260723/S01_SUBMISSION_UPLOAD_STAGE_DECISION_AND_ACCEPTANCE_CN.md`、`docs/20260723/S02_SUBMISSION_RECOGNITION_PROGRESS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`、`docs/20260723/S03_SUBMISSION_REVIEW_OVERVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 >
-> 当前阶段：S-02“作答识别进度”已按 Figma 05 的识别页语言完成独立短页、真实事实计数、隐私事件流、状态恢复及桌面/移动浏览器验收，等待用户视觉确认；下一阶段是 S-03“作答校对总览”。S-01、C-01 与 canonical task entry 纠偏的既有等待确认状态不变。
+> 当前阶段：S-03“作答校对总览”已按 Figma 11 完成四张大号事实指标、独占筛选行、学生 × 题目矩阵、解释性本地智能筛选、统一 canonical 跳转及桌面/移动浏览器验收，等待用户视觉确认；下一阶段是 S-04“学生作答总览”。S-01、S-02、C-01 与 canonical task entry 纠偏的既有等待确认状态不变。
 
 ---
 
@@ -440,7 +440,7 @@
 
 - [~] S01 添加学生作答独立页，支持身份匹配设置和条件性覆盖提醒。工程与浏览器验收完成：2026-07-23；Figma 10 的桌面锚点、单焦点页面、三种真实匹配方式、任务级识别模型、双层条件覆盖确认、1440×900/390×844 PNG 和相关回归均已完成，等待用户视觉确认。
 - [~] S02 作答识别进度独立页。工程与浏览器验收完成：2026-07-23；Figma 05 的 `800×430` 单焦点进度卡、真实文件/身份/答案计数、后台恢复、脱敏事件、错误门禁、1440×900/390×844 PNG 和相关回归均已完成，等待用户视觉确认。
-- [ ] S03 作答校对总览只显示学生 x 题目矩阵、筛选和分流。
+- [~] S03 作答校对总览只显示学生 x 题目矩阵、筛选和分流。工程与浏览器验收完成：2026-07-23；Figma 11 的标题/流程/指标/筛选/矩阵骨架、真实四态单元格、解释性本地筛选、canonical 路由和 1440×900/390×844 PNG 均已完成，等待用户视觉确认。
 - [ ] S04 学生作答总览独立页。
 - [ ] S05 单份作答校对支持学生/题目双维独立筛选。
 - [~] C01 批改配置独立页，默认简单、高级折叠。工程与浏览器验收完成：2026-07-20；独立 route、任务级无密钥配置、真实批改消费链、共享池安全边界、桌面/移动截图和保存后进入作答页均已验证；等待用户视觉确认。
@@ -453,7 +453,7 @@
 
 - 详细决定与验收矩阵：`docs/20260723/S01_SUBMISSION_UPLOAD_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 - Figma 约束：使用 Figma 10（文件 `64TupCQCKXkiT5uxeQY0iH`，节点 `1:679`）作为唯一可见基线；桌面保持标题 `(70,105)`、上传区 `(270,230,900×230)`、身份区约 `900×145`、识别设置约 `900×74`、CTA `(990,780,180×40)`，没有复用遗留上传长页。
-- 页面职责：canonical route 为 `/tasks/:id/submissions/upload`；只完成“选择作答来源、身份匹配、识别模型、开始识别”一个决定。S02 已完成，识别启动后进入 `/submissions/progress`；只有识别完成后的 S03 尚未重写，暂时保留现有作答工作区兼容目的地。
+- 页面职责：canonical route 为 `/tasks/:id/submissions/upload`；只完成“选择作答来源、身份匹配、识别模型、开始识别”一个决定。S02 已完成，识别启动后进入 `/submissions/progress`；S03 也已完成，`already_done` 与识别完成状态统一进入 `/submissions`。
 - 真实能力：支持可复制文字 PDF、TXT/MD/RST/CSV，以及 ZIP/RAR/7z/TAR 压缩包；图片、扫描件、手写 OCR 未实现，页面明确显示“OCR 增强：暂不可用”，没有照抄 Figma 而虚构支持。
 - 身份与隐私：文件名优先、名单确定性匹配、全部人工复核三种模式均进入真实后端合同；名单只在服务端精确匹配，整份名单不发送给模型，未唯一匹配者进入人工复核。识别 provider 必须归当前用户、已启用，默认继承 C01 主 provider 但允许本阶段覆盖。
 - 幂等与替换：请求指纹包含作答文件、身份模式、名单和识别 provider；同请求返回既有状态，不同请求在已有作答时必须前端确认且后端再次校验，任务写入保持原子提交。
@@ -470,7 +470,19 @@
 - 完成与隐私：只有 TaskStore 成功提交后才发布 `completed / done`；进度事件和普通日志不显示学生姓名、学号或单个文件名。全部失败进入 S02 可恢复错误页；OCR/vision 能力边界没有改变。
 - 工程证据：相关后端回归 `48 passed, 1 skipped, 5 warnings`；visible-scope audit 扫描 `68` 个可见文件、lint、TypeScript、Vite production build（`467 modules`）与 `git diff --check` 通过。
 - 浏览器证据：`s02-submission-progress-1440x900.png`、`s02-submission-progress-mobile-390x844.png`。桌面 `scrollWidth=1440`、`scrollHeight=900`、主卡 `(320,230,800×430)`；移动 `scrollWidth=390`、当前流程步骤自动滚入可见区域，无 console error/warning。点击“返回工作台”真实进入 `/`；未调用真实模型、未上传用户文件。
-- 当前状态：代码、合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。S03 尚未实现，`submissions_ready` 暂时保留现有作答工作区兼容目的地；下一阶段必须统一到 `/tasks/:id/submissions`。
+- 当前状态：代码、合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。S03 已实现，`submissions_ready` 已统一到 `/tasks/:id/submissions`；旧 `/upload/submissions` 只保留状态感知兼容跳转。
+
+### 7.3 S-03 作答校对总览阶段工程记录（2026-07-23）
+
+- 详细决定与验收矩阵：`docs/20260723/S03_SUBMISSION_REVIEW_OVERVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
+- Figma 约束：使用 Figma 11（文件 `64TupCQCKXkiT5uxeQY0iH`，节点 `1:740`）作为唯一可见基线；桌面保持标题 `(70,105)`、流程 `(70,155)`、`90px` 大号指标、独占 `52px` 搜索/筛选行、`42px` 表头和 `52px` 数据行。文档要求的身份异常以同语言第四张指标补充，没有恢复旧长页。
+- 页面职责：canonical route 为 `/tasks/:id/submissions`；只展示事实指标、学生 × 题目矩阵、筛选/排序和进入学生详情的精确入口，不编辑整份作答、不重复 C01、不启动批改。旧 `/upload/submissions` 只做状态感知兼容跳转。
+- 真实状态：单元格只使用后端实际数据区分已识别、识别标记、空白和缺失；没有可靠置信度字段，因此“低置信”只映射到已有 flag 并在页面解释，不伪造数值。
+- 智能筛选：学号/姓名、Q 题号、题型/题干关键词、待复核/缺失/身份异常和三种排序均使用确定性本地规则，显示解释和清空动作，不消耗 provider 额度。输入 `Q4 缺失` 的真实浏览器检查只返回两名对应学生。
+- 路由闭环：S01 `already_done`、S02 完成、工作台、历史任务和 canonical task entry 的 `submissions_ready` 全部统一到 S03。单元格在 S05 完成前进入 S04 并携带 `?question=:qId`，不制造死链或伪装单题编辑已完成。
+- 工程证据：visible-scope audit 扫描 `69` 个可见文件、lint、TypeScript、Vite production build（`470 modules`）与 `git diff --check` 通过。
+- 浏览器证据：`S03_submission_review_overview_1440x900.png`、`S03_submission_review_overview_390x844.png`；匿名固定 fixture 覆盖正常、flag、空白、缺失和身份待复核，控制台 `0 errors / 0 warnings`，未调用真实模型或改写用户任务。
+- 当前状态：代码、工程与浏览器验收完成，等待用户视觉确认，故保持 `[~]`。下一阶段 S04 负责身份修正和单个学生全部题目总览；S05 仍是独立的学生 × 题目聚焦编辑页。
 
 ### R02 学生/题目双维导航硬规则
 

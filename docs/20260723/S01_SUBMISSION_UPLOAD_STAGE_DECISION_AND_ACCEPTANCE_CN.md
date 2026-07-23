@@ -11,7 +11,7 @@
 - 当前状态：代码、合同、工程和浏览器验收完成，等待用户视觉确认，因此 tracker 保持 `[~]`
 - 下一阶段：S02 `/tasks/:id/submissions/progress`
 
-后续更新：S02 已于 2026-07-23 完成独立重写。成功启动识别及 `already_running` 现在进入 `/tasks/:id/submissions/progress`；只有 S03 尚未实现，识别完成状态暂时进入现有 `/tasks/:id/upload/submissions` 兼容工作区。该过渡连接不代表遗留页面已通过本轮视觉验收。
+后续更新：S02、S03 已于 2026-07-23 完成独立重写。成功启动识别及 `already_running` 进入 `/tasks/:id/submissions/progress`；`already_done` 与识别完成状态进入 canonical `/tasks/:id/submissions`。旧 `/tasks/:id/upload/submissions` 只保留状态感知兼容跳转，不再渲染遗留工作区。
 
 ## 2. Figma 对齐目标
 
