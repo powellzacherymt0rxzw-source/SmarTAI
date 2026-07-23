@@ -183,6 +183,16 @@ function isAllowedVisibleText(relativePath, line, rule) {
     return true;
   }
 
+  if (
+    rule.id === "visible-lms-integration" &&
+    relativePath === "src/routes/tasks/results/VisualizationAnalysisPage.tsx" &&
+    /(?:createElement\(["']canvas["']\)|\bcanvas\.(?:width|height|toBlob|getContext))/.test(line)
+  ) {
+    // Browser Canvas is used only to rasterize an already-rendered SVG for
+    // PNG download. It is unrelated to the Canvas LMS product capability.
+    return true;
+  }
+
   if (rule.allowHiddenDisclaimer && hiddenDisclaimerPattern.test(line)) {
     return true;
   }

@@ -10,7 +10,7 @@ import {
   LoaderCircle,
   Users,
 } from "lucide-react";
-import type { ComponentType, ReactNode } from "react";
+import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTask, useTaskFinalization, useTaskResult } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
@@ -31,6 +31,8 @@ import { QuestionAnalysisOverview } from "@/routes/tasks/results/QuestionAnalysi
 import { StudentAnalysisDetail } from "@/routes/tasks/results/StudentAnalysisDetail";
 import { StudentAnalysisOverview } from "@/routes/tasks/results/StudentAnalysisOverview";
 import type { TaskFinalizationResponse, TaskResultResponse } from "@/types";
+
+const VisualizationAnalysisPage = lazy(() => import("@/routes/tasks/results/VisualizationAnalysisPage").then((module) => ({ default: module.VisualizationAnalysisPage })));
 
 type WorkspaceSection = "overview" | "questions" | "students" | "visualizations" | "reports";
 
@@ -226,6 +228,10 @@ function WorkspaceContent({
     return studentId
       ? <StudentAnalysisDetail locale={locale} taskId={taskId} studentId={studentId} model={model} />
       : <StudentAnalysisOverview locale={locale} taskId={taskId} model={model} />;
+  }
+
+  if (section === "visualizations") {
+    return <Suspense fallback={<section className="flex min-h-64 items-center justify-center rounded-[10px] border bg-card"><LoaderCircle aria-hidden="true" className="h-7 w-7 animate-spin text-primary" /></section>}><VisualizationAnalysisPage locale={locale} taskId={taskId} version={finalization.final_result_version} model={model} /></Suspense>;
   }
 
   const isReports = section === "reports";
