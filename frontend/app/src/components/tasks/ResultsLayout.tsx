@@ -265,6 +265,12 @@ export function formatScore(value: number | null | undefined) {
   return value.toFixed(1);
 }
 
+export function effectiveCorrectionScore(correction: Correction) {
+  return typeof correction.teacher_score === "number" && Number.isFinite(correction.teacher_score)
+    ? correction.teacher_score
+    : correction.score;
+}
+
 export function formatPercent(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "--";
@@ -316,7 +322,7 @@ function buildStudentSummary(
   const corrections = [...(result.corrections ?? [])].sort((a, b) => compareQuestionIds(a.q_id, b.q_id, problemOrder));
   const answers = result.student_answers?.length ? result.student_answers : (submission?.stu_ans ?? []);
   const answerByQuestion = new Map(answers.map((answer) => [answer.q_id, answer]));
-  const totalScore = sum(corrections.map((correction) => safeNumber(correction.score)));
+  const totalScore = sum(corrections.map((correction) => safeNumber(effectiveCorrectionScore(correction))));
   const totalMax = sum(corrections.map((correction) => safeNumber(correction.max_score)));
   const confidenceValues = corrections.map((correction) => safeNumber(correction.confidence));
   const lowConfidenceCount = corrections.filter(isLowConfidence).length;
@@ -338,12 +344,12 @@ function buildStudentSummary(
 }
 
 function buildQuestionSummary(qId: string, problem: ProblemInfo | undefined, entries: QuestionEntry[]): QuestionSummary {
-  const scores = entries.map((entry) => safeNumber(entry.correction.score));
+  const scores = entries.map((entry) => safeNumber(effectiveCorrectionScore(entry.correction)));
   const maxScores = entries.map((entry) => safeNumber(entry.correction.max_score)).filter((value) => value > 0);
   const percents = entries
     .map((entry) => {
       const maxScore = safeNumber(entry.correction.max_score);
-      return maxScore > 0 ? (safeNumber(entry.correction.score) / maxScore) * 100 : null;
+      return maxScore > 0 ? (safeNumber(effectiveCorrectionScore(entry.correction)) / maxScore) * 100 : null;
     })
     .filter((value): value is number => value !== null);
 

@@ -1,6 +1,7 @@
 import { deleteJSON, getJSON, postJSON, postMultipart, putJSON, type UploadOptions } from "./client";
 import type {
   HistoryInterpretation,
+  CorrectionReviewResponse,
   ProblemInfo,
   StudentAnswerInfo,
   StudentIdentityUpdateResponse,
@@ -189,4 +190,21 @@ export function setTeacherComment(
 
 export function listTeacherComments(taskId: string): Promise<TeacherCommentsResponse> {
   return getJSON<TeacherCommentsResponse>(`/tasks/${taskId}/teacher_comments`);
+}
+
+export function updateCorrectionReview(
+  taskId: string,
+  studentId: string,
+  qId: string,
+  input: {
+    expected_workflow_revision: number;
+    teacher_score: number;
+    teacher_comment: string;
+    confirm: boolean;
+  },
+): Promise<CorrectionReviewResponse> {
+  return putJSON<CorrectionReviewResponse>(
+    `/tasks/${encodeURIComponent(taskId)}/reviews/${encodeURIComponent(studentId)}/${encodeURIComponent(qId)}`,
+    input,
+  );
 }

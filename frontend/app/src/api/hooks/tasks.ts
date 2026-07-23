@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as tasksApi from "@/api/tasks";
 import type { UploadOptions } from "@/api/client";
-import type { Task, TaskHistoryQuery, TaskMetadataPatch, TaskStatus } from "@/types";
+import type { Task, TaskHistoryQuery, TaskMetadataPatch, TaskResultResponse, TaskStatus } from "@/types";
 import { tagKeys, taskKeys } from "./keys";
 
 const ACTIVE_TASK_STATUSES = new Set<TaskStatus>([
@@ -273,6 +273,46 @@ export function useSetTeacherComment() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: taskKeys.comments(variables.taskId) });
       queryClient.invalidateQueries({ queryKey: taskKeys.result(variables.taskId) });
+    },
+  });
+}
+
+export function useUpdateCorrectionReview() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      studentId,
+      qId,
+      ...input
+    }: {
+      taskId: string;
+      studentId: string;
+      qId: string;
+      expected_workflow_revision: number;
+      teacher_score: number;
+      teacher_comment: string;
+      confirm: boolean;
+    }) => tasksApi.updateCorrectionReview(taskId, studentId, qId, input),
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData<Task>(taskKeys.detail(variables.taskId), (current) =>
+        current ? { ...current, workflow_revision: data.workflow_revision } : current,
+      );
+      queryClient.setQueryData<TaskResultResponse>(taskKeys.result(variables.taskId), (current) => {
+        if (!current?.results) return current;
+        return {
+          ...current,
+          results: current.results.map((student) => student.student_id === variables.studentId
+            ? {
+                ...student,
+                corrections: student.corrections.map((correction) => correction.q_id === variables.qId ? data.correction : correction),
+              }
+            : student),
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: taskKeys.list() });
+      queryClient.invalidateQueries({ queryKey: taskKeys.comments(variables.taskId) });
     },
   });
 }

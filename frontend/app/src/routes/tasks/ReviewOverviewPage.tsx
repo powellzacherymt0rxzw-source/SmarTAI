@@ -3,7 +3,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { useTask, useTaskResult, useTeacherComments } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
-import { buildResultsModel, formatConfidence, formatPercent, type QuestionSummary, type ResultsModel, type StudentSummary } from "@/components/tasks/ResultsLayout";
+import { buildResultsModel, effectiveCorrectionScore, formatConfidence, formatPercent, type QuestionSummary, type ResultsModel, type StudentSummary } from "@/components/tasks/ResultsLayout";
 import { collectResultReviewItems, type ReviewItem } from "@/components/tasks/resultsReviewModel";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
@@ -34,6 +34,11 @@ export function ReviewOverviewPage() {
     }
     return keys;
   }, [commentsQuery.data?.comments, model.students]);
+  const confirmedKeys = useMemo(() => new Set(
+    model.students.flatMap((student) => student.corrections
+      .filter((correction) => correction.review_status === "confirmed")
+      .map((correction) => reviewCellKey(student.id, correction.q_id))),
+  ), [model.students]);
   const selection = useMemo(
     () => selectReviewOverview(model, reviewItems, annotatedKeys, query),
     [annotatedKeys, model, query, reviewItems],
@@ -44,7 +49,8 @@ export function ReviewOverviewPage() {
 
   const isLoading = taskQuery.isLoading || resultQuery.isLoading;
   const isError = taskQuery.isError || resultQuery.isError;
-  const firstTarget = reviewItems[0]
+  const pendingReviewItems = reviewItems.filter((item) => !confirmedKeys.has(reviewCellKey(item.student.id, item.question.id)));
+  const firstTarget = pendingReviewItems[0]
     ?? (model.students[0] && model.questions[0]
       ? { student: model.students[0], question: model.questions[0] } as Pick<ReviewItem, "student" | "question">
       : null);
@@ -88,13 +94,13 @@ export function ReviewOverviewPage() {
             <MetricCard value={formatMetricPercent(model.classAveragePercent)} label={copy(locale, "average")} tone="primary" />
             <MetricCard value={String(model.lowConfidenceCount)} label={copy(locale, "lowConfidence")} tone="warning" />
             <MetricCard value={String(disagreementCount)} label={copy(locale, "disagreement")} tone="primary" />
-            <MetricCard value={`${annotatedKeys.size}/${correctionCount}`} label={copy(locale, "annotated")} tone="accent" />
+            <MetricCard value={`${confirmedKeys.size}/${correctionCount}`} label={copy(locale, "annotated")} tone="accent" />
             {targetHref ? (
               <Link
                 to={targetHref}
                 className="col-span-2 inline-flex h-10 items-center justify-center gap-2 self-center rounded-[8px] bg-primary px-5 text-center text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 xl:-ml-[30px] xl:w-[240px] xl:shrink-0"
               >
-                {copy(locale, reviewItems.length ? "startReview" : "viewResult")}
+                {copy(locale, pendingReviewItems.length ? "startReview" : "viewResult")}
                 <ArrowRight aria-hidden="true" className="h-4 w-4" />
               </Link>
             ) : null}
@@ -146,11 +152,12 @@ export function ReviewOverviewPage() {
               matchedCellKeys={selection.matchedCellKeys}
               reviewItems={reviewItems}
               annotatedKeys={annotatedKeys}
+              confirmedKeys={confirmedKeys}
             />
             <ReviewQueue
               locale={locale}
               taskId={taskId}
-              items={reviewItems.filter((item) => selection.matchedCellKeys.has(reviewCellKey(item.student.id, item.question.id))).slice(0, 4)}
+              items={pendingReviewItems.filter((item) => selection.matchedCellKeys.has(reviewCellKey(item.student.id, item.question.id))).slice(0, 4)}
             />
           </div>
         </>
@@ -182,6 +189,7 @@ function ReviewHeatmap({
   matchedCellKeys,
   reviewItems,
   annotatedKeys,
+  confirmedKeys,
 }: {
   locale: Locale;
   taskId: string;
@@ -191,6 +199,7 @@ function ReviewHeatmap({
   matchedCellKeys: Set<string>;
   reviewItems: ReviewItem[];
   annotatedKeys: Set<string>;
+  confirmedKeys: Set<string>;
 }) {
   const reviewByKey = new Map(reviewItems.map((item) => [reviewCellKey(item.student.id, item.question.id), item]));
   const questionById = new Map(model.questions.map((question) => [question.id, question]));
@@ -238,6 +247,7 @@ function ReviewHeatmap({
                             correction={correction}
                             item={reviewByKey.get(key)}
                             annotated={annotatedKeys.has(key)}
+                            confirmed={confirmedKeys.has(key)}
                             question={questionById.get(question.id)}
                           />
                         </td>
@@ -254,10 +264,10 @@ function ReviewHeatmap({
   );
 }
 
-function ReviewCell({ locale, href, correction, item, annotated, question }: { locale: Locale; href: string; correction: Correction; item?: ReviewItem; annotated: boolean; question?: QuestionSummary }) {
-  const state = annotated ? "commented" : item?.category === "low-confidence" ? "low" : item ? "review" : "ok";
+function ReviewCell({ locale, href, correction, item, annotated, confirmed, question }: { locale: Locale; href: string; correction: Correction; item?: ReviewItem; annotated: boolean; confirmed: boolean; question?: QuestionSummary }) {
+  const state = confirmed ? "confirmed" : annotated ? "commented" : item?.category === "low-confidence" ? "low" : item ? "review" : "ok";
   const label = copy(locale, state);
-  const detail = `${question?.label ?? correction.q_id} · ${formatPercent(correction.max_score > 0 ? (correction.score / correction.max_score) * 100 : null)} · ${formatConfidence(correction.confidence)}`;
+  const detail = `${question?.label ?? correction.q_id} · ${formatPercent(correction.max_score > 0 ? (effectiveCorrectionScore(correction) / correction.max_score) * 100 : null)} · ${formatConfidence(correction.confidence)}`;
   return (
     <Link
       to={href}
@@ -268,7 +278,7 @@ function ReviewCell({ locale, href, correction, item, annotated, question }: { l
         state === "ok" && "bg-teal-100 text-teal-600 dark:bg-teal-950/60 dark:text-teal-300",
         state === "low" && "bg-amber-100 text-amber-500 dark:bg-amber-950/50 dark:text-amber-300",
         state === "review" && "bg-red-100 text-red-500 dark:bg-red-950/45 dark:text-red-300",
-        state === "commented" && "bg-blue-100 text-primary dark:bg-blue-950/55",
+        (state === "commented" || state === "confirmed") && "bg-blue-100 text-primary dark:bg-blue-950/55",
       )}
     >
       {label}

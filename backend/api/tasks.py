@@ -203,6 +203,15 @@ class UpdateTeacherCommentRequest(BaseModel):
     comment: str = ""
 
 
+class UpdateCorrectionReviewRequest(BaseModel):
+    """Persist one teacher-owned review overlay without replacing AI output."""
+
+    expected_workflow_revision: int = Field(ge=0)
+    teacher_score: float = Field(ge=0)
+    teacher_comment: str = Field(default="", max_length=4000)
+    confirm: bool = False
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _check_owner(task: Task, user: User) -> None:
@@ -4317,7 +4326,111 @@ def update_student_identity(
     }
 
 
-# ─── Teacher comments (manual annotation on AI corrections) ──────────────────
+# ─── Teacher review overlay on AI corrections ────────────────────────────────
+
+@router.put("/{task_id}/reviews/{student_id}/{q_id}")
+def update_correction_review(
+    task_id: str,
+    student_id: str,
+    q_id: str,
+    req: UpdateCorrectionReviewRequest,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    job_store: JobStore = Depends(get_job_store),
+):
+    """Save or confirm one teacher review while preserving the AI record.
+
+    The task workflow revision is the optimistic-concurrency boundary. Exact
+    retries are idempotent and return the already-persisted correction without
+    advancing the revision again.
+    """
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    if task.status != "graded" or not task.grading_job_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_not_graded", "status": task.status},
+        )
+
+    job = job_store.get(task.grading_job_id)
+    if job is None or job.results is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Grading result not found")
+    correction = _find_result_correction(job.results, student_id, q_id)
+    if correction is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Correction not found")
+
+    max_score = float(correction.get("max_score") or 0)
+    if req.teacher_score > max_score:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "teacher_score_out_of_range", "max_score": max_score},
+        )
+    teacher_comment = req.teacher_comment.strip()
+    review_status = "confirmed" if req.confirm else "edited"
+    if (
+        correction.get("teacher_score") == req.teacher_score
+        and str(correction.get("teacher_comment") or "") == teacher_comment
+        and correction.get("review_status") == review_status
+    ):
+        return {
+            "status": "ok",
+            "unchanged": True,
+            "student_id": student_id,
+            "q_id": q_id,
+            "correction": correction,
+            "workflow_revision": task.workflow_revision,
+        }
+
+    committed_task = task_store.update_workflow_cas(
+        task_id,
+        expected_revision=req.expected_workflow_revision,
+    )
+    if committed_task is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed"},
+        )
+
+    correction["teacher_score"] = req.teacher_score
+    correction["teacher_comment"] = teacher_comment
+    correction["review_status"] = review_status
+    correction["reviewed_at"] = time.time() if req.confirm else None
+    logger.info(
+        "[task:%s] teacher review %s for one correction",
+        task_id,
+        review_status,
+    )
+    return {
+        "status": "ok",
+        "unchanged": False,
+        "student_id": student_id,
+        "q_id": q_id,
+        "correction": correction,
+        "workflow_revision": committed_task.workflow_revision,
+    }
+
+
+def _find_result_correction(
+    results: Dict[str, Any],
+    student_id: str,
+    q_id: str,
+) -> Optional[Dict[str, Any]]:
+    students = results.get("results", []) or []
+    if not isinstance(students, list):
+        return None
+    for student in students:
+        if not isinstance(student, dict) or str(student.get("student_id", "")) != student_id:
+            continue
+        corrections = student.get("corrections", []) or []
+        for correction in corrections if isinstance(corrections, list) else []:
+            if isinstance(correction, dict) and str(correction.get("q_id", "")) == q_id:
+                return correction
+        return None
+    return None
+
+
+# Legacy comment-only API remains for old bookmarks/components. Any change
+# invalidates a previous confirmation and becomes an explicit edited overlay.
 
 @router.post("/{task_id}/teacher_comment")
 def set_teacher_comment(
@@ -4382,9 +4495,12 @@ def set_teacher_comment(
     # Mutate in place — JobStore keeps a reference to the dict, so this persists
     # for the lifetime of the in-memory job.
     target_correction["teacher_comment"] = (req.comment or "").strip()
+    target_correction["review_status"] = "edited"
+    target_correction["reviewed_at"] = None
     logger.info(
-        f"[task:{task_id}] teacher comment {'cleared' if not req.comment else 'set'} "
-        f"on student={req.student_id} q={req.q_id}"
+        "[task:%s] teacher comment %s on one correction",
+        task_id,
+        "cleared" if not req.comment else "set",
     )
     return {
         "status": "ok",

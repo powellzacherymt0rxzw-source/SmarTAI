@@ -125,7 +125,10 @@ export interface Correction {
   is_score?: number | null;
   requires_human_review: boolean;
   review_reasons: string[];
+  teacher_score?: number | null;
   teacher_comment?: string;
+  review_status?: "pending" | "edited" | "confirmed";
+  reviewed_at?: number | null;
 }
 
 export interface StudentResult {
@@ -221,4 +224,13 @@ export interface TeacherCommentResponse {
   student_id: string;
   q_id: string;
   teacher_comment: string;
+}
+
+export interface CorrectionReviewResponse {
+  status: "ok";
+  unchanged: boolean;
+  student_id: string;
+  q_id: string;
+  correction: Correction;
+  workflow_revision: number;
 }

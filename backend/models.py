@@ -70,6 +70,21 @@ class Correction(BaseModel):
         description="Why review was flagged: e.g. 'high_indecisiveness', 'minority_veto'. "
                     "Stable string IDs so the frontend can localize without parsing.",
     )
+    # Teacher review is an overlay: the immutable AI score/comment above stay
+    # available for audit while downstream result views use teacher_score when
+    # present.  Task-level finalization is deliberately separate.
+    teacher_score: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Teacher-approved score override; None keeps the AI score.",
+    )
+    teacher_comment: str = Field(
+        "",
+        max_length=4000,
+        description="Teacher's result comment; empty keeps the AI comment as the effective comment.",
+    )
+    review_status: Literal["pending", "edited", "confirmed"] = "pending"
+    reviewed_at: Optional[float] = None
 
 
 # ─── Problem & student answer models ──────────────────────────────────────────
