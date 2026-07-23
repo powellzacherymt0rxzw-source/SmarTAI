@@ -154,7 +154,12 @@ def test_parse_and_extract_begin_cannot_overwrite_each_other():
             expected_revision=0,
             job_id="parse-job",
             content_sha256="submissions-hash",
+            request_fingerprint="submissions-request",
             filename="submissions.zip",
+            identity_mode="filename",
+            roster_name=None,
+            recognition_provider_id="mock:recognizer",
+            replace_confirmed=False,
         )[0]
 
     with ThreadPoolExecutor(max_workers=2) as pool:

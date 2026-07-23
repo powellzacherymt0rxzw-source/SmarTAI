@@ -210,6 +210,9 @@ async def parse_student_answers(
     student_store: Dict[str, Dict[str, Any]],
     provider: BaseProvider,
     reporter: Optional["ProgressReporter"] = None,
+    *,
+    identity_mode: Literal["filename", "roster", "manual_review"] = "filename",
+    roster_entries: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Parse student submissions using LLM. Each file processed independently in parallel.
@@ -235,6 +238,30 @@ async def parse_student_answers(
             "stem": prob["stem"],
         })
     problems_json_str = json.dumps(prob_for_prompt, ensure_ascii=False, indent=1)
+    safe_roster = [
+        {
+            "stu_id": str(entry.get("stu_id") or "").strip(),
+            "stu_name": str(entry.get("stu_name") or "").strip(),
+        }
+        for entry in (roster_entries or [])
+        if str(entry.get("stu_id") or "").strip()
+    ]
+    if identity_mode == "roster":
+        identity_instruction = (
+            "Extract only the student-ID and name candidates visible in this filename or "
+            "submission. The server will match them against a private roster afterwards; "
+            "do not invent an identity."
+        )
+    elif identity_mode == "manual_review":
+        identity_instruction = (
+            "Extract the most likely identity, but it will always be marked for teacher "
+            "review after recognition."
+        )
+    else:
+        identity_instruction = (
+            "Use the filename as the primary identity source, then use submission content "
+            "only when the filename does not contain a usable student ID or name."
+        )
 
     semaphore = asyncio.Semaphore(20)
 
@@ -251,8 +278,9 @@ async def parse_student_answers(
             logger.info(f"parse_student_answers: processing {filename}")
             user_msg = (
                 f"**[Filename]**: {filename}\n\n"
-                f"**[Question Data (JSON)]**:\n{problems_json_str}\n\n"
-                f"**[Student Submission Content]**:\n---\n{content}\n---"
+                f"**[Identity Matching Rule]**: {identity_instruction}\n\n"
+                + f"**[Question Data (JSON)]**:\n{problems_json_str}\n\n"
+                + f"**[Student Submission Content]**:\n---\n{content}\n---"
             )
             messages = [SystemMessage(content=HW_SYSTEM_PROMPT), HumanMessage(content=user_msg)]
 
@@ -263,7 +291,24 @@ async def parse_student_answers(
                 if reporter:
                     await reporter._emit_message(f"Parsed {filename} → {parsed.stu_name}")
                     await reporter.increment_completed()
-                return parsed.model_dump(), None
+                payload = parsed.model_dump()
+                payload["source_filename"] = filename
+                payload["identity_match_method"] = identity_mode
+                if identity_mode == "roster":
+                    match = _match_roster_identity(payload, filename, safe_roster)
+                    if match is not None:
+                        payload["stu_id"] = match["stu_id"]
+                        payload["stu_name"] = match["stu_name"]
+                        payload["identity_status"] = "matched"
+                    else:
+                        payload["identity_status"] = "needs_review"
+                elif identity_mode == "manual_review":
+                    payload["identity_status"] = "needs_review"
+                else:
+                    unknown_name = payload.get("stu_name") in {"", "[Unknown Student]"}
+                    fallback_id = str(payload.get("stu_id") or "").strip() in {"", filename}
+                    payload["identity_status"] = "needs_review" if unknown_name or fallback_id else "matched"
+                return payload, None
             except Exception as exc:
                 logger.error(
                     "Failed to parse submission; filename=%s exception_type=%s",
@@ -301,6 +346,37 @@ async def parse_student_answers(
         await reporter.set_phase("done")
 
     return stu_dict
+
+
+def _normalize_identity_value(value: str) -> str:
+    return "".join(str(value or "").casefold().split())
+
+
+def _match_roster_identity(
+    parsed: Dict[str, Any],
+    filename: str,
+    roster_entries: List[Dict[str, str]],
+) -> Optional[Dict[str, str]]:
+    """Return one deterministic roster match; ambiguous matches stay unresolved."""
+
+    parsed_id = _normalize_identity_value(str(parsed.get("stu_id") or ""))
+    parsed_name = _normalize_identity_value(str(parsed.get("stu_name") or ""))
+    normalized_filename = _normalize_identity_value(filename)
+
+    id_matches = [
+        entry for entry in roster_entries
+        if (student_id := _normalize_identity_value(entry.get("stu_id", "")))
+        and (student_id == parsed_id or student_id in normalized_filename)
+    ]
+    if len(id_matches) == 1:
+        return id_matches[0]
+
+    name_matches = [
+        entry for entry in roster_entries
+        if (name := _normalize_identity_value(entry.get("stu_name", "")))
+        and (name == parsed_name or name in normalized_filename)
+    ]
+    return name_matches[0] if len(name_matches) == 1 else None
 
 
 # ─── Reference-answer parsing (auxiliary upload) ────────────────────────────

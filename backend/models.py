@@ -78,6 +78,8 @@ MaterialImportTarget = Literal["criterion", "reference_answer", "test_cases"]
 AICompletionTarget = Literal[
     "criterion", "reference_answer", "solution_code", "test_cases",
 ]
+SubmissionIdentityMode = Literal["filename", "roster", "manual_review"]
+SubmissionIdentityStatus = Literal["matched", "needs_review"]
 
 def is_programming_question_type(value: Any) -> bool:
     """Recognize legacy English and current Chinese programming type labels."""
@@ -265,9 +267,12 @@ class StudentAnswerInfo(BaseModel):
 
 
 class StudentSubmission(BaseModel):
-    stu_id: str = Field(description="Student ID extracted from filename")
-    stu_name: str = Field(description="Student name extracted from filename")
+    stu_id: str = Field(description="Student ID candidate extracted from the configured identity source")
+    stu_name: str = Field(description="Student name candidate extracted from the configured identity source")
     stu_ans: List[StudentAnswerInfo]
+    source_filename: Optional[str] = None
+    identity_match_method: Optional[SubmissionIdentityMode] = None
+    identity_status: SubmissionIdentityStatus = "matched"
 
 
 # ─── Progress tracking models (for frontend feedback) ─────────────────────────
@@ -755,6 +760,14 @@ class Task(BaseModel):
     problem_library_material_id: Optional[str] = None
     pending_submission_file_hash: Optional[str] = None
     pending_submission_file_name: Optional[str] = None
+    submission_request_fingerprint: Optional[str] = None
+    pending_submission_request_fingerprint: Optional[str] = None
+    submission_identity_mode: SubmissionIdentityMode = "filename"
+    pending_submission_identity_mode: Optional[SubmissionIdentityMode] = None
+    submission_roster_name: Optional[str] = None
+    pending_submission_roster_name: Optional[str] = None
+    submission_recognition_provider_id: Optional[str] = None
+    pending_submission_recognition_provider_id: Optional[str] = None
     last_failed_job_id: Optional[str] = None
 
     # Reference answers (calculation-style problems) — auxiliary upload, does NOT
@@ -823,6 +836,9 @@ class Task(BaseModel):
             "problem_file_name": self.problem_file_name,
             "pending_problem_file_name": self.pending_problem_file_name,
             "pending_submission_file_name": self.pending_submission_file_name,
+            "submission_identity_mode": self.submission_identity_mode,
+            "submission_roster_name": self.submission_roster_name,
+            "submission_recognition_provider_id": self.submission_recognition_provider_id,
             "last_failed_job_id": self.last_failed_job_id,
             "problem_structure_mode": self.problem_structure_mode,
             "problem_extraction_hint": self.problem_extraction_hint,

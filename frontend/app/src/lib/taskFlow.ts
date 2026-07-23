@@ -138,7 +138,7 @@ export const TASK_WORKFLOW_STEPS: Array<{
     key: "submissions",
     label: "作答校对",
     description: "添加与校对作答",
-    href: (taskId) => `/tasks/${taskId}/upload/submissions`,
+    href: (taskId) => `/tasks/${taskId}/submissions/upload`,
   },
   {
     key: "grading",
@@ -313,6 +313,9 @@ function getRecoveryStep(destination: string): TaskWorkflowStepKey {
   if (destination.endsWith("/upload/submissions")) {
     return "submissions";
   }
+  if (destination.endsWith("/submissions/upload")) {
+    return "submissions";
+  }
   return "problems";
 }
 
@@ -336,7 +339,7 @@ export function getTaskDestination(task: TaskDestinationInput): string {
       return `${taskRoot}/problems/progress`;
     case "problems_ready":
       return task.grading_setup_configured
-        ? `${taskRoot}/upload/submissions`
+        ? `${taskRoot}/submissions/upload`
         : `${taskRoot}/questions`;
     case "parsing_submissions":
     case "submissions_ready":
@@ -353,7 +356,7 @@ export function getTaskDestination(task: TaskDestinationInput): string {
         return `${taskRoot}/results`;
       }
       if (failedJobId && failedJobId === task.parse_job_id) {
-        return `${taskRoot}/upload/submissions`;
+        return `${taskRoot}/submissions/upload`;
       }
       if (failedJobId && failedJobId === task.extract_job_id) {
         return `${taskRoot}/problems/progress`;
@@ -365,7 +368,7 @@ export function getTaskDestination(task: TaskDestinationInput): string {
         return `${taskRoot}/results`;
       }
       if (task.parse_job_id || task.submission_file_name || (task.student_count ?? 0) > 0) {
-        return `${taskRoot}/upload/submissions`;
+        return `${taskRoot}/submissions/upload`;
       }
       if ((task.problem_count ?? 0) > 0) {
         return `${taskRoot}/questions`;
@@ -432,7 +435,8 @@ export function getTaskNextStep(
 
   const problemUpload = `/tasks/${taskId}/upload/problems`;
   const problemProgress = `/tasks/${taskId}/problems/progress`;
-  const submissionUpload = `/tasks/${taskId}/upload/submissions`;
+  const submissionUpload = `/tasks/${taskId}/submissions/upload`;
+  const submissionWorkspace = `/tasks/${taskId}/upload/submissions`;
   const results = `/tasks/${taskId}/results`;
 
   switch (task.status) {
@@ -470,14 +474,14 @@ export function getTaskNextStep(
         title: "等待作答识别完成",
         description: "学生作答正在解析，完成后进入作答校对。",
         buttonLabel: "查看进度",
-        to: submissionUpload,
+        to: submissionWorkspace,
       };
     case "submissions_ready":
       return {
         title: "批改前确认",
         description: "题目和作答已就绪，下一步确认专家组合、资料范围与评分策略。",
         buttonLabel: "进入确认",
-        to: submissionUpload,
+        to: submissionWorkspace,
       };
     case "grading":
       return {

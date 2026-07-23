@@ -122,7 +122,14 @@ export function useExtractProblems() {
 }
 
 export function useParseSubmissions() {
-  return useTaskUploadMutation((taskId, file, options) => tasksApi.parseSubmissions(taskId, file, options));
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: tasksApi.parseSubmissions,
+    onSuccess: (_data, variables) => {
+      invalidateTask(queryClient, variables.taskId);
+    },
+  });
 }
 
 export function useUploadReference() {

@@ -171,7 +171,7 @@ export function GradingSetupPage() {
         gradingSetup: setup,
       });
       allowLeaveRef.current = true;
-      navigate(`/tasks/${taskId}/upload/submissions`);
+      navigate(`/tasks/${taskId}/submissions/upload`);
     } catch (error) {
       const normalized = normalizeAPIError(error);
       const code = apiErrorCode(normalized);

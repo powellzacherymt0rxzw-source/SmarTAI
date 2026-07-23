@@ -441,6 +441,14 @@ class TaskStore:
             task.submission_file_name = None
             task.pending_submission_file_hash = None
             task.pending_submission_file_name = None
+            task.submission_request_fingerprint = None
+            task.pending_submission_request_fingerprint = None
+            task.submission_identity_mode = "filename"
+            task.pending_submission_identity_mode = None
+            task.submission_roster_name = None
+            task.pending_submission_roster_name = None
+            task.submission_recognition_provider_id = None
+            task.pending_submission_recognition_provider_id = None
             task.parse_job_id = None
             task.grading_job_id = None
             task.reference_file_hash = None
@@ -500,18 +508,23 @@ class TaskStore:
         expected_revision: int,
         job_id: str,
         content_sha256: str,
+        request_fingerprint: str,
         filename: str,
+        identity_mode: str,
+        roster_name: Optional[str],
+        recognition_provider_id: str,
+        replace_confirmed: bool,
     ) -> tuple[str, Optional[Task]]:
         with self._lock:
             task = self._tasks.get(task_id)
             if task is None:
                 return "not_found", None
             if task.status == "parsing_submissions" and task.parse_job_id:
-                if task.pending_submission_file_hash == content_sha256:
+                if task.pending_submission_request_fingerprint == request_fingerprint:
                     return "already_running", task
                 return "different_submission_running", task
             if (
-                task.submission_file_hash == content_sha256
+                task.submission_request_fingerprint == request_fingerprint
                 and task.status in {"submissions_ready", "grading", "graded"}
             ):
                 return "already_done", task
@@ -529,10 +542,22 @@ class TaskStore:
                 return "invalid_state", task
             if not task.problem_data:
                 return "invalid_state", task
+            has_existing_submissions = bool(
+                task.student_data
+                or task.submission_file_hash
+                or task.submission_request_fingerprint
+                or task.grading_job_id
+            )
+            if has_existing_submissions and not replace_confirmed:
+                return "replacement_confirmation_required", task
             task.status = "parsing_submissions"
             task.parse_job_id = job_id
             task.pending_submission_file_hash = content_sha256
             task.pending_submission_file_name = filename
+            task.pending_submission_request_fingerprint = request_fingerprint
+            task.pending_submission_identity_mode = identity_mode
+            task.pending_submission_roster_name = roster_name
+            task.pending_submission_recognition_provider_id = recognition_provider_id
             task.error = None
             task.last_failed_job_id = None
             task.workflow_revision += 1
@@ -558,8 +583,16 @@ class TaskStore:
             task.student_data = dict(student_data)
             task.submission_file_hash = task.pending_submission_file_hash
             task.submission_file_name = task.pending_submission_file_name
+            task.submission_request_fingerprint = task.pending_submission_request_fingerprint
+            task.submission_identity_mode = task.pending_submission_identity_mode or "filename"
+            task.submission_roster_name = task.pending_submission_roster_name
+            task.submission_recognition_provider_id = task.pending_submission_recognition_provider_id
             task.pending_submission_file_hash = None
             task.pending_submission_file_name = None
+            task.pending_submission_request_fingerprint = None
+            task.pending_submission_identity_mode = None
+            task.pending_submission_roster_name = None
+            task.pending_submission_recognition_provider_id = None
             task.grading_job_id = None
             task.status = "submissions_ready"
             task.error = None
@@ -581,6 +614,10 @@ class TaskStore:
                 return None
             task.pending_submission_file_hash = None
             task.pending_submission_file_name = None
+            task.pending_submission_request_fingerprint = None
+            task.pending_submission_identity_mode = None
+            task.pending_submission_roster_name = None
+            task.pending_submission_recognition_provider_id = None
             task.status = "error"
             task.error = error
             task.last_failed_job_id = job_id

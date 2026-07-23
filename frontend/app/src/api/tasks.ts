@@ -3,6 +3,7 @@ import type {
   HistoryInterpretation,
   ProblemInfo,
   StudentAnswerInfo,
+  SubmissionIdentityMode,
   Task,
   TaskHistoryQuery,
   TaskHistoryResponse,
@@ -87,8 +88,37 @@ export function extractProblems(taskId: string, file: File, options?: UploadOpti
   return postMultipart<TaskMutationResponse>(`/tasks/${taskId}/extract_problems`, file, options);
 }
 
-export function parseSubmissions(taskId: string, file: File, options?: UploadOptions): Promise<TaskMutationResponse> {
-  return postMultipart<TaskMutationResponse>(`/tasks/${taskId}/parse_submissions`, file, options);
+export interface ParseSubmissionsInput extends UploadOptions {
+  taskId: string;
+  file: File;
+  identityMode?: SubmissionIdentityMode;
+  rosterFile?: File | null;
+  recognitionProviderId?: string | null;
+  replaceConfirmed?: boolean;
+}
+
+export function parseSubmissions({
+  taskId,
+  file,
+  identityMode = "filename",
+  rosterFile,
+  recognitionProviderId,
+  replaceConfirmed = false,
+  ...options
+}: ParseSubmissionsInput): Promise<TaskMutationResponse> {
+  return postMultipart<TaskMutationResponse>(`/tasks/${taskId}/parse_submissions`, file, {
+    ...options,
+    fields: {
+      ...options.fields,
+      identity_mode: identityMode,
+      recognition_provider_id: recognitionProviderId,
+      replace_confirmed: replaceConfirmed,
+    },
+    files: {
+      ...options.files,
+      roster_file: rosterFile,
+    },
+  });
 }
 
 export function uploadReference(taskId: string, file: File, options?: UploadOptions): Promise<TaskMutationResponse> {

@@ -27,7 +27,9 @@ Idempotency:
 from __future__ import annotations
 
 import asyncio
+import csv
 import hashlib
+import io
 import json
 import logging
 import re
@@ -53,6 +55,7 @@ from backend.models import (
     MaterialImportPlan,
     MaterialImportTarget,
     ProblemSourceDraft,
+    SubmissionIdentityMode,
     Task,
     TaskGradingSetup,
     TestCase,
@@ -455,6 +458,12 @@ _AI_COMPLETION_MAX_GENERATED_BYTES = 2 * 1024 * 1024
 _PROBLEM_SOURCE_EXTENSIONS = {".pdf", ".txt", ".md"}
 _PROBLEM_SOURCE_MAX_CHARACTERS = 400_000
 _PROBLEM_SOURCE_MAX_ESTIMATED_TOKENS = 120_000
+_SUBMISSION_SOURCE_MAX_BYTES = 50 * 1024 * 1024
+_SUBMISSION_ROSTER_MAX_BYTES = 1024 * 1024
+_SUBMISSION_SOURCE_SUFFIXES = (
+    ".zip", ".rar", ".7z", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2",
+    ".txt", ".md", ".rst", ".csv", ".pdf",
+)
 _PROBLEM_REPLACEMENT_CLEARS = [
     "problem_data",
     "student_data",
@@ -559,6 +568,120 @@ def _validate_problem_source_text(text: str) -> None:
                 "max_estimated_tokens": _PROBLEM_SOURCE_MAX_ESTIMATED_TOKENS,
             },
         )
+
+
+async def _read_submission_upload(file: UploadFile) -> tuple[str, bytes, str]:
+    filename = Path(file.filename or "").name.strip()
+    if not filename or not filename.casefold().endswith(_SUBMISSION_SOURCE_SUFFIXES):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "submission_source_unsupported"},
+        )
+    body = await file.read(_SUBMISSION_SOURCE_MAX_BYTES + 1)
+    if not body:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "submission_source_empty"},
+        )
+    if len(body) > _SUBMISSION_SOURCE_MAX_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "code": "submission_source_too_large",
+                "max_bytes": _SUBMISSION_SOURCE_MAX_BYTES,
+            },
+        )
+    return filename, body, hashlib.sha256(body).hexdigest()
+
+
+def _normalize_roster_header(value: str) -> str:
+    return "".join(str(value or "").strip().casefold().replace("-", "_").split())
+
+
+async def _read_submission_roster(file: UploadFile) -> tuple[str, List[Dict[str, str]], str]:
+    filename = Path(file.filename or "").name.strip()
+    if not filename or not filename.casefold().endswith((".csv", ".tsv", ".txt")):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "submission_roster_unsupported"},
+        )
+    body = await file.read(_SUBMISSION_ROSTER_MAX_BYTES + 1)
+    if not body:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "submission_roster_empty"},
+        )
+    if len(body) > _SUBMISSION_ROSTER_MAX_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "code": "submission_roster_too_large",
+                "max_bytes": _SUBMISSION_ROSTER_MAX_BYTES,
+            },
+        )
+    text = await decode_text_bytes(body)
+    try:
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",\t;")
+    except csv.Error:
+        dialect = csv.excel_tab if "\t" in text.partition("\n")[0] else csv.excel
+    reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+    headers = {
+        _normalize_roster_header(header): header
+        for header in (reader.fieldnames or [])
+        if header
+    }
+    id_header = next(
+        (headers[key] for key in ("stu_id", "student_id", "studentid", "学号") if key in headers),
+        None,
+    )
+    name_header = next(
+        (headers[key] for key in ("stu_name", "student_name", "studentname", "name", "姓名") if key in headers),
+        None,
+    )
+    if id_header is None or name_header is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "submission_roster_headers_invalid"},
+        )
+    entries: List[Dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for row in reader:
+        student_id = str(row.get(id_header) or "").strip()
+        student_name = str(row.get(name_header) or "").strip()
+        normalized_id = student_id.casefold()
+        if not student_id or not student_name or normalized_id in seen_ids:
+            continue
+        seen_ids.add(normalized_id)
+        entries.append({"stu_id": student_id[:160], "stu_name": student_name[:160]})
+        if len(entries) > 5000:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={"code": "submission_roster_too_many_rows", "max_rows": 5000},
+            )
+    if not entries:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "submission_roster_empty"},
+        )
+    return filename, entries, hashlib.sha256(body).hexdigest()
+
+
+def _submission_request_fingerprint(
+    *,
+    content_sha256: str,
+    identity_mode: SubmissionIdentityMode,
+    roster_sha256: Optional[str],
+    recognition_provider_id: str,
+) -> str:
+    payload = {
+        "content_sha256": content_sha256,
+        "identity_mode": identity_mode,
+        "roster_sha256": roster_sha256,
+        "recognition_provider_id": recognition_provider_id,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def _normalize_question_number(value: str) -> str:
@@ -2971,6 +3094,9 @@ async def _run_parse(
     job_id: str,
     task_store: TaskStore,
     job_store: JobStore,
+    *,
+    identity_mode: SubmissionIdentityMode,
+    roster_entries: List[Dict[str, str]],
 ):
     reporter = get_or_create_reporter(job_id, total_students=len(files_data))
     new_student_data: Dict[str, Dict[str, Any]] = {}
@@ -2981,6 +3107,8 @@ async def _run_parse(
             student_store=new_student_data,
             provider=provider,
             reporter=reporter,
+            identity_mode=identity_mode,
+            roster_entries=roster_entries,
         )
         committed, old_grading_job_id = task_store.commit_submission_parse(
             task_id,
@@ -3015,6 +3143,10 @@ async def _run_parse(
 async def task_parse_submissions(
     task_id: str,
     file: UploadFile = File(...),
+    identity_mode: SubmissionIdentityMode = Form(default="filename"),
+    roster_file: Optional[UploadFile] = File(default=None),
+    recognition_provider_id: Optional[str] = Form(default=None),
+    replace_confirmed: bool = Form(default=False),
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
     job_store: JobStore = Depends(get_job_store),
@@ -3024,19 +3156,65 @@ async def task_parse_submissions(
     _check_owner(t, current)
     _require_task_llm_principal(t, current)
     base_workflow_revision = t.workflow_revision
+    if t.grading_setup is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "grading_setup_required"},
+        )
     problems_snapshot = {
         q_id: dict(problem) for q_id, problem in t.problem_data.items()
     }
 
-    provider = registry.for_owner(current.id).pick_default()
+    owner_registry = registry.for_owner(current.id)
+    selected_provider_id = (
+        str(recognition_provider_id or "").strip()
+        or t.grading_setup.primary_provider_id
+    )
+    try:
+        recognition_registry = owner_registry.select(
+            [selected_provider_id],
+            primary_provider_id=selected_provider_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "recognition_provider_not_enabled"},
+        ) from exc
+    provider = recognition_registry.pick_default()
     if provider is None:
-        raise HTTPException(503, detail="No LLM provider configured.")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "recognition_provider_not_enabled"},
+        )
 
-    bytes_ = await file.read()
-    new_hash = hashlib.sha256(bytes_).hexdigest()
+    filename, bytes_, new_hash = await _read_submission_upload(file)
+    roster_name: Optional[str] = None
+    roster_entries: List[Dict[str, str]] = []
+    roster_hash: Optional[str] = None
+    if identity_mode == "roster":
+        if roster_file is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "submission_roster_required"},
+            )
+        roster_name, roster_entries, roster_hash = await _read_submission_roster(roster_file)
+    elif roster_file is not None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "submission_roster_not_applicable"},
+        )
+
+    request_fingerprint = _submission_request_fingerprint(
+        content_sha256=new_hash,
+        identity_mode=identity_mode,
+        roster_sha256=roster_hash,
+        recognition_provider_id=selected_provider_id,
+    )
 
     try:
-        files_data = await extract_files_from_archive(bytes_, file.filename or "submissions")
+        files_data = await extract_files_from_archive(bytes_, filename)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.warning(
             "[task:%s] submission archive rejected; exception_type=%s",
@@ -3049,7 +3227,10 @@ async def task_parse_submissions(
         ) from exc
 
     if not files_data:
-        raise HTTPException(400, detail="No valid student files found in archive.")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "submission_archive_empty"},
+        )
 
     job_id = str(uuid.uuid4())
     outcome, current_task = task_store.begin_submission_parse(
@@ -3057,7 +3238,12 @@ async def task_parse_submissions(
         expected_revision=base_workflow_revision,
         job_id=job_id,
         content_sha256=new_hash,
-        filename=file.filename or "submissions",
+        request_fingerprint=request_fingerprint,
+        filename=filename,
+        identity_mode=identity_mode,
+        roster_name=roster_name,
+        recognition_provider_id=selected_provider_id,
+        replace_confirmed=replace_confirmed,
     )
     if current_task is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
@@ -3093,12 +3279,16 @@ async def task_parse_submissions(
         job_id,
         task_store,
         job_store,
+        identity_mode=identity_mode,
+        roster_entries=roster_entries,
     ))
     return {
         "status": "started",
         "job_id": job_id,
         "task_id": t.task_id,
         "file_count": len(files_data),
+        "identity_mode": identity_mode,
+        "recognition_provider_id": selected_provider_id,
         "workflow_revision": current_task.workflow_revision,
     }
 

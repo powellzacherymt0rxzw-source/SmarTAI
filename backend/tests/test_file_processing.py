@@ -73,3 +73,20 @@ async def test_extract_zip_repairs_gbk_name_decoded_as_cp437():
             "content": "姓名：卫六\n答案：A\n",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_extract_7z_with_current_py7zr_api(tmp_path):
+    py7zr = pytest.importorskip("py7zr")
+    archive_path = tmp_path / "students.7z"
+    with py7zr.SevenZipFile(archive_path, "w") as archive:
+        archive.writestr("姓名：卫六\n答案：A\n", "PB20241669_卫六.txt")
+
+    files = await extract_files_from_archive(archive_path.read_bytes(), archive_path.name)
+
+    assert files == [
+        {
+            "filename": "PB20241669_卫六.txt",
+            "content": "姓名：卫六\n答案：A\n",
+        }
+    ]

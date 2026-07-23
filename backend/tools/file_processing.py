@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 import sys
 import tarfile
+import tempfile
 import threading
 import zipfile
 from typing import List, Dict, Optional
@@ -43,6 +44,9 @@ PDF_EXTRACTION_TIMEOUT_SECONDS = 10.0
 PDF_EXTRACTION_MAX_WORKERS = 2
 _PDF_EXTRACTION_SLOTS = threading.BoundedSemaphore(PDF_EXTRACTION_MAX_WORKERS)
 _PDF_WORKER_PATH = Path(__file__).with_name("_pdf_worker.py")
+SUBMISSION_ARCHIVE_MAX_FILES = 500
+SUBMISSION_ARCHIVE_MAX_EXPANDED_BYTES = 100 * 1024 * 1024
+SUBMISSION_ARCHIVE_MAX_MEMBER_BYTES = 5 * 1024 * 1024
 
 
 async def decode_text_bytes(text_bytes: bytes) -> str:
@@ -175,6 +179,21 @@ def _repair_zip_member_name(name: str) -> str:
     return repaired if _has_cjk(repaired) else name
 
 
+def _validate_archive_members(sizes: List[int]) -> None:
+    if len(sizes) > SUBMISSION_ARCHIVE_MAX_FILES:
+        raise ValueError("Submission archive contains too many files")
+    if any(size > SUBMISSION_ARCHIVE_MAX_MEMBER_BYTES for size in sizes):
+        raise ValueError("Submission archive contains an oversized file")
+    if sum(sizes) > SUBMISSION_ARCHIVE_MAX_EXPANDED_BYTES:
+        raise ValueError("Submission archive expands beyond the safe limit")
+
+
+async def _decode_submission_file(data: bytes, filename: str) -> str:
+    if filename.casefold().endswith(".pdf"):
+        return await extract_text_from_pdf(data)
+    return await decode_text_bytes(data)
+
+
 async def extract_files_from_archive(file_bytes: bytes, filename: str) -> List[Dict[str, str]]:
     """
     Extract all text files from an archive (zip/rar/7z/tar.*) or wrap a single
@@ -187,10 +206,11 @@ async def extract_files_from_archive(file_bytes: bytes, filename: str) -> List[D
     if lower.endswith(".zip"):
         with zipfile.ZipFile(file_in_memory, "r") as zf:
             valid = [i for i in zf.infolist() if not i.is_dir() and _is_valid_file(i.filename)]
+            _validate_archive_members([i.file_size for i in valid])
 
             async def process(info):
                 clean = _repair_zip_member_name(info.filename).split("/")[-1]
-                content = await decode_text_bytes(zf.read(info.filename))
+                content = await _decode_submission_file(zf.read(info.filename), clean)
                 return {"filename": clean, "content": content}
 
             files_data.extend(await asyncio.gather(*[process(i) for i in valid]))
@@ -201,10 +221,11 @@ async def extract_files_from_archive(file_bytes: bytes, filename: str) -> List[D
         try:
             with rarfile.RarFile(file_in_memory, "r") as rf:
                 valid = [i for i in rf.infolist() if not i.is_dir() and _is_valid_file(i.filename)]
+                _validate_archive_members([i.file_size for i in valid])
 
                 async def process(info):
                     clean = info.filename.split("/")[-1]
-                    content = await decode_text_bytes(rf.read(info.filename))
+                    content = await _decode_submission_file(rf.read(info.filename), clean)
                     return {"filename": clean, "content": content}
 
                 files_data.extend(await asyncio.gather(*[process(i) for i in valid]))
@@ -217,37 +238,51 @@ async def extract_files_from_archive(file_bytes: bytes, filename: str) -> List[D
         if py7zr is None:
             raise ValueError("Processing .7z files requires 'py7zr'; pip install py7zr")
         with py7zr.SevenZipFile(file_in_memory, "r") as szf:
-            all_files = szf.readall()
-            valid = {n: bio for n, bio in all_files.items() if _is_valid_file(n)}
+            valid = [
+                info for info in szf.list()
+                if info.is_file and not info.is_symlink and _is_valid_file(info.filename)
+            ]
+            _validate_archive_members([info.uncompressed for info in valid])
+            with tempfile.TemporaryDirectory(prefix="smartai-submissions-") as temp_dir:
+                root = Path(temp_dir).resolve()
+                targets = [info.filename for info in valid]
+                szf.extract(path=root, targets=targets)
 
-            async def process(item):
-                n, bio = item
-                clean = n.split("/")[-1]
-                content = await decode_text_bytes(bio.read())
-                return {"filename": clean, "content": content}
+                async def process(info):
+                    extracted = (root / info.filename).resolve()
+                    try:
+                        extracted.relative_to(root)
+                    except ValueError as exc:
+                        raise ValueError("Unsafe path in submission archive") from exc
+                    extracted.chmod(0o600)
+                    data = extracted.read_bytes()
+                    clean = Path(info.filename).name
+                    content = await _decode_submission_file(data, clean)
+                    return {"filename": clean, "content": content}
 
-            files_data.extend(await asyncio.gather(*[process(i) for i in valid.items()]))
+                files_data.extend(await asyncio.gather(*[process(info) for info in valid]))
 
     elif lower.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2")):
         with tarfile.open(fileobj=file_in_memory, mode="r:*") as tf:
             valid = [m for m in tf.getmembers() if m.isfile() and _is_valid_file(m.name)]
+            _validate_archive_members([m.size for m in valid])
 
             async def process(member):
                 clean = member.name.split("/")[-1]
                 obj = tf.extractfile(member)
                 if obj is None:
                     return None
-                content = await decode_text_bytes(obj.read())
+                content = await _decode_submission_file(obj.read(), clean)
                 return {"filename": clean, "content": content}
 
             results = await asyncio.gather(*[process(m) for m in valid])
             files_data.extend([r for r in results if r is not None])
 
     else:
-        if lower.endswith(".txt"):
+        if lower.endswith((".txt", ".md", ".rst", ".csv", ".pdf")):
             files_data.append({
                 "filename": filename,
-                "content": await decode_text_bytes(file_bytes),
+                "content": await _decode_submission_file(file_bytes, filename),
             })
         else:
             logger.warning(f"Ignoring unsupported single-file type: {filename}")

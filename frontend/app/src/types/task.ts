@@ -75,7 +75,12 @@ export interface StudentSubmission {
   stu_id: string;
   stu_name: string;
   stu_ans: StudentAnswerInfo[];
+  source_filename?: string | null;
+  identity_match_method?: SubmissionIdentityMode | null;
+  identity_status?: "matched" | "needs_review";
 }
+
+export type SubmissionIdentityMode = "filename" | "roster" | "manual_review";
 
 export interface StepScore {
   step_no: number;
@@ -128,6 +133,7 @@ export interface TaskLite {
   name: string;
   owner_id: string;
   status: TaskStatus;
+  workflow_revision: number;
   semester_id?: string | null;
   course_id?: string | null;
   tag_ids?: string[];
@@ -138,6 +144,10 @@ export interface TaskLite {
   last_failed_job_id?: string | null;
   problem_file_name?: string | null;
   submission_file_name?: string | null;
+  pending_submission_file_name?: string | null;
+  submission_identity_mode?: SubmissionIdentityMode;
+  submission_roster_name?: string | null;
+  submission_recognition_provider_id?: string | null;
   reference_file_name?: string | null;
   test_cases_file_name?: string | null;
   reference_parse_job_id?: string | null;

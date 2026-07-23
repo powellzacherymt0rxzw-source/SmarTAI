@@ -178,7 +178,7 @@ function ResultsContent({
         title="结果尚未生成"
         description={`当前任务阶段：${getTaskStatusMeta(status ?? "draft").label}。批改完成后这里会显示真实结果。`}
         action={
-          <Link to={`/tasks/${taskId}/upload/submissions`}>
+          <Link to={`/tasks/${taskId}/submissions/upload`}>
             <Button type="button" variant="secondary">
               返回批改流程
             </Button>
@@ -194,7 +194,7 @@ function ResultsContent({
         title="暂无批改结果"
         description="后端返回了完成状态，但没有学生结果数据。可以刷新页面或返回上传页检查作答。"
         action={
-          <Link to={`/tasks/${taskId}/upload/submissions`}>
+          <Link to={`/tasks/${taskId}/submissions/upload`}>
             <Button type="button" variant="secondary">
               检查学生作答
             </Button>

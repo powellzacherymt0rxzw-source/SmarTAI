@@ -121,6 +121,8 @@ export async function deleteJSON<T>(path: string, config?: AxiosRequestConfig): 
 export interface UploadOptions {
   contentType?: string;
   onProgress?: (percent: number, event: AxiosProgressEvent) => void;
+  fields?: Record<string, string | number | boolean | null | undefined>;
+  files?: Record<string, File | null | undefined>;
 }
 
 export async function postMultipart<T>(
@@ -130,6 +132,16 @@ export async function postMultipart<T>(
 ): Promise<T> {
   const formData = new FormData();
   formData.append("file", file);
+  Object.entries(options.fields ?? {}).forEach(([key, value]) => {
+    if (value !== null && value !== undefined) {
+      formData.append(key, String(value));
+    }
+  });
+  Object.entries(options.files ?? {}).forEach(([key, value]) => {
+    if (value) {
+      formData.append(key, value);
+    }
+  });
 
   try {
     const response = await apiClient.post<T>(path, formData, {
