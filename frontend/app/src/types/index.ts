@@ -2,6 +2,7 @@ export * from "./analytics";
 export * from "./aiCompletions";
 export * from "./auth";
 export * from "./catalog";
+export * from "./courseMaterials";
 export * from "./experts";
 export * from "./health";
 export * from "./gradingSetup";

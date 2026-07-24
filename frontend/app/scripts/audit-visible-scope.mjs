@@ -166,19 +166,26 @@ function isAllowedVisibleText(relativePath, line, rule) {
   if (
     rule.id === "visible-course-management" &&
     (
-      relativePath.startsWith("src/components/new-task/")
+      relativePath.startsWith("src/components/knowledge-base/")
+      || relativePath === "src/routes/KnowledgeBasePage.tsx"
+      || relativePath.startsWith("src/components/new-task/")
       || relativePath === "src/routes/NewTaskPage.tsx"
       || (relativePath === "src/i18n/messages.ts" && /^\s*newTask/.test(line))
     )
   ) {
-    // New Task may select or create owner-scoped course metadata. This is not
-    // a course-management route and does not expose enrollment or publishing.
+    // New Task may select/create course metadata, and Course Library may use
+    // that metadata to organize materials. Neither exposes enrollment,
+    // assignment publishing, or a standalone course-management route.
     return true;
   }
 
   if (
     rule.id === "visible-global-kb" &&
-    (relativePath === "src/routes/KnowledgeBasePage.tsx" || relativePath === "src/routes/tasks/TaskSetupPage.tsx")
+    (
+      relativePath === "src/routes/KnowledgeBasePage.tsx"
+      || relativePath.startsWith("src/components/knowledge-base/")
+      || relativePath === "src/routes/tasks/TaskSetupPage.tsx"
+    )
   ) {
     return true;
   }

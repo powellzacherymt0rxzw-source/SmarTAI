@@ -26,6 +26,12 @@ export const courseKeys = {
   search: (query: string) => ["courses", "search", query] as const,
 };
 
+export const courseMaterialKeys = {
+  all: ["course-materials"] as const,
+  list: (queryKey: string) => ["course-materials", "list", queryKey] as const,
+  groups: (query: string) => ["course-materials", "groups", query] as const,
+};
+
 export const kbKeys = {
   all: ["kb"] as const,
   list: (taskId: string) => ["kb", "list", taskId] as const,
