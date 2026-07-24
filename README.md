@@ -1,342 +1,318 @@
 # SmarTAI
 
-> 面向高校理工科课程的 AI 智能作业批改平台。一份题目 + 一份学生作答，几分钟出分；多 AI 协同评审，结果可追溯、可修改、可分析。
+[![CI](https://github.com/SmarTAI-2025/SmarTAI/actions/workflows/ci.yml/badge.svg)](https://github.com/SmarTAI-2025/SmarTAI/actions/workflows/ci.yml)
 
-## 在线 Demo
+SmarTAI 是面向课程作业场景的 AI 辅助批改系统。项目以课程、作业、提交、批改运行和成绩为核心数据模型，为管理员、教师和学生提供相互隔离的工作区，并保留教师复核与成绩发布环节。
 
-🔗 **当前主版本在线体验**：[https://smartai-course.pages.dev](https://smartai-course.pages.dev)
+在线演示：[https://smartai-course.pages.dev](https://smartai-course.pages.dev)
 
-🔗 **测试账号**：等待邀请发放
+## 当前能力
 
----
+- 管理员：管理用户、创建邀请码、查看系统状态。
+- 教师：创建课程并管理选课学生，编辑和发布作业，查看提交，启动批改，处理人工复核队列并发布成绩。
+- 学生：查看已选课程和已发布作业，在线提交结构化答案或上传文件，查看教师已发布的成绩。
+- AI 批改：支持 Gemini、OpenAI、Anthropic 和智谱等模型配置，可按用户保存 BYOK（Bring Your Own Key）凭据。
+- 知识库：教师可维护个人知识文档，并为作业选择用于检索的资料。
+- 数据持久化：本地开发使用 SQLite 和本地文件存储，生产环境可切换到 PostgreSQL 和 S3 兼容对象存储。
+- 可追踪批改：提交修订是不可变版本；批改运行、逐题结果、AI 评语、教师复核和发布状态分别保存。
 
-## 本地运行（开发与测试）
+## 业务流程
 
-### 当前代码状态
+1. 管理员创建用户或发放邀请码。
+2. 教师创建课程、添加学生并创建作业与题目。
+3. 教师将作业发布后，学生提交答案；再次修改会生成新的提交修订。
+4. 教师启动批改运行，后台工作器从数据库领取并处理任务。
+5. 低置信度、模型意见分歧或执行失败的结果进入人工复核队列。
+6. 教师可调整分数和评语，确认后发布整次批改运行。
+7. 学生只能看到已经发布的结果，不会看到草稿分数或模型调用信息。
 
-当前 `main` 已包含三部分：
+## 技术架构
 
-- **FastAPI 后端**：`backend/`，提供 `/tasks/*`、`/analytics/*`、`/experts/*`、认证、RAG、批改等 API。
-- **旧 Reflex 前端**：`frontend/`，保留为回退和对照路径，仍依赖 Python/Reflex 状态服务器。
-- **新 Vite React 前端**：`frontend/app/`，已合并进 `main`，是当前推荐的教师端本地开发与验收入口。
+| 层级 | 技术 |
+| --- | --- |
+| 前端 | React 19、TypeScript、Vite 8、Tailwind CSS 4、TanStack Query |
+| 后端 | FastAPI、Pydantic、Uvicorn |
+| 数据库 | SQLAlchemy 2、Alembic、SQLite / PostgreSQL |
+| 文件存储 | 本地文件系统 / S3 兼容对象存储 |
+| AI 与检索 | LangChain provider adapters、BM25、SymPy、多模型批改 |
+| 测试 | Pytest、Vitest、Testing Library、Playwright |
 
-### 环境分工
+当前前端唯一入口位于 `frontend/app/`。
 
-- **后端需要 `smartai` Conda 环境**：FastAPI、LLM、RAG、SymPy 等 Python 依赖都在这里跑。
-- **旧 Reflex 前端需要 `smartai` Conda 环境**：它是 Python/Reflex 应用，运行 `reflex run` 前需要安装 `frontend/requirements.txt`。
-- **新 Vite React 前端不需要 `smartai` Conda 环境**：它只需要 Node.js + npm，依赖由 `frontend/app/package-lock.json` 锁定。
-- 可以在激活 `smartai` 的终端里跑 React 前端，但这不是必需条件；React 前端包不要用 `pip/conda` 装。
+## 仓库结构
 
-### 准备后端与旧前端的 Python 环境
-
-推荐使用 Conda 创建并激活专用 Python 环境（项目内统一称为 `smartai`，Python 3.11 推荐）：
-
-```bash
-conda create -n smartai python=3.11
-conda activate smartai
+```text
+SmarTAI/
+├── backend/
+│   ├── api/                 # FastAPI 路由
+│   ├── auth/                # JWT、刷新会话与测试账号导入
+│   ├── db/                  # ORM、仓储与 Alembic migrations
+│   ├── services/            # 课程、提交、批改等业务服务
+│   ├── knowledge/           # 个人知识库
+│   ├── llm/                 # 模型 provider 与专家注册表
+│   ├── storage/             # 本地及对象存储实现
+│   ├── tests/               # 后端测试
+│   └── main.py              # FastAPI 应用入口
+├── frontend/app/            # React/Vite 应用
+├── scripts/                 # 管理员、测试用户和开发数据库工具
+├── .github/workflows/ci.yml # CI 配置
+├── .env.example             # 后端环境变量示例
+├── alembic.ini              # 数据库迁移配置
+└── render-requirements.txt  # 后端部署依赖
 ```
 
-激活后请使用 `python` / `pip`（而不是 `python3` / `pip3`），避免与系统 Python 混淆。
+## 快速开始
 
-### 安装后端依赖
+### 环境要求
 
-在仓库根目录执行下述命令，安装 FastAPI、LangChain 各厂商适配器、SymPy、PyJWT、PyMuPDF、rank-bm25 等核心包（`backend/requirements.txt` 直接复用根目录的 `render-requirements.txt`）：
+- Python 3.11 或 3.12
+- Node.js 20
+- npm
+
+以下命令均从仓库根目录开始执行。
+
+### 1. 安装后端依赖
 
 ```bash
+python -m venv .venv
+```
+
+激活虚拟环境：
+
+```bash
+# macOS / Linux
+source .venv/bin/activate
+
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+```
+
+安装依赖并创建本地配置：
+
+```bash
+python -m pip install --upgrade pip
 pip install -r render-requirements.txt
+cp .env.example .env
 ```
 
-### 启动后端
+Windows PowerShell 可使用：
 
-在仓库根目录执行：
+```powershell
+Copy-Item .env.example .env
+```
+
+默认配置使用 `data/smartai.db` 和 `data/uploads/`，适合单机开发。首次启动前建议显式执行迁移：
+
+```bash
+alembic upgrade head
+```
+
+### 2. 创建管理员
+
+```bash
+python scripts/create_admin.py admin --email admin@example.com
+```
+
+命令会交互式读取密码，密码长度至少为 10 个字符。也可以通过 `SMARTAI_BOOTSTRAP_ADMIN_PASSWORD` 临时传入密码，但不要将密码写入仓库。
+
+如需批量生成仅供本地测试的账号：
+
+```bash
+python scripts/generate_test_users.py
+```
+
+生成的凭据保存在被 Git 忽略的 `data/test_users.json`。后端启动时会在 `SMARTAI_SEED_TEST_USERS=true` 的情况下导入这些账号。
+
+### 3. 启动后端
 
 ```bash
 python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-后端服务将监听 `8000` 端口，对外暴露 `/tasks/*`、`/analytics/*` 等任务中心化 API，可通过 `http://localhost:8000/health` 验证健康状态。
+- 健康检查：`http://localhost:8000/health`
+- 就绪检查：`http://localhost:8000/ready`
+- OpenAPI 文档：`http://localhost:8000/docs`
 
-### 启动 React 新前端
+### 4. 启动前端
 
-在另一终端中执行：
+打开另一个终端：
 
 ```bash
-cd /Users/annie/code/SmarTAI/frontend/app
-npm install
+cd frontend/app
+npm ci
 npm run dev
 ```
 
-浏览器打开：
+浏览器访问 `http://localhost:5173`。前端默认连接 `http://localhost:8000`；需要覆盖时，在 `frontend/app/.env` 中设置：
 
-```text
-http://localhost:5173/login
-```
-
-如果 `5173` 被占用，Vite 会在终端里打印新的本地地址，按终端显示的地址打开即可。
-
-React 新前端默认连接：
-
-```text
-http://localhost:8000
-```
-
-如果没有 `frontend/app/.env`，会使用上面的默认值，因此本地 `npm run dev`
-默认连接本地 FastAPI 后端。若要明确指定后端地址，可从示例文件复制一份本地
-配置：
-
-```bash
-cd /Users/annie/code/SmarTAI/frontend/app
-cp .env.example .env
-```
-
-连本地后端时写：
-
-```text
+```dotenv
 VITE_SMARTAI_BACKEND_URL=http://localhost:8000
 ```
 
-连 Render 公网后端时改为：
+修改该变量后需要重启开发服务器或重新构建前端。
 
-```text
-VITE_SMARTAI_BACKEND_URL=https://smartai-backend-z2zu.onrender.com
+## 环境配置
+
+后端从仓库根目录的 `.env` 和进程环境变量读取配置。常用变量如下：
+
+| 变量 | 用途 | 本地默认/示例 |
+| --- | --- | --- |
+| `SMARTAI_DATABASE_HEAVY` | `OFF` 使用 SQLite，`ON` 使用 PostgreSQL | `OFF` |
+| `SMARTAI_DATABASE_URL_LIGHT` | SQLite SQLAlchemy URL | `sqlite:///data/smartai.db` |
+| `SMARTAI_DATABASE_URL_HEAVY` | PostgreSQL SQLAlchemy URL | `postgresql+psycopg://...` |
+| `SMARTAI_DATABASE_AUTO_CREATE` | 启动时自动建表；生产环境应关闭并使用 Alembic | `true` |
+| `SMARTAI_STORAGE_BACKEND` | `local` 或 `object` | `local` |
+| `SMARTAI_STORAGE_ROOT` | 本地上传目录 | `data/uploads` |
+| `SMARTAI_STORAGE_S3_*` | S3 兼容存储的 endpoint、bucket、region 和凭据 | 空 |
+| `SMARTAI_REQUIRE_AUTH` | 是否强制保护 API | `true`（示例配置） |
+| `SMARTAI_REGISTRATION_CLOSED` | 是否关闭公开注册 | `true` |
+| `SMARTAI_PROVIDER_ENCRYPTION_KEY` | 加密持久化的用户 BYOK 凭据 | 必须自行设置 |
+| `SMARTAI_JWT_SECRET` | JWT 签名密钥；生产环境必须替换 | 必须自行设置 |
+| `FRONTEND_URLS` | 允许跨域访问后端的前端源，逗号分隔 | 本地 Vite 地址 |
+
+配置模型也兼容部署模板使用的 `JWT_SECRET`。新建本地配置时建议沿用 `.env.example` 中的 `SMARTAI_JWT_SECRET`。
+
+生产环境使用跨站刷新 Cookie 时，还需要设置：
+
+```dotenv
+SMARTAI_REFRESH_COOKIE_SECURE=true
+SMARTAI_REFRESH_COOKIE_SAMESITE=none
 ```
 
-`frontend/app/.env` 会被 git 忽略，只影响本机；`VITE_*` 变量由 Vite 在启动
-开发服务器或生产构建时读取，修改后需要重启 `npm run dev` 或重新构建/部署。
-React 设置页会显示当前前端正在使用的后端地址，后端日志里出现请求也能确认实
-际连到的是本地还是公网后端。
+`FRONTEND_URLS` 必须包含实际部署的前端 origin，例如：
 
-本地测试账号可生成：
+```dotenv
+FRONTEND_URLS=https://smartai-course.pages.dev
+```
+
+不要在 URL 末尾添加 `/`。
+
+## 数据库与迁移
+
+本地 SQLite：
+
+```dotenv
+SMARTAI_DATABASE_HEAVY=OFF
+SMARTAI_DATABASE_URL_LIGHT=sqlite:///data/smartai.db
+```
+
+生产 PostgreSQL：
+
+```dotenv
+SMARTAI_DATABASE_HEAVY=ON
+SMARTAI_DATABASE_URL_HEAVY=postgresql+psycopg://USER:PASSWORD@HOST:5432/DBNAME
+SMARTAI_DATABASE_AUTO_CREATE=false
+```
+
+应用数据库迁移：
 
 ```bash
-cd /Users/annie/code/SmarTAI
-python scripts/generate_test_users.py
+alembic upgrade head
 ```
 
-生成后查看 `data/test_users.json`，用里面的 `username/password` 登录。生成文件已被 git 忽略，不会提交到仓库。
-
-### 旧 Reflex 前端（保留回退路径）
-
-如果要跑旧 Reflex 前端，需要在 `smartai` Conda 环境中安装它自己的 Python 前端依赖：
+仅在确定要清空本地开发数据时，可重建 `data/` 下的 SQLite 数据库：
 
 ```bash
-cd frontend
-pip install -r requirements.txt
-reflex run
+python scripts/reset_development_database.py
 ```
 
-Reflex 将自动启动前端开发服务器并连接到本地 `8000` 端口的后端，浏览器访问默认地址（一般为 `http://localhost:3000`）即可进入 SmarTAI 教师工作台。
+该命令不会删除上传文件，并会拒绝默认范围之外的数据库路径。
 
-### 运行测试
+## 认证与模型凭据
 
-后端单元测试（在仓库根目录执行）：
+- 系统角色为 `admin`、`teacher`、`student`。
+- 登录成功后，前端使用短期 JWT access token；refresh token 通过可轮换的 HttpOnly Cookie 管理。
+- 示例配置默认关闭公开注册。新用户应由管理员直接创建，或使用管理员生成的邀请码注册。
+- 用户可在“专家配置”页面保存自己的模型 API Key。凭据写入数据库前会使用 `SMARTAI_PROVIDER_ENCRYPTION_KEY` 加密。
+- 至少配置一个可用模型 provider 后才能执行真实 AI 批改。不要提交 `.env`、测试账号文件或 API Key。
+
+## API
+
+主要 API 分组：
+
+| 路径 | 内容 |
+| --- | --- |
+| `/auth` | 登录、注册、刷新与退出 |
+| `/admin` | 用户、邀请码与系统管理 |
+| `/users` | 当前用户相关操作 |
+| `/courses` | 课程与选课关系 |
+| `/assignments` | 作业、题目、发布状态与知识库选择 |
+| `/submissions` | 学生提交及不可变修订 |
+| `/grading-runs` | 批改运行、状态与发布 |
+| `/results` | 成绩、统计与人工复核 |
+| `/knowledge` | 个人知识文档 |
+| `/experts` | BYOK 模型配置 |
+
+以运行中的 `/docs` 为完整接口契约。
+
+## 测试与 CI
+
+后端完整测试：
 
 ```bash
-pytest backend/tests
+pip install pytest pytest-asyncio
+python -m pytest backend/tests -q
 ```
 
----
+前端检查：
 
-## 部署到公网
+```bash
+cd frontend/app
+npm ci
+npm run audit:scope
+npm run typecheck
+npm test
+npm run build
+```
 
-仓库已附带 Render 部署配置；当前配置主要覆盖 FastAPI 后端与旧 Reflex 前端：
+端到端测试需要 Playwright Chromium 和一个可用的本地后端：
 
-- **后端**：`backend/render.yaml`，根目录读取 `render-requirements.txt`
-- **旧 Reflex 前端状态服务器**：`frontend/render.yaml`，`rootDir` 设为 `frontend`
-- **旧 Reflex 静态导出站点**：`frontend/render-static.yaml`，`rootDir` 设为 `frontend`
+```bash
+cd frontend/app
+npx playwright install chromium
+npm run e2e
+```
 
-新 Vite React 前端位于 `frontend/app/`，它是纯静态前端：本地使用
-`npm run dev`，生产部署使用 `npm run build` 生成 `dist/`。推荐把 React 前端
-部署到 Cloudflare Pages、Vercel 或 Render Static Site，后端继续部署为 Render
-Web Service。
+GitHub Actions 在 `.github/workflows/ci.yml` 中执行四类任务：
 
-React 静态前端的公网构建配置：
+- SQLite 后端测试
+- PostgreSQL 集成测试与迁移往返验证
+- 前端范围审计、类型检查、单元测试和生产构建
+- Playwright 端到端测试
+
+## 部署
+
+### 后端：Render
+
+仓库包含 `backend/render.yaml`。生产启动命令为：
+
+```bash
+alembic upgrade head && uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+```
+
+生产部署应使用 PostgreSQL、S3 兼容对象存储，并通过平台 Secret 管理数据库、存储、JWT 和加密密钥。部署后用 `/ready` 同时检查数据库与存储可用性。
+
+### 前端：Cloudflare Pages
+
+推荐构建配置：
 
 ```text
 Root directory: frontend/app
 Build command: npm ci && npm run build
 Build output directory: dist
-VITE_SMARTAI_BACKEND_URL=https://smartai-backend-z2zu.onrender.com
 ```
 
-旧 Reflex 前端仍需要自己的 `SMARTAI_BACKEND_URL` 和 `REFLEX_API_URL`；React
-前端不使用 `REFLEX_API_URL`。
+构建环境变量：
 
-后端的 `FRONTEND_URLS` 是 CORS 白名单，要包含所有允许访问该后端的前端源。可
-以同时保留旧 Reflex 前端、本地开发地址和新的 React 公网地址，例如：
-
-```text
-FRONTEND_URLS=https://smartai-course.pages.dev,https://smartai-l6zw.onrender.com,https://smartai-frontend-94ya.onrender.com,http://localhost:3000,http://localhost:8001,http://localhost:5173,http://127.0.0.1:5173
+```dotenv
+VITE_SMARTAI_BACKEND_URL=https://your-backend.example.com
 ```
 
-注意每个 URL 之间只用英文逗号，不要在逗号后加空格，也不要带结尾 `/`。
-`http://localhost:5173` 与 `http://127.0.0.1:5173` 只用于本地 React 前端直连
-线上后端的调试；公网用户访问不依赖这两项。修改 Render 环境变量后需要
-redeploy/restart 后端服务。
+同时将前端正式域名加入后端的 `FRONTEND_URLS`。
 
-部署完成后，需要将下列环境变量填为真实服务 URL：
+## 当前边界
 
-- `VITE_SMARTAI_BACKEND_URL`（React 静态前端构建时配置）
-- `SMARTAI_BACKEND_URL`（旧 Reflex 前端配置）
-- `REFLEX_API_URL`（旧 Reflex 前端配置）
-- `FRONTEND_URLS`（后端配置，前端域名白名单）
-
-部署成功后，任意教师可通过公网 URL 直接访问完整功能，无需任何本地环境准备；同时建议将公网 URL、演示账号、示例题目压缩包同步填入本 README 顶部「在线 Demo」一节，以便评审专家与试用教师以零工程成本体验完整批改流程。
-
----
-
-## 这是什么
-
-SmarTAI 把"批作业"这件事完整托管：
-
-```
-上传题目  →  抽题 + 设计评分标准  →  上传学生答卷  →  AI 多专家协同评分  →  浏览结果 + 班级分析
-  PDF/TXT       AI 自动切分题号        ZIP/RAR/7Z        多家 AI 投票 + 综合评审      自然语言查询
-```
-
-教师不需要写一行代码，也不需要懂任何 AI 模型。上传文件，等几分钟，拿到带评语的成绩单和班级分析报告。
-
----
-
-## 特色功能
-
-### 🎯 多 AI 协同评分（核心亮点）
-
-不是"一键调一次 GPT"。SmarTAI 让你**同时配置多家 LLM**（Gemini / GPT / Claude / 智谱 GLM），对同一份答案独立打分，再由一位"评判 AI"综合给出最终分数。
-
-- **真并行调用** —— 多家 AI 同时跑，总耗时 ≈ 最慢的那一家
-- **每位专家原始评分都保留** —— 你能看到 "Gemini 给 8 分，GPT-4o 给 5 分，评判后 6.5 分" 的完整链路
-- **学生申诉时直接调出三家原始判分** —— 不再是黑盒分数
-- **评判 AI 失败自动降级** —— 按置信度加权平均兜底，永远不会因为单次故障挂掉整批
-
-### 📐 四种题型，四套批改方法
-
-不同题型 LLM 容易犯的错完全不同。SmarTAI 把题目分类后用不同流程处理：
-
-| 题型                    | 处理方法                                                    |
-| ----------------------- | ----------------------------------------------------------- |
-| **概念题**        | RAG 检索教材 + 结构化打分 + 显式列出命中的知识点            |
-| **计算题**        | SymPy 数值/符号验证 + LLM 步骤评分（结果分 + 过程分分开打） |
-| **编程题**        | 沙箱真跑测试用例（256MB / 10s 限制）+ LLM 看代码风格        |
-| **证明题/推理题** | 拆步骤 + 逐步知识检索 + MapReduce 长答案聚合                |
-
-> 程序"跑起来对不对"是客观的，沙箱给出 ground truth；LLM 只负责风格分。这远比"全靠 LLM 看代码猜"靠谱。
-
-### 🔑 BYOK（自带 API Key）
-
-教师自己配 API Key，token 费用走自己钱包。平台不囤 token、不替老师付费、不通过中央服务器中转你的 Key。
-
-- 国内推荐：智谱 GLM（人民币结算，不用代理）
-- 海外：OpenAI / Gemini / Anthropic
-- 至少配一家就能跑；配 ≥2 家自动开启多专家模式
-
-### 👤 全程人工可控
-
-AI 是助手不是法官。每个 AI 输出都有对应的人工修改入口：
-
-- ✏️ 改题干、改评分细则（AI 抽错或漏抽时手动修正）
-- ✏️ 改学生答案（OCR 错字、题号错乱都能改）
-- ✏️ 改分数、加教师批注（与 AI 评语并存，不覆盖）
-- ✏️ 改完答卷可以重新点"评分"再批一次
-
-### 📊 班级分析 & 单题深挖
-
-批改完不是终点。SmarTAI 给你两套分析工具：
-
-**自然语言查询**：用大白话问问题
-
-- "找出所有不及格的学生" → 学生列表 + 一句话理由
-- "总结这次作业 q3 的常见问题" → Markdown 摘要
-- "画一张每题及格率的柱状图" → Plotly 图表
-
-**单题深挖**：每道题预烤好的洞察
-
-- 答题人数 / 平均分 / 及格率 / 最低最高
-- AI 自动总结的共性错误（"47% 的学生在第二步漏了边界条件"）
-- 帮你从"批完了"快速过渡到"下次课讲什么"
-
-### ⚡ 任务中心化 + 幂等设计
-
-- **任务并存** —— 可以同时开多个批改任务互不干扰
-- **中途切走** —— 关掉浏览器，第二天回来状态还在
-- **同一文件传两次不重烧 token** —— 文件 hash 一致直接命中缓存
-- **可以暂停 / 取消 / 重批** —— 所有操作都是幂等的
-
-### 📡 细粒度实时进度
-
-跑批时不是只看到"加载中..."。前端实时显示：
-
-- 当前阶段（抽题 / 解析答卷 / 评分）
-- 已完成 / 总数（每完成一个 学生×题目 +1）
-- 正在跑的单元（"学生 PB001 / 题目 q3 / GeminiSkill / sympy_verify"）
-- 子步骤（检索知识 / 构建提示 / LLM 调用 / 沙箱执行）
-
-### 🛡️ 可信的评分质量
-
-三层防护降低 AI 评错的影响：
-
-1. **置信度（confidence）** —— 每道题评分都有 0-1 分置信度，低于阈值的应当人工复核
-2. **多专家相互校验** —— 多家 AI 一致 = 可信；分歧大时评判 AI 会显式提醒
-3. **完全可改** —— AI 输出从不是只读的，最终决定权永远在教师手上
-
----
-
-## 适合谁用
-
-- 高校**理工科课程**的任课教师 / 助教 / 课程负责人
-- 作业题型涵盖**概念、计算、编程、证明、推理**
-- 班级规模从几人到上百人都能跑
-- 希望**留下批改痕迹**（不是一个不透明的最终分数）
-- 想从批改快速过渡到**教学反思**（共性错误、易错点）
-
----
-
-## 一份典型工作流
-
-> 场景：30 人 × 10 道题的"算法分析"作业，混合概念 + 计算 + 编程 + 证明。
-
-```
-[10:00] 配置两家 AI（Gemini + GPT-4o），多专家自动开启
-[10:02] 上传题目 PDF → 1 分钟后抽题完成 → 检查并修正 2 处 AI 漏抽
-[10:05] 上传 30 份答卷 ZIP → 2 分钟后解析完成 → 修正 3 名学生的 OCR 异常
-[10:08] 点击"评分" → 进度页实时滚动 → 10 分钟后完成
-[10:18] 浏览结果 → 4 道置信度 < 0.6 的题人工复核 → 改 1 道
-[10:35] 进入分析页 → 问"最普遍的错误" → 截图准备下次课
-[11:00] 导出成绩单
-```
-
-**总耗时：不到半小时**，原本要花 4-6 小时。每道题的判分都有可追溯的依据。
-
----
-
-## 当前能力边界（坦诚版）
-
-| 已经能做                              | 暂时还不行                                |
-| ------------------------------------- | ----------------------------------------- |
-| 多题型自动分类 + 针对性批改           | 自动从题面生成编程题 test cases           |
-| 多 AI 协同 + 综合评审                 | 同一专家多次自洽采样                      |
-| zip / rar / 7z / tar / pdf / txt 解析 | docx / 纯图片直接 OCR（需先转 PDF）       |
-| SymPy 数值验证                        | 自动从 criterion 提取参考答案             |
-| Python 沙箱                           | C / C++ / Java 沙箱（接口已抽象，待扩展） |
-| 自然语言查询 + 5 种图表               | 多轮对话式分析                            |
-| 任务并存 / 暂停切换                   | 跨设备同步                                |
-
----
-
-## 设计哲学
-
-**LLM 评分不应该是黑盒。**
-
-- 你看到每道题"哪几位 AI 怎么打分、为什么综合到这个分"
-- 你知道这道题用了哪些工具（SymPy / 沙箱 / 知识检索）
-- 你随时改题面 / 改答卷 / 改分 / 加批注
-- 你能问"这次作业最普遍的错误是什么"，而不是只盯着分数
-
-如果你正在评估批改类工具，问自己几个问题：
-
-1. 它能给出每道题的判分依据吗？
-2. 它支持多 AI 投票吗？
-3. AI 评错时改起来麻烦吗？
-4. 它能帮我从批改过渡到教学反思吗？
-
-希望 SmarTAI 能让你的批改工作 —— 至少 —— 比今天少花几个小时。
+- AI 批改依赖外部模型服务，响应时间、费用和可用性受所选 provider 影响。
+- SQLite 与本地文件存储适合单机开发；多实例生产部署应使用 PostgreSQL 和对象存储。
+- 公开注册默认关闭，首次部署必须先创建管理员，再通过用户管理或邀请码完成账号初始化。
+- 成绩发布是显式操作；批改完成不等于学生立即可见，教师必须先处理必要复核并发布批改运行。
