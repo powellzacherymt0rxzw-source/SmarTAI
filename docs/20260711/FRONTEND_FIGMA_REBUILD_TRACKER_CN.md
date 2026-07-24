@@ -8,7 +8,7 @@
 >
 > R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02、A-00、K00/K01 与 G05 记录位于 `docs/20260724/`。
 >
-> 当前阶段：G05 已从最右侧用户名菜单进入 `/settings/account`，按 Figma 09/14 的轻量标题、单层面板、克制状态色和宽行控件语言重写；真实账号资料、语言、主题、用户名菜单与退出入口通过中英文和双尺寸浏览器验收。用户已要求持续推进，现进入 G06 模型与 BYOK；既有等待视觉确认状态不变。
+> 当前阶段：G06A 已补齐 owner-scoped 模型修改、显式最小验证请求、脱敏验证状态/时间和官方 provider 链接白名单；全量 `225 passed, 1 skipped`，最终 CAS 修正后定向 `16 passed`，未调用真实 provider。现进入 G06B `/settings/byok` Figma 风格可见页重写；既有等待视觉确认状态不变。
 
 ---
 
@@ -204,10 +204,10 @@
 ### 3.3 BYOK 与模型信息
 
 - [~] BE-BYOK-01 专家 registry 与 key 按用户隔离。工程完成：2026-07-16；单一进程中 shared/owner 存储与可见视图已分离，教师有任一 BYOK 时不再混用 shared pool，同 provider/model 可分 owner 存储；仍为进程内存且未持久化，故保持 `[~]`。
-- [~] BE-BYOK-02 返回 provider、model、enabled、验证状态、最近验证时间和可安全展示的限制信息。进展：2026-07-16；provider/model/enabled/scope/editable/限流配置已脱敏返回，但尚无真实连通性验证与最近验证时间，不得把 enabled 写成 available/online。
-- [~] BE-BYOK-03 不返回 key 原文；前端只显示掩码、状态和修改/删除动作。工程完成：2026-07-16；API 固定返回 `***`，base URL 只返回脱敏 origin，shared 配置只读，异常和日志不记录 key；完整 BYOK 页双语与交互验收属 G-06，故保持 `[~]`。
-- [ ] BE-BYOK-04 配置官方 provider 控制台/用量页面链接白名单，前端新窗口打开并标明外部网站。
-- [ ] BE-BYOK-05 若供应商没有用量 API，不伪造余额、token 或费用。
+- [~] BE-BYOK-02 返回 provider、model、enabled、验证状态、最近验证时间和可安全展示的限制信息。进展：2026-07-24；列表现返回 `unverified / verified / failed / platform_managed`、`last_checked_at / verified_at` 和稳定脱敏错误码，显式验证只发送最小测试提示且有 30 秒上限；状态仍为进程内存，故保持 `[~]`。
+- [~] BE-BYOK-03 不返回 key 原文；前端只显示掩码、状态和修改/删除动作。进展：2026-07-24；API 固定返回 `***`，base URL 只返回脱敏 origin，shared 配置只读；PUT 修改可在 key 留空时由后端保留旧密钥，模型 ID 迁移原子完成，异常和日志不记录 key。完整 BYOK 页双语与交互验收属 G06B，故保持 `[~]`。
+- [~] BE-BYOK-04 配置官方 provider 控制台/用量页面链接白名单，前端新窗口打开并标明外部网站。后端完成：2026-07-24；`/experts/catalog` 仅返回 Gemini/OpenAI/Zhipu/Anthropic 固定 HTTPS 官网文档、密钥控制台和用量入口，不接受用户 URL；等待 G06B 可见页接入。
+- [~] BE-BYOK-05 若供应商没有用量 API，不伪造余额、token 或费用。后端边界完成：2026-07-24；只返回官方外链，不读取或推断余额、token、费用；等待 G06B 文案验收。
 
 ### 3.4 智能查询、复核和分析
 
@@ -338,8 +338,8 @@
 
 - [~] G04-01 课程资料库使用 Figma 09 结构，支持真实文件、资料分组、标签、搜索和跨任务选择。K00/K01 工程完成：2026-07-24；真实解析上传/去重、分组/标签/课程、确定性 exact/related 查找、owner 隔离、任务引用与删除保护均已接入；可见页按 Figma 09 的标题动作、54px 搜索、分类行、扁平表格和底部概况从头重写。lint/typecheck、`945 modules` build、后端 `222 passed, 1 skipped`、1440×900/390×844 浏览器及真实交互通过；等待用户视觉确认，故保持 `[~]`。详细记录见 `docs/20260724/K00_COURSE_LIBRARY_BACKEND_STAGE_DECISION_AND_ACCEPTANCE_CN.md` 与 `K01_COURSE_LIBRARY_FIGMA_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 - [~] G05-01 账户设置从用户名菜单进入。工程与浏览器验收完成：2026-07-24；账户设置、模型与 BYOK、退出登录继续只存在于最右侧用户名菜单，不占顶部主导航。`/settings/account` 已移除后端 URL、CPU、内存等开发者信息，改为真实会话账号摘要、浏览器本地语言/主题偏好和明确能力边界；中英文切换、1440×900/390×844 无横向溢出、lint/typecheck 与 Vite `946 modules` build 通过。等待用户视觉确认，故保持 `[~]`；详细记录见 `docs/20260724/G05_ACCOUNT_SETTINGS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
-- [ ] G06-01 BYOK 页面支持添加、验证、修改、启用/停用和删除 key。
-- [ ] G06-02 展示官方 provider 官网/控制台/用量页面链接。
+- [~] G06-01 BYOK 页面支持添加、验证、修改、启用/停用和删除 key。G06A 后端完成：2026-07-24；owner 隔离、共享只读、原子修改、显式一次验证、稳定错误和 CAS 防过期回写已通过定向/全量回归；可见页属于 G06B。
+- [~] G06-02 展示官方 provider 官网/控制台/用量页面链接。G06A 后端白名单完成：2026-07-24；等待 G06B 新窗口、外部网站标识和双语验收。
 - [ ] G06-03 Dashboard 模型摘要与 BYOK 页面使用同一真实状态源。
 - [ ] G00-01 登录页后置品牌视觉，不影响主流程优先级。
 

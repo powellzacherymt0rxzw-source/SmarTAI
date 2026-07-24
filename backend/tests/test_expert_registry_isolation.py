@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
@@ -48,6 +49,7 @@ def _empty_registry() -> ExpertRegistry:
         registry._shared_provider_ids.clear()
         registry._entry_owners.clear()
         registry._public_provider_ids.clear()
+        registry._verification.clear()
     return registry
 
 
@@ -111,6 +113,10 @@ def test_same_logical_model_is_stored_per_owner_and_unscoped_view_is_shared_only
         "scope": "owner",
         "is_shared": False,
         "editable": True,
+        "verification_status": "unverified",
+        "last_checked_at": None,
+        "verified_at": None,
+        "verification_error_code": None,
     }]
     assert b_listing == a_listing
     assert "secret-a" not in repr(a_listing)
@@ -146,6 +152,128 @@ def test_experts_api_is_authenticated_owner_scoped_and_keys_are_redacted(
     assert all(item["api_key"] == "***" for item in list_a.json() + list_b.json())
     assert isolated_registry.for_owner(A_ID).get("openai:gpt-private").config.api_key == "api-key-a"
     assert isolated_registry.for_owner(B_ID).get("openai:gpt-private").config.api_key == "api-key-b"
+
+
+def test_owner_can_update_without_key_echo_and_model_change_is_atomic(
+    client,
+    isolated_registry,
+):
+    created = client.post("/experts/keys", headers=A_HEADERS, json={
+        "provider_type": "openai",
+        "api_key": "owner-secret",
+        "model": "gpt-before",
+        "display_name": "Before",
+        "rpm": 10,
+    })
+    assert created.status_code == 200
+
+    updated = client.put(
+        "/experts/openai:gpt-before",
+        headers=A_HEADERS,
+        json={
+            "model": "gpt-after",
+            "display_name": "After",
+            "max_concurrent": 3,
+            "rpm": 20,
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["provider_id"] == "openai:gpt-after"
+    assert "owner-secret" not in updated.text
+    assert isolated_registry.for_owner(A_ID).get("openai:gpt-before") is None
+    provider = isolated_registry.for_owner(A_ID).get("openai:gpt-after")
+    assert provider is not None
+    assert provider.config.api_key == "owner-secret"
+    assert provider.config.display_name == "After"
+    assert provider.config.max_concurrent == 3
+    assert provider.config.rpm == 20
+
+    listing = client.get("/experts/available", headers=A_HEADERS).json()
+    assert [item["provider_id"] for item in listing] == ["openai:gpt-after"]
+    assert listing[0]["verification_status"] == "unverified"
+    assert listing[0]["api_key"] == "***"
+    assert client.put(
+        "/experts/openai:gpt-after",
+        headers=B_HEADERS,
+        json={"model": "stolen"},
+    ).status_code == 404
+
+
+def test_verification_records_safe_summary_and_never_calls_shared(
+    client,
+    isolated_registry,
+    monkeypatch,
+):
+    provider_id = isolated_registry.register(
+        _config("verify-owner", "verify-secret"),
+        owner_id=A_ID,
+    )
+    provider = isolated_registry.for_owner(A_ID).get(provider_id)
+    observed: dict = {}
+
+    async def successful_verify(messages):
+        observed["prompt"] = messages[0].content
+        return SimpleNamespace(content="OK")
+
+    monkeypatch.setattr(provider, "ainvoke", successful_verify)
+    verified = client.post(
+        f"/experts/{provider_id}/verify",
+        headers=A_HEADERS,
+    )
+    assert verified.status_code == 200, verified.text
+    assert verified.json()["verification_status"] == "verified"
+    assert verified.json()["verified_at"]
+    assert observed["prompt"] == "Reply with exactly OK."
+    assert "verify-secret" not in verified.text
+
+    listing = client.get("/experts/available", headers=A_HEADERS).json()[0]
+    assert listing["verification_status"] == "verified"
+    assert listing["last_checked_at"] == listing["verified_at"]
+    assert listing["verification_error_code"] is None
+
+    class AuthFailure(RuntimeError):
+        status_code = 401
+
+    async def failed_verify(messages):
+        raise AuthFailure("raw-provider-secret-detail")
+
+    monkeypatch.setattr(provider, "ainvoke", failed_verify)
+    failed = client.post(
+        f"/experts/{provider_id}/verify",
+        headers=A_HEADERS,
+    )
+    assert failed.status_code == 502
+    assert failed.json()["detail"]["code"] == "expert_verification_auth_failed"
+    assert "raw-provider-secret-detail" not in failed.text
+    failed_listing = client.get("/experts/available", headers=A_HEADERS).json()[0]
+    assert failed_listing["verification_status"] == "failed"
+    assert failed_listing["verified_at"] == listing["verified_at"]
+    assert failed_listing["verification_error_code"] == "expert_verification_auth_failed"
+
+    shared_id = isolated_registry.register(
+        _config("verify-shared", "shared-secret"),
+        shared=True,
+    )
+    assert client.post(
+        f"/experts/{shared_id}/verify",
+        headers=B_HEADERS,
+    ).status_code == 403
+
+
+def test_provider_catalog_is_an_authenticated_https_allowlist(client):
+    assert client.get("/experts/catalog").status_code == 401
+    response = client.get("/experts/catalog", headers=A_HEADERS)
+    assert response.status_code == 200
+    catalog = response.json()
+    assert {item["provider_type"] for item in catalog} == {
+        "openai", "gemini", "anthropic", "zhipu",
+    }
+    for item in catalog:
+        for field in ("docs_url", "console_url", "usage_url"):
+            parsed = urlsplit(item[field])
+            assert parsed.scheme == "https"
+            assert parsed.username is None and parsed.password is None
+            assert parsed.query == "" and parsed.fragment == ""
 
 
 def test_other_owner_cannot_select_or_delete_and_shared_is_read_only(

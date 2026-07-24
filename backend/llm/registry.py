@@ -198,6 +198,7 @@ class ExpertRegistry:
         self._shared_provider_ids: set[str] = set()  # internal storage IDs
         self._entry_owners: Dict[str, Optional[str]] = {}
         self._public_provider_ids: Dict[str, str] = {}
+        self._verification: Dict[str, Dict[str, Optional[str]]] = {}
         self._lock = Lock()
         self._seed_from_settings()
 
@@ -293,6 +294,12 @@ class ExpertRegistry:
             self._configs[storage_id] = config
             self._entry_owners[storage_id] = None if is_shared else owner_id
             self._public_provider_ids[storage_id] = provider_id
+            self._verification[storage_id] = {
+                "status": "platform_managed" if is_shared else "unverified",
+                "last_checked_at": None,
+                "verified_at": None,
+                "error_code": None,
+            }
             if is_shared:
                 self._shared_provider_ids.add(storage_id)
             else:
@@ -323,6 +330,7 @@ class ExpertRegistry:
             self._shared_provider_ids.discard(storage_id)
             self._entry_owners.pop(storage_id, None)
             self._public_provider_ids.pop(storage_id, None)
+            self._verification.pop(storage_id, None)
         if existed:
             logger.info("Unregistered expert")
         return existed
@@ -354,6 +362,140 @@ class ExpertRegistry:
             if self._shared_storage_id(provider_id) is not None:
                 return "shared_read_only"
         return "not_found"
+
+    def update_for_owner(
+        self,
+        owner_id: str,
+        provider_id: str,
+        *,
+        api_key: Optional[str],
+        model: str,
+        base_url: Optional[str],
+        display_name: Optional[str],
+        max_concurrent: int,
+        rpm: int,
+    ) -> Dict[str, str]:
+        """Replace one owner entry without exposing its current key.
+
+        ``api_key=None`` preserves the existing secret. A model change also
+        changes the public provider ID; replacement is atomic and refuses to
+        overwrite another existing owner entry.
+        """
+
+        storage_id = self._owner_storage_id(owner_id, provider_id)
+        with self._lock:
+            existing = self._configs.get(storage_id)
+            if existing is None:
+                if self._shared_storage_id(provider_id) is not None:
+                    return {"status": "shared_read_only"}
+                return {"status": "not_found"}
+
+            updated = existing.model_copy(deep=True)
+            if api_key is not None:
+                updated.api_key = api_key
+            updated.model = model
+            updated.base_url = base_url
+            updated.display_name = display_name
+            updated.max_concurrent = max_concurrent
+            updated.rpm = rpm
+            provider = build_provider(updated)
+            next_provider_id = provider.provider_id
+            next_storage_id = self._owner_storage_id(owner_id, next_provider_id)
+
+            if next_storage_id != storage_id and next_storage_id in self._configs:
+                return {
+                    "status": "conflict",
+                    "provider_id": next_provider_id,
+                }
+
+            owner_storage_ids = [
+                key for key, entry_owner in self._entry_owners.items()
+                if entry_owner == owner_id and key != storage_id
+            ]
+            global_owner_storage_ids = [
+                key for key, entry_owner in self._entry_owners.items()
+                if entry_owner is not None and key != storage_id
+            ]
+            config_bytes = self._config_resident_bytes(updated)
+            owner_bytes = sum(
+                self._config_resident_bytes(self._configs[key])
+                for key in owner_storage_ids
+                if key in self._configs
+            )
+            global_bytes = sum(
+                self._config_resident_bytes(self._configs[key])
+                for key in global_owner_storage_ids
+                if key in self._configs
+            )
+            if owner_bytes + config_bytes > self.MAX_CONFIG_BYTES_PER_OWNER:
+                raise RegistryQuotaError("expert_owner_bytes_limit", 413)
+            if global_bytes + config_bytes > self.MAX_OWNER_CONFIG_BYTES_GLOBAL:
+                raise RegistryQuotaError("expert_global_bytes_limit", 413)
+
+            if next_storage_id != storage_id:
+                self._providers.pop(storage_id, None)
+                self._configs.pop(storage_id, None)
+                self._entry_owners.pop(storage_id, None)
+                self._public_provider_ids.pop(storage_id, None)
+                self._verification.pop(storage_id, None)
+
+            self._providers[next_storage_id] = provider
+            self._configs[next_storage_id] = updated
+            self._entry_owners[next_storage_id] = owner_id
+            self._public_provider_ids[next_storage_id] = next_provider_id
+            self._verification[next_storage_id] = {
+                "status": "unverified",
+                "last_checked_at": None,
+                "verified_at": None,
+                "error_code": None,
+            }
+            return {
+                "status": "updated",
+                "provider_id": next_provider_id,
+            }
+
+    def owned_provider_for_verification(
+        self,
+        owner_id: str,
+        provider_id: str,
+    ) -> tuple[str, Optional[BaseProvider]]:
+        """Return only an owner's provider; shared entries remain read-only."""
+
+        storage_id = self._owner_storage_id(owner_id, provider_id)
+        with self._lock:
+            provider = self._providers.get(storage_id)
+            if provider is not None:
+                return "owned", provider
+            if self._shared_storage_id(provider_id) is not None:
+                return "shared_read_only", None
+            return "not_found", None
+
+    def record_verification_for_owner(
+        self,
+        owner_id: str,
+        provider_id: str,
+        *,
+        expected_provider: BaseProvider,
+        success: bool,
+        error_code: Optional[str] = None,
+    ) -> Optional[Dict[str, Optional[str]]]:
+        """Store a safe summary only if the verified config is still current."""
+
+        storage_id = self._owner_storage_id(owner_id, provider_id)
+        checked_at = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            if self._providers.get(storage_id) is not expected_provider:
+                return None
+            previous = self._verification.get(storage_id, {})
+            verified_at = checked_at if success else previous.get("verified_at")
+            summary = {
+                "status": "verified" if success else "failed",
+                "last_checked_at": checked_at,
+                "verified_at": verified_at,
+                "error_code": None if success else error_code,
+            }
+            self._verification[storage_id] = summary
+            return dict(summary)
 
     def for_owner(self, owner_id: str) -> ExpertRegistryView:
         if not owner_id:
@@ -548,6 +690,12 @@ class ExpertRegistry:
                 storage_id = visible[provider_id]
                 config = self._configs[storage_id]
                 is_shared = storage_id in self._shared_provider_ids
+                verification = self._verification.get(storage_id, {
+                    "status": "platform_managed" if is_shared else "unverified",
+                    "last_checked_at": None,
+                    "verified_at": None,
+                    "error_code": None,
+                })
                 out.append({
                     "provider_id": provider_id,
                     "provider_type": config.provider_type,
@@ -561,6 +709,10 @@ class ExpertRegistry:
                     "scope": "shared" if is_shared else "owner",
                     "is_shared": is_shared,
                     "editable": not is_shared,
+                    "verification_status": verification["status"],
+                    "last_checked_at": verification["last_checked_at"],
+                    "verified_at": verification["verified_at"],
+                    "verification_error_code": verification["error_code"],
                 })
             return out
 
