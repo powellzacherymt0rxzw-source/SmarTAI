@@ -9,7 +9,7 @@ import {
   type QuestionSummary,
   type ResultsModel,
   type StudentSummary,
-} from "@/components/tasks/ResultsLayout";
+} from "@/components/tasks/resultsModel";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import type { Correction } from "@/types";

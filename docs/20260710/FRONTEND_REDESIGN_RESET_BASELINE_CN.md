@@ -47,6 +47,8 @@
 > **2026-07-24 G06B 阶段工程记录：`/settings/byok` 已删除旧“已有配置卡 + 大表单卡”堆叠，按 Figma 09 扁平表格、Figma 14 四项指标和 Figma 17 恢复语义组合为标题/单一添加 CTA、配置摘要、模型矩阵及官方入口；添加、修改、显式验证和删除进入短对话框。enabled 与 verified 分开，header/工作台/BYOK 继续消费同一 `useExperts()`，用词统一为“已启用”而非在线。真实浏览器完成临时配置新增、key 留空修改、停用/启用同步、验证前额度提示和删除清理；未调用真实 provider。84 文件 visible-scope/lint/TypeScript、Vite `947 modules` build、`1440×900`/`390×844` PNG 和移动 `390/390` 无横向溢出通过。key 与验证状态仍为进程内存；详细记录见 `docs/20260724/G06B_MODELS_BYOK_FIGMA_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
 >
 > **2026-07-24 G00 阶段工程记录：`/login`、`/register`、`/student` 和会话恢复态已统一为 440px 居中单卡、44px 控件、12px 圆角、浅蓝灰背景与低对比静态教育线稿；无营销分栏、渐变、Emoji 或动画。登录支持安全同源回跳和本地化错误；邀请注册不再是假表单，并补齐邮箱绑定、过期清理、大小写无关及原子一次性消费。真实浏览器通过中英文、错误登录、`/history` 回跳、无效邀请码和 390px 无溢出；85 文件 scope/lint/TypeScript、Vite `953 modules` build、全量后端 `229 passed, 1 skipped`。用户/邀请码仍为内存，找回密码、邮件投递和学生工作区未伪造；详细记录见 `docs/20260724/G00_AUTH_ENTRY_FIGMA_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
+>
+> **2026-07-24 R5-08 阶段工程记录：仍可由通配深链打开的旧 `TaskUploadPage`、`TaskResultsPage`、`TaskQuestionDetailPage` 及其专属可见组件已删除，纯结果统计改放 `resultsModel.ts`；`/tasks/:id/upload/:kind` 统一由 `TaskEntryRedirect` 根据真实任务状态进入 canonical route。约 6,400 行旧可见实现移除，visible-scope `85 → 68`，Vite `924 modules`。真实临时草稿从 `/upload/legacy` 自动回到新版 `/upload/problems`，干净标签页控制台为 0，临时任务随后删除。详细记录见 `docs/20260724/R5_08_LEGACY_VISIBLE_UI_REMOVAL_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
 
 ---
 
@@ -803,7 +805,7 @@ Figma 的 17 帧是最低页面粒度。根据本轮反馈，两个最复杂区�
 - [~] R5-05 重做登录页，最后加入克制的 AI/教育品牌视觉。工程与浏览器验收完成：2026-07-24；认证入口使用 Figma 同系居中单卡和低对比静态教育线稿，登录、真实邀请注册、学生边界、会话恢复及中英文已统一；桌面/移动与全量后端回归通过，等待用户视觉确认。
 - [ ] R5-06 所有页面完成中英文 i18n。完成：
 - [ ] R5-07 完成键盘、焦点、对比度、缩放和 reduced-motion 检查。完成：
-- [ ] R5-08 删除被新页面替代的旧可见 UI 和死 route。完成：
+- [~] R5-08 删除被新页面替代的旧可见 UI 和死 route。工程与兼容流程验收完成：2026-07-24；旧上传长页、旧结果/题目详情及 17 个专属组件已删除，通配旧深链改为状态感知 canonical 跳转；visible-scope `85 → 68`、Vite `924 modules`，真实浏览器深链与控制台通过。文档中的旧文件名只保留为历史证据。
 
 ### Phase R6：最终验收
 

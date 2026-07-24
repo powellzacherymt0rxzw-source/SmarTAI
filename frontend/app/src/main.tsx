@@ -34,9 +34,6 @@ const TaskEntryRedirect = React.lazy(() =>
 const TaskMaterialsPage = React.lazy(() =>
   import("@/routes/tasks/TaskMaterialsPage").then((module) => ({ default: module.TaskMaterialsPage })),
 );
-const TaskUploadPage = React.lazy(() =>
-  import("@/routes/tasks/TaskUploadPage").then((module) => ({ default: module.TaskUploadPage })),
-);
 const AddProblemsPage = React.lazy(() =>
   import("@/routes/tasks/AddProblemsPage").then((module) => ({ default: module.AddProblemsPage })),
 );
@@ -136,7 +133,7 @@ const router = createBrowserRouter([
       { path: "tasks/:taskId/students/:studentId", element: routeElement(<StudentSubmissionOverviewPage />) },
       { path: "tasks/:taskId/students/:studentId/questions/:questionId", element: routeElement(<StudentAnswerReviewPage />) },
       { path: "tasks/:taskId/upload/submissions", element: routeElement(<TaskEntryRedirect />) },
-      { path: "tasks/:taskId/upload/:kind", element: routeElement(<TaskUploadPage />) },
+      { path: "tasks/:taskId/upload/:kind", element: routeElement(<TaskEntryRedirect />) },
       { path: "tasks/:taskId/problems/progress", element: routeElement(<ProblemRecognitionProgressPage />) },
       { path: "tasks/:taskId/questions", element: routeElement(<QuestionPreparationOverviewPage />) },
       { path: "tasks/:taskId/questions/import", element: routeElement(<QuestionMaterialImportPage />) },

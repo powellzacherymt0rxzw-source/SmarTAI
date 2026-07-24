@@ -9,7 +9,7 @@ import {
   type QuestionEntry,
   type QuestionSummary,
   type ResultsModel,
-} from "@/components/tasks/ResultsLayout";
+} from "@/components/tasks/resultsModel";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";

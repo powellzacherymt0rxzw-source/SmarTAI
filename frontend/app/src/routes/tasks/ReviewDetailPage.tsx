@@ -24,7 +24,7 @@ import {
   formatScore,
   type QuestionSummary,
   type StudentSummary,
-} from "@/components/tasks/ResultsLayout";
+} from "@/components/tasks/resultsModel";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";

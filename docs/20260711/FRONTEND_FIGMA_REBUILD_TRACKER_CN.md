@@ -8,7 +8,7 @@
 >
 > R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02、A-00、K00/K01、G05、G06 与 G00 记录位于 `docs/20260724/`。
 >
-> 当前阶段：G00 已完成登录、真实邀请注册和同系品牌视觉重写；中英文、错误登录、邀请码错误、受保护 route 回跳及桌面/移动均通过真实浏览器验收，全量后端 `229 passed, 1 skipped`。现进入全局产品化 QA，优先处理 i18n、可访问性、旧可见 UI/死 route 和“一页一个任务”；既有等待视觉确认状态不变。
+> 当前阶段：R5-08 已删除仍可被旧深链打开的遗留长页和被替代可见组件，旧 `/upload/:kind` 统一进入状态感知跳转；visible-scope 从 85 降为 68 个文件，Vite `924 modules`，真实临时任务深链回到新版 Q01 且干净标签页控制台为 0。现进入 R5-06 全局中英文审计；既有等待视觉确认状态不变。
 
 ---
 
@@ -363,6 +363,15 @@
 - 视觉证据：`G00-login-desktop.png`、`G00-login-mobile.png`，位于当前 Codex 临时可视化目录。
 - 数据边界：用户和邀请码仍为进程内存，JWT 未新增服务端撤销；找回密码、邮件投递和学生工作区没有后端合同，不放假入口。
 - 当前状态：实现与浏览器验收完成，等待用户视觉确认，故保持 `[~]`；详细记录见 `docs/20260724/G00_AUTH_ENTRY_FIGMA_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。下一阶段进入全局产品化 QA。
+
+### 5.7 R5-08 遗留可见 UI 与死 route 清理记录（2026-07-24）
+
+- 删除对象：旧 `TaskUploadPage`、`TaskResultsPage`、`TaskQuestionDetailPage`，以及只服务这些页面的 17 个可见组件文件；纯结果统计移到 `resultsModel.ts`。
+- 兼容策略：`/tasks/:taskId/upload/:kind` 不再渲染旧长页，统一交给 `TaskEntryRedirect` 根据真实状态进入 canonical route。
+- 代码结果：约 6,400 行旧可见实现删除；visible-scope `85 → 68`；旧三个页面 chunk 消失。
+- 工程证据：lint/scope/TypeScript、Vite `924 modules` build 与 `git diff --check` 通过。
+- 浏览器证据：本地临时草稿从 `/upload/legacy` 自动进入 `/upload/problems`；新标签页 DOM 为新版 Q01、控制台 `error/warn = 0`；临时任务随后删除。
+- 当前状态：代码与兼容流程完成；详细记录见 `docs/20260724/R5_08_LEGACY_VISIBLE_UI_REMOVAL_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。下一阶段 R5-06 做全局中英文审计。
 
 ---
 

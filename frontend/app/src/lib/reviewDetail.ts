@@ -1,4 +1,4 @@
-import type { QuestionSummary, StudentSummary } from "@/components/tasks/ResultsLayout";
+import type { QuestionSummary, StudentSummary } from "@/components/tasks/resultsModel";
 
 export type MatchKind = "exact" | "related";
 

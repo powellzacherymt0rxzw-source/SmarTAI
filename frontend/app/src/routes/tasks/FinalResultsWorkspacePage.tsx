@@ -20,7 +20,7 @@ import {
   type QuestionSummary,
   type ResultsModel,
   type StudentSummary,
-} from "@/components/tasks/ResultsLayout";
+} from "@/components/tasks/resultsModel";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";

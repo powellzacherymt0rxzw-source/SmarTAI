@@ -1,5 +1,5 @@
 import type { Correction } from "@/types";
-import type { QuestionSummary, ResultsModel, StudentSummary } from "@/components/tasks/ResultsLayout";
+import type { QuestionSummary, ResultsModel, StudentSummary } from "@/components/tasks/resultsModel";
 import { getExpertScoreSpread, type ReviewItem } from "@/components/tasks/resultsReviewModel";
 
 export const reviewCellKey = (studentId: string, questionId: string) => `${studentId}::${questionId}`;

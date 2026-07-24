@@ -9,7 +9,7 @@ import {
   LOW_CONFIDENCE_THRESHOLD,
   type QuestionSummary,
   type ResultsModel,
-} from "@/components/tasks/ResultsLayout";
+} from "@/components/tasks/resultsModel";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import type { Correction, ProblemInfo } from "@/types";

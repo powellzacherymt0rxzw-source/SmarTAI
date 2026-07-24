@@ -5,7 +5,7 @@ import {
   type QuestionSummary,
   type ResultsModel,
   type StudentSummary,
-} from "./ResultsLayout";
+} from "./resultsModel";
 
 export interface ReviewItem {
   student: StudentSummary;
