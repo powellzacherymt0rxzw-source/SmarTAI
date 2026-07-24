@@ -57,6 +57,8 @@
 > **2026-07-24 R6-01/02 阶段工程记录：全部 canonical 教师 route 已完成“一页一个任务”、页面长度、主操作和卡片层级审计；当前结构以独立上传/进度/总览/详情/批量处理/复核/分析页面取代旧长工作区，总览只分流、详情只处理一个对象。自然长滚动只保留给全部题目模式和真实数据列表/报告。可见 route/component 无遗留 `Card` / `WorkflowSection` 容器；BYOK、资料保留、图表限制和复核信号已删除实现层措辞，并新增用户可见开发者术语 lint 门禁。69 文件 lint/TypeScript 通过；本阶段复用既有逐页双尺寸证据、不调用模型或重复截图。详细记录见 `docs/20260724/R6_01_02_PAGE_FOCUS_AND_DENSITY_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
 >
 > **2026-07-24 R6-03/04 阶段工程记录：已逐项建立 17 张 Figma frame、canonical route 和既有桌面/移动证据清单，并只补缺失的 G03、Q01、Q08 `1440×900` 及 Q01/Q08 1280 风险图。Q01 真实显示 0 模型 BYOK 恢复门禁，Q08 真实显示题目准备前置门禁；临时草稿在同一流程删除，最终 Chromium 控制台 0 error/0 warning。精确验收同时修复缺失 favicon 造成的唯一 404。Q07、Q08 移动、R02 1440 和原生 200%/读屏仍留用户抽查，故不冒充全部用户验收。详细记录见 `docs/20260724/R6_03_04_VISUAL_EVIDENCE_AND_REFLOW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
+>
+> **2026-07-24 R6-05/06/07 最终工程回归：前端 69 个用户可见源文件 lint/TypeScript、Vite production build（`925 modules`）、后端全量 `229 passed, 1 skipped, 19 warnings` 通过；唯一 skip 为本机缺少可选 PyMuPDF。精确视口 Chromium 完成登录、新建任务、Q01 0 模型门禁、Q08 前置门禁、删除临时任务和返回工作台，最终控制台 0 error/0 warning。不存在任务/结果、BYOK、429/408/413/503、quota、timeout、retry、owner、CAS 与幂等均有浏览器或确定性合同证据。当前 0/0 模型，未消费真实 provider 重放完整识别，因此 R6-05/06 保持 `[~]`；R6-07 工程测试完成。详细记录见 `docs/20260724/R6_05_07_FINAL_ENGINEERING_REGRESSION_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
 
 ---
 
@@ -821,9 +823,9 @@ Figma 的 17 帧是最低页面粒度。根据本轮反馈，两个最复杂区�
 - [~] R6-02 每个页面通过长度、主操作数和卡片层级检查。工程审计完成：2026-07-24；用户数据以外不制造长滚动，无遗留 Card/WorkflowSection 和用户可见开发者待接术语，等待用户逐页视觉确认。
 - [~] R6-03 `1440x900` 截图逐帧对照 Figma。证据清单与 G03/Q01/Q08 缺口补图完成：2026-07-24；Q07、R02 1440 及用户主观确认仍待完成。
 - [~] R6-04 `1280x800`、`390x844`、`430x932` 响应式检查。工程检查完成：2026-07-24；既有 390 双尺寸、1280 核心 route 与 Q01/Q08 风险检查通过，430 无新增断点风险未重复截图；原生 200%/读屏待用户终验。
-- [ ] R6-05 题目和作答两条完整流程真实点击测试。完成：
-- [ ] R6-06 错误恢复、BYOK 门禁、API 超量、超时和重试检查。完成：
-- [ ] R6-07 typecheck、build、单元测试和 Playwright 流程测试通过。完成：
+- [~] R6-05 题目和作答两条完整流程真实点击测试。分段浏览器闭环与最终合同全量回归完成：2026-07-24；当前 0/0 模型，真实 provider 端到端识别未重放。
+- [~] R6-06 错误恢复、BYOK 门禁、API 超量、超时和重试检查。工程检查完成：2026-07-24；浏览器错误/门禁及 429/408/413/503、quota、timeout、retry/CAS 合同通过，真实供应商现场待测试 key。
+- [x] R6-07 typecheck、build、单元测试和 Playwright 流程测试通过。完成：2026-07-24；69 文件 lint/TypeScript、Vite `925 modules`、后端 `229 passed, 1 skipped` 及 Playwright CLI 临时任务流程通过。
 - [ ] R6-08 用户逐页产品验收通过。完成：
 
 在 R6-08 之前，不得再次宣称“前端已完成”或“只剩美工”。
