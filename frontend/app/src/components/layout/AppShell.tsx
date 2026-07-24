@@ -1,31 +1,26 @@
-import {
-  BrainCircuit,
-  BookOpenCheck,
-  ClipboardList,
-  History,
-  LayoutDashboard,
-  LogOut,
-  Menu,
-  PlusCircle,
-  Settings,
-  X,
-} from "lucide-react";
+import { ClipboardList, LogOut, Menu, X } from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useLogout } from "@/api/hooks";
+import { useCurrentUser, useLogout } from "@/api/hooks";
 import { Button } from "@/components/ui/Button";
+import { navForRole, homeForRole } from "@/components/layout/nav";
 import { useI18n } from "@/i18n/I18nProvider";
+import type { MessageKey } from "@/i18n/messages";
+import type { UserRole } from "@/types/auth";
 import { cn } from "@/lib/cn";
 
-const navItems = [
-  { to: "/", labelKey: "dashboard", icon: LayoutDashboard },
-  { to: "/tasks/new", labelKey: "newTask", icon: PlusCircle },
-  { to: "/history", labelKey: "history", icon: History },
-  { to: "/knowledge-base", labelKey: "knowledgeBase", icon: BookOpenCheck },
-  { to: "/experts", labelKey: "experts", icon: BrainCircuit },
-  { to: "/settings", labelKey: "settings", icon: Settings },
-] as const;
+const ROLE_LABEL: Record<UserRole, { zh: string; en: string }> = {
+  teacher: { zh: "教师工作台", en: "Teacher workspace" },
+  student: { zh: "学生工作台", en: "Student workspace" },
+  admin: { zh: "管理员工作台", en: "Admin workspace" },
+};
 
+/**
+ * Role-aware application shell. Navigation is resolved from the current user's
+ * role (admin / teacher / student) so each workspace sees only its own routes.
+ * The shell layout and styling are shared across roles; only the nav list and
+ * the role label change.
+ */
 export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { t } = useI18n();
@@ -97,23 +92,28 @@ export function AppShell() {
     </div>
   );
 }
-
 function ShellNav({ onNavigate }: { onNavigate?: () => void }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const currentUser = useCurrentUser();
+  const role = currentUser.data?.role ?? "teacher";
+  const items = navForRole(role);
   return (
     <div className="flex h-full flex-col">
-      <Link to="/" className="flex h-16 items-center gap-2 px-5 text-lg font-semibold">
+      <Link
+        to={homeForRole(role)}
+        className="flex h-16 items-center gap-2 px-5 text-lg font-semibold"
+      >
         <ClipboardList className="h-6 w-6 text-primary" />
         SmarTAI
       </Link>
       <nav className="grid gap-1 px-3">
-        {navItems.map((item) => {
+        {items.map((item) => {
           const Icon = item.icon;
           return (
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === "/"}
+              end={item.to === homeForRole(role)}
               onClick={onNavigate}
               className={({ isActive }) =>
                 cn(
@@ -125,13 +125,13 @@ function ShellNav({ onNavigate }: { onNavigate?: () => void }) {
               }
             >
               <Icon className="h-4 w-4" />
-              {t(item.labelKey)}
+              {t(item.labelKey as MessageKey)}
             </NavLink>
           );
         })}
       </nav>
       <div className="mt-auto border-t p-4 text-xs leading-5 text-muted-foreground">
-        当前仅展示教师端主流程；LMS、课程作业和学生端入口保持隐藏。
+        {locale === "en-US" ? ROLE_LABEL[role].en : ROLE_LABEL[role].zh}
       </div>
     </div>
   );

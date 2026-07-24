@@ -132,8 +132,9 @@ class GradingSkill(ABC):
         self.provider = provider
         self.reporter = reporter
         self.language = language
-        # Threaded down from api/tasks.py::_run_grade so KB retrieval can scope
-        # to the current task. None means "no task scope" — retriever returns [].
+        # The normalized adapter passes assignment_id through this existing
+        # algorithm parameter so knowledge retrieval stays assignment-scoped.
+        # None means "no assignment scope" and the retriever returns [].
         self.task_id = task_id
 
     @abstractmethod

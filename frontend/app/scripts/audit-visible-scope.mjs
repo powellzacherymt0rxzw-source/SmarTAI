@@ -1,5 +1,14 @@
 #!/usr/bin/env node
 
+// Visible-scope audit for the normalized learning workflow.
+//
+// The redesign makes courses/assignments/submissions/grading/review/release
+// first-class visible capabilities for admin/teacher/student roles, so the old
+// "hide courses / hide student workspace" rules are gone. Instead this audit
+// fails when any *legacy* Task surface remains: old /tasks routes, TaskStepper,
+// useTaskProgress, TaskStatus, old task API clients/types, the
+// StudentUnavailablePage, and text claiming courses/student access are hidden.
+
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -11,56 +20,54 @@ const scanEntries = [
   { relativePath: "src/main.tsx", required: true },
   { relativePath: "src/components", required: true },
   { relativePath: "src/routes", required: true },
+  { relativePath: "src/api", required: true },
+  { relativePath: "src/types", required: true },
+  { relativePath: "src/hooks", required: false },
   { relativePath: "src/i18n/messages.ts", required: false },
 ];
 
-const hiddenDisclaimerPattern =
-  /保持隐藏|隐藏预留|暂未开放|尚未开放|未开放|不可用|不展示|不提供|not available|hidden|unavailable/i;
-const futureCapabilityDisclaimerPattern =
-  /前端先行|前端清单|前端预览|待后端接入|后端.*待接入|不参与当前批改|不会.*参与批改|does not.*participate|backend.*pending|preview/i;
-
-const visibleTextRules = [
+// Legacy symbols/route segments that must not survive the redesign.
+const legacySymbolRules = [
   {
-    id: "visible-lms-integration",
-    description: "Do not show LMS/LTI/Canvas/Moodle integration as a visible capability.",
-    pattern: /\b(?:LMS|LTI|SSO|Canvas|Moodle)\b|学校\s*LMS|成绩回传/i,
-    allowHiddenDisclaimer: true,
+    id: "legacy-task-stepper",
+    description: "Legacy TaskStepper component must be removed.",
+    pattern: /\bTaskStepper\b/,
   },
   {
-    id: "visible-course-management",
-    description: "Do not show course management as a visible capability.",
-    pattern: /课程管理|课程作业|课程入口|课程列表|\bcourses?\b|\bclassroom\b/i,
-    allowHiddenDisclaimer: true,
+    id: "legacy-use-task-progress",
+    description: "Legacy useTaskProgress hook must be removed.",
+    pattern: /\buseTaskProgress\b/,
   },
   {
-    id: "visible-assignment-publishing",
-    description: "Do not show assignment publishing or LMS assignment flows.",
-    pattern: /作业发布|发布作业|学生提交入口|学生成绩页|\bassignments?\b|\bgradebook\b/i,
-    allowHiddenDisclaimer: true,
+    id: "legacy-task-status",
+    description: "Legacy TaskStatus type must be removed.",
+    pattern: /\bTaskStatus\b/,
   },
   {
-    id: "visible-student-workspace",
-    description: "Do not show a student workspace beyond the unavailable notice.",
-    pattern: /学生端工作台|学生端入口|学生端 Dashboard|student (?:dashboard|workspace|portal)/i,
-    allowHiddenDisclaimer: true,
+    id: "legacy-task-api-import",
+    description: "Legacy task/analytics/kb API clients must be removed.",
+    pattern: /from\s+["']@\/api\/(?:tasks|analytics|kb)["']/,
   },
   {
-    id: "visible-grading-language",
-    description: "Do not show grading-language selection.",
-    pattern: /批改语言|评语语言|学科语言|grading[-\s]?language|feedback[-\s]?language/i,
-    allowHiddenDisclaimer: false,
+    id: "legacy-task-types-import",
+    description: "Legacy task/analytics/kb/lms types must be removed.",
+    pattern: /from\s+["']@\/types\/(?:task|analytics|kb|lms)["']/,
   },
   {
-    id: "visible-global-kb",
-    description: "Do not show user/global knowledge base as implemented without a backend-pending disclaimer.",
-    pattern: /全局知识库|个人知识库|我的知识库|用户级知识库|跨任务复用|global knowledge base|personal knowledge base|user-scoped knowledge base/i,
-    allowHiddenDisclaimer: true,
-    allowFutureCapabilityDisclaimer: true,
+    id: "legacy-student-unavailable",
+    description: "StudentUnavailablePage must be removed (students have a real workspace now).",
+    pattern: /\bStudentUnavailablePage\b|学生端暂未开放/,
+  },
+  {
+    id: "legacy-hidden-course-claim",
+    description: "Do not claim courses/student access are hidden — they are core capabilities now.",
+    pattern: /课程.*隐藏|学生端.*隐藏|courses.*hidden|student.*hidden|暂未开放.*课程/i,
   },
 ];
 
-const forbiddenRouteSegments = ["courses", "course", "assignments", "assignment", "lms", "lti", "canvas", "moodle"];
-const allowedStudentUnavailableText = "学生端暂未开放";
+// Legacy /tasks routes are removed (Task 13 deleted the files); the audit now
+// fails if any /tasks route segment reappears in the router.
+const forbiddenRouteSegments = ["tasks"];
 
 function toRelative(filePath) {
   return path.relative(projectRoot, filePath).split(path.sep).join("/");
@@ -131,30 +138,7 @@ function isCommentOnlyLine(line) {
   return trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*") || trimmed.startsWith("*/");
 }
 
-function isAllowedVisibleText(relativePath, line, rule) {
-  if (relativePath === "src/routes/StudentUnavailablePage.tsx" && line.includes(allowedStudentUnavailableText)) {
-    return true;
-  }
-
-  if (
-    rule.id === "visible-global-kb" &&
-    (relativePath === "src/routes/KnowledgeBasePage.tsx" || relativePath === "src/routes/tasks/TaskSetupPage.tsx")
-  ) {
-    return true;
-  }
-
-  if (rule.allowHiddenDisclaimer && hiddenDisclaimerPattern.test(line)) {
-    return true;
-  }
-
-  if (rule.allowFutureCapabilityDisclaimer && futureCapabilityDisclaimerPattern.test(line)) {
-    return true;
-  }
-
-  return false;
-}
-
-function auditVisibleText(relativePath, content) {
+function auditLegacySymbols(relativePath, content) {
   const findings = [];
   const lines = content.split(/\r?\n/);
 
@@ -162,11 +146,10 @@ function auditVisibleText(relativePath, content) {
     if (isCommentOnlyLine(line)) {
       return;
     }
-
-    for (const rule of visibleTextRules) {
-      if (rule.pattern.test(line) && !isAllowedVisibleText(relativePath, line, rule)) {
+    for (const rule of legacySymbolRules) {
+      if (rule.pattern.test(line)) {
         findings.push({
-          type: "visible-text",
+          type: "legacy-symbol",
           file: relativePath,
           line: index + 1,
           rule: rule.id,
@@ -204,29 +187,13 @@ function auditRouter(content) {
     const line = lineNumberAt(content, match.index);
 
     for (const forbiddenSegment of forbiddenRouteSegments) {
-      if (segments.some((segment) => segment === forbiddenSegment || segment.includes(forbiddenSegment))) {
+      if (segments.some((segment) => segment === forbiddenSegment)) {
         findings.push({
           type: "route",
           file: "src/main.tsx",
           line,
           rule: "forbidden-route-segment",
-          message: `Router path must not expose ${forbiddenSegment}.`,
-          excerpt: `path: "${routePath}"`,
-        });
-      }
-    }
-
-    if (segments.includes("student") || segments.includes("students")) {
-      const hasAllowedStudentRoute = /\{\s*path\s*:\s*(["'`])\/student\1\s*,\s*element\s*:\s*<StudentUnavailablePage\s*\/>\s*\}/s.test(
-        content,
-      );
-      if (routePath !== "/student" || !hasAllowedStudentRoute) {
-        findings.push({
-          type: "route",
-          file: "src/main.tsx",
-          line,
-          rule: "student-route-must-be-unavailable",
-          message: "Student routes are only allowed for the unavailable notice page.",
+          message: `Router path must not expose legacy ${forbiddenSegment} route.`,
           excerpt: `path: "${routePath}"`,
         });
       }
@@ -260,7 +227,7 @@ for (const relativePath of missingRequired) {
 for (const filePath of files) {
   const relativePath = toRelative(filePath);
   const content = await readFile(filePath, "utf8");
-  findings.push(...auditVisibleText(relativePath, content));
+  findings.push(...auditLegacySymbols(relativePath, content));
 }
 
 const mainContent = await pathExists(mainFile).then((mainStat) => (mainStat ? readFile(mainFile, "utf8") : null));
@@ -276,6 +243,5 @@ if (findings.length > 0) {
 } else {
   console.log("PASS visible scope audit");
   console.log(`Scanned ${files.length} user-visible source files.`);
-  console.log("Checked Router paths for hidden LMS/course/assignment integrations.");
-  console.log("No visible LMS, course, assignment publishing, grading-language, or unsupported KB claims found.");
+  console.log("Checked for legacy task routes, components, hooks, types, and hidden-capability claims.");
 }

@@ -14,6 +14,8 @@ import logging
 from typing import Dict, List, Optional, Any
 from threading import Lock
 
+from fastapi import Depends, HTTPException
+
 from backend.config import settings
 from backend.models import ProviderConfig
 from backend.llm.providers import BaseProvider, build_provider
@@ -63,14 +65,15 @@ class ExpertRegistry:
                 model=settings.anthropic_model,
             ))
 
-    def register(self, config: ProviderConfig) -> str:
+    def register(self, config: ProviderConfig, provider_id: str | None = None) -> str:
         """Register or update a provider. Returns its provider_id."""
         provider = build_provider(config)
+        registry_id = provider_id or provider.provider_id
         with self._lock:
-            self._providers[provider.provider_id] = provider
-            self._configs[provider.provider_id] = config
-        logger.info(f"Registered expert: {provider.provider_id}")
-        return provider.provider_id
+            self._providers[registry_id] = provider
+            self._configs[registry_id] = config
+        logger.info("Registered expert configuration: %s", registry_id)
+        return registry_id
 
     def unregister(self, provider_id: str) -> bool:
         """Remove an expert. Returns True if it existed."""
@@ -149,3 +152,28 @@ def get_expert_registry() -> ExpertRegistry:
             if _registry is None:
                 _registry = ExpertRegistry()
     return _registry
+
+
+def _build_scoped_registry(current) -> ExpertRegistry:
+    registry = ExpertRegistry()
+    if current is None:
+        return registry
+    if not settings.provider_encryption_key:
+        return registry
+    try:
+        from backend.db.provider_repository import list_provider_configs
+        for stored in list_provider_configs(current.id, master_key=settings.provider_encryption_key):
+            registry.register(stored.config, provider_id=stored.id)
+    except ValueError as exc:
+        logger.error("Unable to load encrypted provider configurations for user %s", current.id)
+        raise HTTPException(503, detail="Saved provider credentials cannot be loaded.") from exc
+    return registry
+
+
+# Import auth after the registry class is defined so direct registry imports
+# remain lightweight and the dependency graph stays explicit.
+from backend.auth import get_optional_user  # noqa: E402
+
+
+def get_scoped_expert_registry(current=Depends(get_optional_user)) -> ExpertRegistry:
+    return _build_scoped_registry(current)

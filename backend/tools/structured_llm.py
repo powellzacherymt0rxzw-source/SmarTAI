@@ -155,7 +155,7 @@ def _fix_incomplete_json(json_str: str) -> str:
 def format_math_and_quotes(text: str) -> str:
     if not isinstance(text, str):
         return text
-    # Fix standard LaTeX delimiters to Reflex-compatible math markers
+    # Normalize standard LaTeX delimiters for the Markdown math renderer.
     text = re.sub(r'\\\[(.*?)\\\]', r'$$\1$$', text, flags=re.DOTALL)
     text = re.sub(r'\\\((.*?)\\\)', r'$\1$', text, flags=re.DOTALL)
     # Strip literal quotes hallucinated by LLM

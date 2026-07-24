@@ -3,8 +3,8 @@ ProgrammingSkill: grades programming questions (编程题).
 
 Strategy (4-tier sandbox-cases ladder):
 
-    1. teacher          → ProblemInfo.test_cases (uploaded via
-                          POST /tasks/{id}/upload_test_cases) is non-empty.
+    1. teacher          → ProblemInfo.test_cases from normalized assignment
+                          questions is non-empty.
                           Run sandbox; pass/fail tally is the score anchor.
     2. llm_generated    → No teacher cases AND no complexity-keyword hits
                           AND student code is Python.
