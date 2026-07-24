@@ -16,8 +16,8 @@ from backend.auth import (
 from backend.config import settings
 from backend.models import User
 from backend.state import (
+    consume_invite,
     find_user_by_username,
-    get_invite_store,
     register_user,
 )
 
@@ -43,16 +43,22 @@ class RegisterRequest(BaseModel):
 
 @router.post("/register")
 def register(req: RegisterRequest):
-    # Public registration is closed; only an invite code can create a new
-    # account. The frontend keeps the page as a facade so the link doesn't
-    # 404, but we surface a clear "closed" message here.
+    # Public registration is closed; only a valid one-time invitation can
+    # create an account.
     if settings.registration_closed and not req.invite_code:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail="注册暂未开放。如需测试请联系管理员获取受邀账号。",
         )
 
-    if find_user_by_username(req.username) is not None:
+    username = req.username.strip()
+    email = req.email.strip()
+    if len(username) < 3:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Username must contain at least 3 non-space characters",
+        )
+    if find_user_by_username(username) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Username already exists")
 
     role = req.role
@@ -60,23 +66,30 @@ def register(req: RegisterRequest):
 
     # Validate invite code if provided
     if req.invite_code:
-        invites = get_invite_store()
-        invite = invites.get(req.invite_code)
-        if invite is None:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid invite code")
+        outcome, invite = consume_invite(req.invite_code, email=email)
+        if outcome == "email_mismatch":
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Invite code is not valid for this email",
+            )
+        if outcome != "consumed" or invite is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired invite code",
+            )
         role = invite.get("role", role)
         course_id = invite.get("course_id")
+        email = str(invite.get("email") or email).strip()
         if course_id:
             course_ids = [course_id]
-        invites.pop(req.invite_code, None)  # one-time use
 
     if role not in ("teacher", "student"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Role must be teacher or student")
 
     user = User(
         id=f"u_{uuid.uuid4().hex[:10]}",
-        username=req.username,
-        email=req.email,
+        username=username,
+        email=email,
         role=role,  # type: ignore
         password_hash=hash_password(req.password),
         course_ids=course_ids,

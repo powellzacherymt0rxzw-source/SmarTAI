@@ -6,14 +6,14 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.auth import get_current_user, require_admin, require_teacher
 from backend.models import User
 from backend.state import (
-    get_invite_store,
     get_user_store,
     remove_user,
+    store_invite,
 )
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -26,10 +26,10 @@ class PatchUserRequest(BaseModel):
 
 
 class InviteRequest(BaseModel):
-    email: str = ""
+    email: str = Field(default="", max_length=254)
     role: str = "student"
     course_id: Optional[str] = None
-    expires_in_hours: int = 168  # 7 days
+    expires_in_hours: int = Field(default=168, ge=1, le=720)  # 1 hour–30 days
 
 
 @router.get("/")
@@ -80,11 +80,11 @@ def invite(req: InviteRequest, current: User = Depends(require_teacher)):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Role must be teacher or student")
     code = uuid.uuid4().hex[:10].upper()
     expires = time.time() + req.expires_in_hours * 3600
-    get_invite_store()[code] = {
+    store_invite(code, {
         "role": req.role,
         "course_id": req.course_id,
-        "email": req.email,
+        "email": req.email.strip(),
         "expires_at": expires,
         "invited_by": current.id,
-    }
+    })
     return {"invite_code": code, "expires_at": expires}

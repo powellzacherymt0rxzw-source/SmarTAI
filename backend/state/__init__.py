@@ -2144,6 +2144,7 @@ _submission_store: Dict[str, Submission] = {}
 _submissions_by_assignment_student: Dict[str, str] = {}  # f"{aid}:{sid}" → submission_id
 
 _invite_codes: Dict[str, Dict[str, Any]] = {}  # code → {role, course_id, email, expires_at}
+_invite_store_lock = RLock()
 
 
 def get_user_store() -> Dict[str, User]:
@@ -2230,3 +2231,43 @@ def index_submission(sub: Submission) -> None:
 
 def get_invite_store() -> Dict[str, Dict[str, Any]]:
     return _invite_codes
+
+
+def store_invite(code: str, invite: Dict[str, Any]) -> None:
+    """Store an invite under a lock so creation and consumption cannot race."""
+
+    with _invite_store_lock:
+        _invite_codes[code.strip().upper()] = dict(invite)
+
+
+def consume_invite(
+    code: str,
+    *,
+    email: str,
+    now: Optional[float] = None,
+) -> tuple[str, Optional[Dict[str, Any]]]:
+    """Atomically validate and consume one invitation.
+
+    Returns ``consumed``, ``not_found``, ``expired``, or ``email_mismatch``.
+    An email mismatch does not burn the invite, so the invited user can correct
+    a typo; expired invites are removed immediately.
+    """
+
+    import time
+
+    normalized_code = code.strip().upper()
+    normalized_email = email.strip().casefold()
+    checked_at = time.time() if now is None else now
+    with _invite_store_lock:
+        invite = _invite_codes.get(normalized_code)
+        if invite is None:
+            return "not_found", None
+        expires_at = invite.get("expires_at")
+        if not isinstance(expires_at, (int, float)) or expires_at <= checked_at:
+            _invite_codes.pop(normalized_code, None)
+            return "expired", None
+        invited_email = str(invite.get("email") or "").strip().casefold()
+        if invited_email and invited_email != normalized_email:
+            return "email_mismatch", None
+        consumed = _invite_codes.pop(normalized_code)
+        return "consumed", dict(consumed)
