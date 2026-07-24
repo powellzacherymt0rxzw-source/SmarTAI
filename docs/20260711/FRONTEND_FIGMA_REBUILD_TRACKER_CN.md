@@ -8,7 +8,7 @@
 >
 > R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02、A-00、K00/K01、G05、G06 与 G00 记录位于 `docs/20260724/`。
 >
-> 当前阶段：R5-08 已删除仍可被旧深链打开的遗留长页和被替代可见组件，旧 `/upload/:kind` 统一进入状态感知跳转；visible-scope 从 85 降为 68 个文件，Vite `924 modules`，真实临时任务深链回到新版 Q01 且干净标签页控制台为 0。现进入 R5-06 全局中英文审计；既有等待视觉确认状态不变。
+> 当前阶段：R5-06 全局中英文工程审计已完成；68 个可见源文件加入硬编码中文防回归，English 模式下工作台、历史、课程资料库、新建任务、BYOK 和 404 六个核心入口可见中文均为 0，Vite `924 modules`。现进入 R5-07 键盘、焦点、对比度、缩放与 reduced-motion 检查；既有等待视觉确认状态不变。
 
 ---
 
@@ -372,6 +372,14 @@
 - 工程证据：lint/scope/TypeScript、Vite `924 modules` build 与 `git diff --check` 通过。
 - 浏览器证据：本地临时草稿从 `/upload/legacy` 自动进入 `/upload/problems`；新标签页 DOM 为新版 Q01、控制台 `error/warn = 0`；临时任务随后删除。
 - 当前状态：代码与兼容流程完成；详细记录见 `docs/20260724/R5_08_LEGACY_VISIBLE_UI_REMOVAL_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。下一阶段 R5-06 做全局中英文审计。
+
+### 5.8 R5-06 全局中英文一致性记录（2026-07-24）
+
+- 修正范围：会话过期/角色门禁、404 与正式结果总览局部标题；其余中文字符串已按双语表、locale 分支、自然语言别名或用户数据分类复核。
+- 防回归：visible-scope audit 新增 `raw-unlocalized-chinese`，阻止中文 JSX 文本和中文可见 literal 属性直接进入界面。
+- 工程证据：68 个可见源文件 scope/lint/TypeScript、Vite `924 modules` build 与 `git diff --check` 通过。
+- 浏览器证据：真实 `tester01` 会话切换 English 后，`/`、`/history`、`/knowledge-base`、`/tasks/new`、`/settings/byok` 与 404 的整页可见中文片段均为 0；随后恢复中文偏好。
+- 当前状态：工程与浏览器验收完成，等待用户视觉确认，故保持 `[~]`；详细记录见 `docs/20260724/R5_06_GLOBAL_I18N_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。下一阶段 R5-07 做全局可访问性与缩放检查。
 
 ---
 

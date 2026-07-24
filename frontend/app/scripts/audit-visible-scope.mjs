@@ -18,6 +18,9 @@ const hiddenDisclaimerPattern =
   /保持隐藏|隐藏预留|暂未开放|尚未开放|未开放|不可用|不展示|不提供|not available|hidden|unavailable/i;
 const futureCapabilityDisclaimerPattern =
   /前端先行|前端清单|前端预览|待后端接入|后端.*待接入|不参与当前批改|不会.*参与批改|does not.*participate|backend.*pending|preview/i;
+const rawChineseJsxTextPattern = />\s*[\u3400-\u9fff][^<{]*</;
+const rawChineseLiteralPropPattern =
+  /\b(?:aria-label|title|description|placeholder|label|hint|message|alt)\s*=\s*(["'`])[^"'`\n]*[\u3400-\u9fff][^"'`\n]*\1/;
 
 const visibleTextRules = [
   {
@@ -218,6 +221,17 @@ function auditVisibleText(relativePath, content) {
   lines.forEach((line, index) => {
     if (isCommentOnlyLine(line)) {
       return;
+    }
+
+    if (rawChineseJsxTextPattern.test(line) || rawChineseLiteralPropPattern.test(line)) {
+      findings.push({
+        type: "visible-text",
+        file: relativePath,
+        line: index + 1,
+        rule: "raw-unlocalized-chinese",
+        message: "User-visible Chinese JSX text must select a locale-aware alternative.",
+        excerpt: line.trim().replace(/\s+/g, " "),
+      });
     }
 
     for (const rule of visibleTextRules) {

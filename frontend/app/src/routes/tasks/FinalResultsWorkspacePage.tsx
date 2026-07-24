@@ -280,11 +280,12 @@ function ResultsOverview({
   return (
     <section className="rounded-[10px] border bg-card p-5">
       <SectionHeading
-        locale={locale}
-        title="结果总览"
-        titleEn="Results overview"
-        description="正式结果的简洁班级摘要；详细信息分别进入独立分析页面。"
-        descriptionEn="A concise class summary of the formal result, with focused pages for details."
+        title={tx(locale, "结果总览", "Results overview")}
+        description={tx(
+          locale,
+          "正式结果的简洁班级摘要；详细信息分别进入独立分析页面。",
+          "A concise class summary of the formal result, with focused pages for details.",
+        )}
       />
 
       <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -464,11 +465,11 @@ function buildScoreDistribution(students: StudentSummary[]) {
   return buckets;
 }
 
-function SectionHeading({ locale, title, titleEn, description, descriptionEn }: { locale: Locale; title: string; titleEn: string; description: string; descriptionEn: string }) {
+function SectionHeading({ title, description }: { title: string; description: string }) {
   return (
     <div>
-      <h2 className="text-[20px] font-bold tracking-[-0.01em] text-foreground">{locale === "en-US" ? titleEn : title}</h2>
-      <p className="mt-1 text-[13px] text-muted-foreground">{locale === "en-US" ? descriptionEn : description}</p>
+      <h2 className="text-[20px] font-bold tracking-[-0.01em] text-foreground">{title}</h2>
+      <p className="mt-1 text-[13px] text-muted-foreground">{description}</p>
     </div>
   );
 }

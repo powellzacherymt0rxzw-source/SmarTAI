@@ -38,14 +38,21 @@ export function RequireTeacherSession({ children }: { children: ReactNode }) {
 
   if (currentUser.isError || !currentUser.data) {
     return (
-      <ResetSessionAndRedirect message="登录状态已过期，请重新登录。" returnTo={returnTo} />
+      <ResetSessionAndRedirect
+        message={zh ? "登录状态已过期，请重新登录。" : "Your session expired. Sign in again."}
+        returnTo={returnTo}
+      />
     );
   }
 
   if (currentUser.data.role !== "teacher" && currentUser.data.role !== "admin") {
     return (
       <ResetSessionAndRedirect
-        message="当前 React 前端仅开放教师端流程，请使用教师账号登录。"
+        message={
+          zh
+            ? "当前 React 前端仅开放教师端流程，请使用教师账号登录。"
+            : "This workspace is currently available to teachers only. Sign in with a teacher account."
+        }
         returnTo={returnTo}
       />
     );
