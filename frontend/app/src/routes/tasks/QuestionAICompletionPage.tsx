@@ -4,6 +4,7 @@ import { Link, useBeforeUnload, useBlocker, useNavigate, useParams, useSearchPar
 import { normalizeAPIError } from "@/api/client";
 import { useAICompletionPreflight, useExperts, useStartAICompletion } from "@/api/hooks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
+import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { aiCompletionText } from "@/lib/aiCompletionCopy";
@@ -221,16 +222,14 @@ export function QuestionAICompletionPage() {
       </section>
 
       {blocker.state === "blocked" ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/40 p-4" role="presentation">
-          <section role="alertdialog" aria-modal="true" aria-labelledby="leave-ai-completion-title" className="w-full max-w-md rounded-[10px] border bg-card p-5 shadow-2xl">
-            <h2 id="leave-ai-completion-title" className="text-lg font-bold text-foreground">{aiCompletionText(locale, "leaveTitle")}</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{aiCompletionText(locale, "leaveDescription")}</p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" className="h-9 rounded-[7px] border bg-card px-4 text-sm font-semibold hover:bg-muted" onClick={() => blocker.reset()}>{aiCompletionText(locale, "stay")}</button>
-              <button type="button" className="h-9 rounded-[7px] bg-danger px-4 text-sm font-semibold text-white hover:opacity-90" onClick={() => blocker.proceed()}>{aiCompletionText(locale, "leave")}</button>
-            </div>
-          </section>
-        </div>
+        <UnsavedChangesDialog
+          title={aiCompletionText(locale, "leaveTitle")}
+          description={aiCompletionText(locale, "leaveDescription")}
+          stayLabel={aiCompletionText(locale, "stay")}
+          leaveLabel={aiCompletionText(locale, "leave")}
+          onStay={() => blocker.reset()}
+          onLeave={() => blocker.proceed()}
+        />
       ) : null}
     </div>
   );

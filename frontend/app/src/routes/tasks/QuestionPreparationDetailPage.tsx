@@ -19,6 +19,7 @@ import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
+import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useI18n } from "@/i18n/I18nProvider";
 import { cn } from "@/lib/cn";
 import { isProgrammingProblem } from "@/lib/questionPreparation";
@@ -288,7 +289,6 @@ function SingleQuestionView({
   const [solutionCode, setSolutionCode] = useState(problem.solution_code ?? "");
   const [testCases, setTestCases] = useState<TestCase[]>(problem.test_cases ?? []);
   const [saved, setSaved] = useState(false);
-  const stayButtonRef = useRef<HTMLButtonElement>(null);
   const previousQuestionIdRef = useRef(problem.q_id);
 
   useEffect(() => {
@@ -331,12 +331,6 @@ function SingleQuestionView({
       event.returnValue = "";
     }
   }, [dirty]));
-
-  useEffect(() => {
-    if (blocker.state !== "blocked") return;
-    const frame = window.requestAnimationFrame(() => stayButtonRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, [blocker.state]);
 
   const save = async (confirm = false) => {
     const patch = section === "content"
@@ -450,16 +444,14 @@ function SingleQuestionView({
       </div> : null}
 
       {blocker.state === "blocked" ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/35 p-5" role="presentation">
-          <div role="alertdialog" aria-modal="true" aria-labelledby="leave-question-title" aria-describedby="leave-question-description" className="w-full max-w-sm rounded-[10px] border bg-card p-5 shadow-xl">
-            <h2 id="leave-question-title" className="text-base font-semibold text-foreground">{tx(locale, "离开且不保存？", "Leave without saving?")}</h2>
-            <p id="leave-question-description" className="mt-2 text-sm leading-5 text-muted-foreground">{tx(locale, "当前题目的修改尚未保存，切换页面后会丢失。", "This problem has unsaved changes that will be lost.")}</p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button ref={stayButtonRef} type="button" className="h-9 rounded-md border px-4 text-sm font-medium hover:bg-muted" onClick={() => blocker.reset()}>{tx(locale, "继续编辑", "Keep Editing")}</button>
-              <button type="button" className="h-9 rounded-md bg-danger px-4 text-sm font-medium text-white hover:opacity-90" onClick={() => blocker.proceed()}>{tx(locale, "放弃修改", "Discard Changes")}</button>
-            </div>
-          </div>
-        </div>
+        <UnsavedChangesDialog
+          title={tx(locale, "离开且不保存？", "Leave without saving?")}
+          description={tx(locale, "当前题目的修改尚未保存，切换页面后会丢失。", "This problem has unsaved changes that will be lost.")}
+          stayLabel={tx(locale, "继续编辑", "Keep Editing")}
+          leaveLabel={tx(locale, "放弃修改", "Discard Changes")}
+          onStay={() => blocker.reset()}
+          onLeave={() => blocker.proceed()}
+        />
       ) : null}
     </section>
   );

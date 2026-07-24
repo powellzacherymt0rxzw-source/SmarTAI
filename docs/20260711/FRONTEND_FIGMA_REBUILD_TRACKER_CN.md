@@ -8,7 +8,7 @@
 >
 > R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02、A-00、K00/K01、G05、G06 与 G00 记录位于 `docs/20260724/`。
 >
-> 当前阶段：R5-06 全局中英文工程审计已完成；68 个可见源文件加入硬编码中文防回归，English 模式下工作台、历史、课程资料库、新建任务、BYOK 和 404 六个核心入口可见中文均为 0，Vite `924 modules`。现进入 R5-07 键盘、焦点、对比度、缩放与 reduced-motion 检查；既有等待视觉确认状态不变。
+> 当前阶段：R5-07 全局可访问性与回流工程检查已完成；共享未保存确认统一焦点门禁，交互嵌套/button type/focus indicator 加入静态防回归，语义色达到 AA，reduced-motion 生效，并修复工作台 1280px 横向溢出。69 文件 lint/TypeScript、Vite `925 modules` 与核心 route 浏览器巡检通过。现进入 R6 全局最终验收收口；原生 200% 与读屏仍保留用户抽查，既有等待视觉确认状态不变。
 
 ---
 
@@ -380,6 +380,15 @@
 - 工程证据：68 个可见源文件 scope/lint/TypeScript、Vite `924 modules` build 与 `git diff --check` 通过。
 - 浏览器证据：真实 `tester01` 会话切换 English 后，`/`、`/history`、`/knowledge-base`、`/tasks/new`、`/settings/byok` 与 404 的整页可见中文片段均为 0；随后恢复中文偏好。
 - 当前状态：工程与浏览器验收完成，等待用户视觉确认，故保持 `[~]`；详细记录见 `docs/20260724/R5_06_GLOBAL_I18N_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。下一阶段 R5-07 做全局可访问性与缩放检查。
+
+### 5.9 R5-07 全局可访问性与回流记录（2026-07-24）
+
+- 键盘/焦点：五个任务编辑页改用共享未保存确认，提供安全初始焦点、焦点循环、Escape、焦点恢复和背景滚动锁；新建任务与课程资料库对话框补齐同等边界。
+- 语义/防回归：移除学生边界页嵌套交互，`Button` 默认安全 type；scope audit 新增交互嵌套、原生 button type 和 focus indicator 检查。
+- 对比度/动画：浅色 semantic accent/warning 调深，亮/暗主题普通正文语义色最低均达到 `4.5:1`；生产 CSS 已包含 `prefers-reduced-motion`。
+- 回流：自动巡检发现并修复工作台 1280px 右溢出 42px；修复后六个核心 route 页面级横向溢出为 0，既有 390px 双尺寸证据继续作为严格回流依据。
+- 工程证据：69 文件 scope/lint/TypeScript、Vite `925 modules` build 与 `git diff --check` 通过；核心 route 可访问名称缺失与重复 ID 均为 0。
+- 当前状态：工程与自动浏览器验收完成，等待用户原生 200%/读屏及视觉抽查，故保持 `[~]`；详细记录见 `docs/20260724/R5_07_ACCESSIBILITY_REFLOW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。下一阶段进入 R6 最终收口。
 
 ---
 
@@ -761,7 +770,7 @@
 - [ ] QA-07 图表类型、数据版本、空数据、单学生/单题和导出测试。
 - [~] QA-08 BYOK 用户隔离、密钥掩码、外链和缺失门禁测试。进展：2026-07-24；G06A owner/shared 隔离、key 保留/脱敏、验证错误/CAS 和官方 HTTPS 白名单已有定向/全量后端回归，G06B 新增/修改/启停/验证确认/删除/外链/header 同源已有真实浏览器链路。真实 provider 成功验证与持久化重启测试仍未完成。
 - [ ] QA-09 `1440x900` 逐帧对照 Figma；用户确认的扩展页按同一 token/组件检查。
-- [ ] QA-10 桌面/移动、键盘、焦点、对比度、缩放、读屏和 reduced-motion 检查。
+- [~] QA-10 桌面/移动、键盘、焦点、对比度、缩放、读屏和 reduced-motion 检查。工程与自动浏览器验收完成：2026-07-24；焦点门禁、AA 语义色、reduced-motion、1280/既有 390 回流及核心 route 可访问名称均通过。原生 200% 与 VoiceOver/NVDA 留待用户终验。
 - [ ] QA-11 删除新页面替代的旧可见 UI、死 route 和用户可见开发说明。
 - [ ] QA-12 用户逐页验收全部通过；在此之前不得宣称“前端已完成”或“只剩美工”。
 

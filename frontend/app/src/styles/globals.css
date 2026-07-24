@@ -11,8 +11,8 @@
   --border: 217 224 233;
   --primary: 37 99 235;
   --primary-foreground: 255 255 255;
-  --accent: 13 148 136;
-  --warning: 217 119 6;
+  --accent: 15 118 110;
+  --warning: 180 83 9;
   --danger: 220 38 38;
   --ring: 37 99 235;
 }
@@ -75,4 +75,19 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

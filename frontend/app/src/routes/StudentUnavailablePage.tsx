@@ -1,7 +1,6 @@
 import { GraduationCap } from "lucide-react";
 import { Link } from "react-router-dom";
 import { AuthCard, AuthFrame } from "@/components/auth/AuthFrame";
-import { Button } from "@/components/ui/Button";
 import { useI18n } from "@/i18n/I18nProvider";
 
 export function StudentUnavailablePage() {
@@ -21,10 +20,11 @@ export function StudentUnavailablePage() {
             ? "当前版本只开放教师批改工作台。你的学生账号不会获得教师任务或数据权限。"
             : "This release currently includes the teacher grading workspace only. Student accounts do not receive teacher task or data access."}
         </p>
-        <Link to="/login" className="mt-7 block">
-          <Button className="h-11 w-full" variant="secondary">
-            {zh ? "返回登录" : "Back to sign in"}
-          </Button>
+        <Link
+          to="/login"
+          className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-md border bg-card px-3 text-sm font-medium text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        >
+          {zh ? "返回登录" : "Back to sign in"}
         </Link>
       </AuthCard>
     </AuthFrame>

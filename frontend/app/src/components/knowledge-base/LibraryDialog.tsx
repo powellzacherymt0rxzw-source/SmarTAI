@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
 interface LibraryDialogProps {
   title: string;
@@ -19,9 +19,13 @@ export function LibraryDialog({
   onClose,
 }: LibraryDialogProps) {
   const dialogRef = useRef<HTMLElement>(null);
-  const titleId = `library-dialog-${title.replace(/\s+/g, "-")}`;
+  const titleId = useId();
+  const descriptionId = useId();
 
   useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     window.requestAnimationFrame(() => {
@@ -54,6 +58,7 @@ export function LibraryDialog({
     return () => {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", handleKeyDown);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
   }, [onClose]);
 
@@ -70,12 +75,13 @@ export function LibraryDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
         className="max-h-[calc(100vh-32px)] w-full max-w-[560px] overflow-y-auto rounded-[12px] border bg-card shadow-2xl"
       >
         <header className="flex items-start justify-between gap-4 border-b px-5 py-4">
           <div>
             <h2 id={titleId} className="text-lg font-semibold tracking-tight">{title}</h2>
-            {description ? <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p> : null}
+            {description ? <p id={descriptionId} className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p> : null}
           </div>
           <button
             type="button"

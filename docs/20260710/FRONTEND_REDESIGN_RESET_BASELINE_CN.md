@@ -51,6 +51,8 @@
 > **2026-07-24 R5-08 阶段工程记录：仍可由通配深链打开的旧 `TaskUploadPage`、`TaskResultsPage`、`TaskQuestionDetailPage` 及其专属可见组件已删除，纯结果统计改放 `resultsModel.ts`；`/tasks/:id/upload/:kind` 统一由 `TaskEntryRedirect` 根据真实任务状态进入 canonical route。约 6,400 行旧可见实现移除，visible-scope `85 → 68`，Vite `924 modules`。真实临时草稿从 `/upload/legacy` 自动回到新版 `/upload/problems`，干净标签页控制台为 0，临时任务随后删除。详细记录见 `docs/20260724/R5_08_LEGACY_VISIBLE_UI_REMOVAL_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
 >
 > **2026-07-24 R5-06 阶段工程记录：当前 68 个用户可见源文件已完成中英文静态审计，并新增硬编码中文 JSX/可见 literal 属性防回归；会话过期/角色门禁、404 和正式结果总览局部标题的英文遗漏已修正。真实 `tester01` 会话切到 English 后，工作台、历史、课程资料库、新建任务、BYOK 与 404 六个核心入口整页可见中文均为 0，巡检后恢复中文偏好。lint/TypeScript、Vite `924 modules` build 与 `git diff --check` 通过；用户输入和题目原文保持原语言。当前为“工程与浏览器验收完成，等待用户视觉确认”；详细记录见 `docs/20260724/R5_06_GLOBAL_I18N_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
+>
+> **2026-07-24 R5-07 阶段工程记录：五个任务编辑页已统一使用共享未保存确认，安全初始焦点、Tab 循环、Escape、焦点恢复和背景滚动锁完整；新建任务与课程资料库对话框补齐同等边界。学生边界页嵌套交互已移除，原生 button type、交互嵌套和 focus indicator 加入静态防回归。语义色调整后亮/暗主题普通文字最低对比度达到 `4.5:1`，全局 reduced-motion 已接入。浏览器巡检发现并修复工作台在 1280px 的 42px 横向溢出；修复后六个核心 route 无页面级溢出、可访问名称缺失与重复 ID 均为 0。69 文件 lint/TypeScript、Vite `925 modules` build 与 `git diff --check` 通过；原生 200% 和读屏保留用户抽查。详细记录见 `docs/20260724/R5_07_ACCESSIBILITY_REFLOW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
 
 ---
 
@@ -806,7 +808,7 @@ Figma 的 17 帧是最低页面粒度。根据本轮反馈，两个最复杂区�
 - [~] R5-04 重做用户名账户菜单、账户设置页、模型与 BYOK 页及退出登录；BYOK 门禁可直达配置并返回原步骤。工程与浏览器验收完成：2026-07-24；G05 已完成真实账户摘要、语言/主题与退出入口，G06A/G06B 已完成 owner-scoped 模型修改/显式验证合同、脱敏状态、官方链接、摘要矩阵和安全短对话框；`returnTo` 只接受同源 `/tasks/*`。仍为进程内存且等待用户视觉确认，故保持 `[~]`。
 - [~] R5-05 重做登录页，最后加入克制的 AI/教育品牌视觉。工程与浏览器验收完成：2026-07-24；认证入口使用 Figma 同系居中单卡和低对比静态教育线稿，登录、真实邀请注册、学生边界、会话恢复及中英文已统一；桌面/移动与全量后端回归通过，等待用户视觉确认。
 - [~] R5-06 所有页面完成中英文 i18n。工程与浏览器验收完成：2026-07-24；68 个可见源文件全量审计及硬编码中文防回归已接入，English 模式六个核心入口整页可见中文为 0；等待用户视觉确认。
-- [ ] R5-07 完成键盘、焦点、对比度、缩放和 reduced-motion 检查。完成：
+- [~] R5-07 完成键盘、焦点、对比度、缩放和 reduced-motion 检查。工程与自动浏览器验收完成：2026-07-24；共享焦点门禁、AA 语义色、reduced-motion、核心 route 语义检查及 1280/既有 390 回流通过；原生 200% 和读屏等待用户终验。
 - [~] R5-08 删除被新页面替代的旧可见 UI 和死 route。工程与兼容流程验收完成：2026-07-24；旧上传长页、旧结果/题目详情及 17 个专属组件已删除，通配旧深链改为状态感知 canonical 跳转；visible-scope `85 → 68`、Vite `924 modules`，真实浏览器深链与控制台通过。文档中的旧文件名只保留为历史证据。
 
 ### Phase R6：最终验收

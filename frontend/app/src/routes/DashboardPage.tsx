@@ -154,7 +154,7 @@ export function DashboardPage() {
 
       <section
         aria-label={t("dashboardMetrics")}
-        className="mt-[14px] grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-[repeat(4,250px)_40px_150px] xl:gap-5"
+        className="mt-[14px] grid grid-cols-2 gap-3 md:grid-cols-4 min-[1400px]:grid-cols-[repeat(4,250px)_40px_150px] min-[1400px]:gap-5"
       >
         {metrics.map((metric) => (
           <MetricCard
@@ -168,7 +168,7 @@ export function DashboardPage() {
         ))}
         <Link
           to="/tasks/new"
-          className="col-span-2 inline-flex h-10 items-center justify-center self-center rounded-lg bg-primary px-5 text-[14px] font-semibold text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 md:col-span-4 md:justify-self-end xl:col-span-1 xl:col-start-6 xl:row-start-1 xl:w-[150px]"
+          className="col-span-2 inline-flex h-10 items-center justify-center self-center rounded-lg bg-primary px-5 text-[14px] font-semibold text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 md:col-span-4 md:justify-self-end min-[1400px]:col-span-1 min-[1400px]:col-start-6 min-[1400px]:row-start-1 min-[1400px]:w-[150px]"
         >
           {t("dashboardCreateTask")}
         </Link>

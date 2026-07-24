@@ -24,6 +24,7 @@ import {
 } from "@/api/hooks";
 import { normalizeAPIError } from "@/api/client";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
+import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useI18n } from "@/i18n/I18nProvider";
 import { cn } from "@/lib/cn";
 import { materialImportText } from "@/lib/materialImportCopy";
@@ -341,16 +342,14 @@ export function QuestionMaterialImportPage() {
       </div>
 
       {blocker.state === "blocked" ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/40 p-4" role="presentation">
-          <section role="dialog" aria-modal="true" aria-labelledby="leave-import-title" className="w-full max-w-md rounded-[10px] border bg-card p-5 shadow-2xl">
-            <h2 id="leave-import-title" className="text-lg font-bold text-foreground">{materialImportText(locale, "leaveTitle")}</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{materialImportText(locale, "leaveDescription")}</p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" className="h-9 rounded-[7px] border bg-card px-4 text-sm font-semibold hover:bg-muted" onClick={() => blocker.reset()}>{materialImportText(locale, "stay")}</button>
-              <button type="button" className="h-9 rounded-[7px] bg-danger px-4 text-sm font-semibold text-white hover:opacity-90" onClick={() => blocker.proceed()}>{materialImportText(locale, "leave")}</button>
-            </div>
-          </section>
-        </div>
+        <UnsavedChangesDialog
+          title={materialImportText(locale, "leaveTitle")}
+          description={materialImportText(locale, "leaveDescription")}
+          stayLabel={materialImportText(locale, "stay")}
+          leaveLabel={materialImportText(locale, "leave")}
+          onStay={() => blocker.reset()}
+          onLeave={() => blocker.proceed()}
+        />
       ) : null}
     </div>
   );

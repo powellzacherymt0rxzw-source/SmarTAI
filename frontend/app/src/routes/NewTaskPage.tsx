@@ -81,6 +81,8 @@ export function NewTaskPage() {
     const previouslyFocused = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const focusFrame = window.requestAnimationFrame(() => stayButtonRef.current?.focus());
 
     function keepFocusInDialog(event: globalThis.KeyboardEvent) {
@@ -105,6 +107,7 @@ export function NewTaskPage() {
     document.addEventListener("keydown", keepFocusInDialog);
     return () => {
       window.cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", keepFocusInDialog);
       if (previouslyFocused && document.contains(previouslyFocused)) previouslyFocused.focus();
     };
@@ -263,8 +266,8 @@ export function NewTaskPage() {
             <h2 id="leave-new-task-title" className="text-base font-semibold text-foreground">{t("newTaskLeaveTitle")}</h2>
             <p id="leave-new-task-description" className="mt-2 text-sm leading-5 text-muted-foreground">{t("newTaskLeaveDescription")}</p>
             <div className="mt-5 flex justify-end gap-2">
-              <button ref={stayButtonRef} type="button" className="h-9 rounded-md border px-4 text-sm font-medium hover:bg-muted" onClick={() => blocker.reset()}>{t("newTaskStay")}</button>
-              <button ref={leaveButtonRef} type="button" className="h-9 rounded-md bg-danger px-4 text-sm font-medium text-white hover:opacity-90" onClick={() => blocker.proceed()}>{t("newTaskLeave")}</button>
+              <button ref={stayButtonRef} type="button" className="h-9 rounded-md border px-4 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" onClick={() => blocker.reset()}>{t("newTaskStay")}</button>
+              <button ref={leaveButtonRef} type="button" className="h-9 rounded-md bg-danger px-4 text-sm font-medium text-white outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" onClick={() => blocker.proceed()}>{t("newTaskLeave")}</button>
             </div>
           </div>
         </div>

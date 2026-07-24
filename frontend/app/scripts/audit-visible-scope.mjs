@@ -251,6 +251,52 @@ function auditVisibleText(relativePath, content) {
   return findings;
 }
 
+function auditInteractionMarkup(relativePath, content) {
+  const findings = [];
+  const nestedInteractivePattern =
+    /<(?:Link|a)\b[^>]*>\s*<(?:Button|button)\b|<(?:Button|button)\b[^>]*>\s*<(?:Link|a)\b/g;
+  const nativeButtonPattern = /<button\b[^>]*>/gs;
+  const interactiveTagPattern = /<(?:button|a|Link|input|select|textarea)\b[^>]*>/gs;
+  let match;
+
+  while ((match = nestedInteractivePattern.exec(content)) !== null) {
+    findings.push({
+      type: "interaction",
+      file: relativePath,
+      line: lineNumberAt(content, match.index),
+      rule: "nested-interactive-control",
+      message: "Links and buttons must not be nested inside one another.",
+      excerpt: match[0].replace(/\s+/g, " "),
+    });
+  }
+
+  while ((match = nativeButtonPattern.exec(content)) !== null) {
+    if (/\btype\s*=/.test(match[0])) continue;
+    findings.push({
+      type: "interaction",
+      file: relativePath,
+      line: lineNumberAt(content, match.index),
+      rule: "native-button-type",
+      message: "Native buttons must declare an explicit type.",
+      excerpt: match[0].replace(/\s+/g, " "),
+    });
+  }
+
+  while ((match = interactiveTagPattern.exec(content)) !== null) {
+    if (!match[0].includes("outline-none") || /\bfocus(?:-visible)?:/.test(match[0])) continue;
+    findings.push({
+      type: "interaction",
+      file: relativePath,
+      line: lineNumberAt(content, match.index),
+      rule: "missing-focus-indicator",
+      message: "Interactive controls that remove the default outline must add an explicit focus indicator.",
+      excerpt: match[0].replace(/\s+/g, " "),
+    });
+  }
+
+  return findings;
+}
+
 function routeSegments(routePath) {
   return routePath
     .toLowerCase()
@@ -340,6 +386,7 @@ for (const filePath of files) {
   const relativePath = toRelative(filePath);
   const content = await readFile(filePath, "utf8");
   findings.push(...auditVisibleText(relativePath, content));
+  findings.push(...auditInteractionMarkup(relativePath, content));
 }
 
 const mainContent = await pathExists(mainFile).then((mainStat) => (mainStat ? readFile(mainFile, "utf8") : null));

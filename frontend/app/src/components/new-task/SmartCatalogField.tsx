@@ -168,10 +168,11 @@ export function SmartCatalogField<T>({
         id={`${listId}-${index}`}
         key={getId(item)}
         type="button"
+        tabIndex={-1}
         role="option"
         aria-selected={selectedNow}
         disabled={isCreating}
-        className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm outline-none disabled:cursor-wait disabled:opacity-50 ${index === activeIndex ? "bg-blue-50 text-foreground dark:bg-slate-700" : "hover:bg-muted"}`}
+        className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-50 ${index === activeIndex ? "bg-blue-50 text-foreground dark:bg-slate-700" : "hover:bg-muted"}`}
         onMouseEnter={() => setActiveIndex(index)}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => { if (!isCreating) selectItem(item); }}
@@ -218,7 +219,7 @@ export function SmartCatalogField<T>({
             disabled={isCreating}
             value={query}
             placeholder={selected.length ? t("newTaskSearchAnother") : placeholder}
-            className="h-7 w-full bg-transparent pl-6 pr-7 text-[14px] text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-wait disabled:opacity-60"
+          className="h-7 w-full bg-transparent pl-6 pr-7 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
             onFocus={() => setOpen(true)}
             onChange={(event) => { onQueryChange(event.target.value); setCreateError(null); setConflictCandidates([]); setOpen(true); }}
             onKeyDown={handleKeyDown}
@@ -239,7 +240,7 @@ export function SmartCatalogField<T>({
           {relatedCandidates.length ? <div className="border-t px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("newTaskRelatedMatches")}</div> : null}
           {relatedCandidates.map(renderCandidate)}
           {canCreate ? (
-            <button id={`${listId}-${rows.length - 1}`} type="button" role="option" aria-selected="false" disabled={isCreating} className={`flex w-full items-center gap-2 border-t px-3 py-2 text-left text-sm font-medium text-primary outline-none disabled:cursor-wait disabled:opacity-50 ${activeIndex === rows.length - 1 ? "bg-blue-50 dark:bg-slate-700" : "hover:bg-muted"}`} onMouseEnter={() => setActiveIndex(rows.length - 1)} onMouseDown={(event) => event.preventDefault()} onClick={() => void createValue(false)}>
+            <button id={`${listId}-${rows.length - 1}`} type="button" tabIndex={-1} role="option" aria-selected="false" disabled={isCreating} className={`flex w-full items-center gap-2 border-t px-3 py-2 text-left text-sm font-medium text-primary outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-50 ${activeIndex === rows.length - 1 ? "bg-blue-50 dark:bg-slate-700" : "hover:bg-muted"}`} onMouseEnter={() => setActiveIndex(rows.length - 1)} onMouseDown={(event) => event.preventDefault()} onClick={() => void createValue(false)}>
               <Plus aria-hidden="true" className="h-4 w-4" />
               {isCreating ? t("newTaskCreating") : <>{t(resource === "course" ? "newTaskCreateCourse" : "newTaskCreateTag")} “{trimmedQuery}”</>}
             </button>
