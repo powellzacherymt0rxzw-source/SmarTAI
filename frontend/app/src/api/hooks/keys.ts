@@ -62,6 +62,7 @@ export const gradingSetupKeys = {
 export const expertKeys = {
   all: ["experts"] as const,
   list: () => ["experts", "list"] as const,
+  catalog: () => ["experts", "catalog"] as const,
 };
 
 export const analyticsKeys = {

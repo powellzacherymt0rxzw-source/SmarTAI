@@ -23,7 +23,7 @@ export function ModelStatusMenu({
   isFetching,
   onRetry,
 }: ModelStatusMenuProps) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const visibleExperts = experts.slice(0, 3);
   const countLabel = isLoading || isError ? "—" : `${enabledCount}/${experts.length}`;
 
@@ -118,7 +118,7 @@ export function ModelStatusMenu({
                       </p>
                     </div>
                     <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
-                      {t(expert.enabled ? "enabled" : "disabled")}
+                      {compactExpertStatus(expert, locale)}
                     </span>
                   </div>
                 ))
@@ -145,3 +145,14 @@ export function ModelStatusMenu({
   );
 }
 
+function compactExpertStatus(expert: ExpertConfig, locale: "zh-CN" | "en-US") {
+  if (!expert.enabled) return locale === "zh-CN" ? "已停用" : "Disabled";
+  const status = expert.verification_status ?? (expert.is_shared ? "platform_managed" : "unverified");
+  const labels = {
+    verified: ["已验证", "Verified"],
+    failed: ["验证失败", "Failed"],
+    platform_managed: ["平台托管", "Platform"],
+    unverified: ["未验证", "Unverified"],
+  } satisfies Record<string, [string, string]>;
+  return (labels[status] ?? labels.unverified)[locale === "zh-CN" ? 0 : 1];
+}
