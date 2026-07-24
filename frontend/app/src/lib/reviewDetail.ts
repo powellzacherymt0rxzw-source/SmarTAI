@@ -75,7 +75,7 @@ export function matchReviewItems(items: ReviewSearchItem[], rawQuery: string): R
 function semanticQuestionAliases(question: QuestionSummary): string {
   const source = normalize(`${question.type ?? ""} ${question.stem ?? ""}`);
   const aliases: string[] = [];
-  if (/积分|integral|integrat|微积分/.test(source)) aliases.push("积分题 calculus integration");
+  if (/积分|integral|integrat|微积分|\\int|∫/.test(source)) aliases.push("积分题 calculus integration");
   if (/证明|proof|prove/.test(source)) aliases.push("证明题 proof");
   if (/编程|代码|program|code/.test(source)) aliases.push("编程题 programming code");
   if (/计算|calculate|compute/.test(source)) aliases.push("计算题 calculation");

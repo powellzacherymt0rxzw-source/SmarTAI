@@ -8,7 +8,7 @@
 >
 > R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02、A-00、K00/K01、G05、G06 与 G00 记录位于 `docs/20260724/`。
 >
-> 当前阶段：R6-05/06/07 最终工程回归已完成。前端 69 文件 lint/TypeScript、Vite `925 modules`、后端 `229 passed, 1 skipped` 及本地 Chromium 登录→创建→Q01/Q08 门禁→清理流程通过。R6-05/06 因当前 0/0 模型未重放真实远端 provider 全流程，保持 `[~]`；R6-07 工程测试完成。按用户指令现在停止，不自动开始新阶段；R6-08 仍由用户逐页验收。
+> 当前阶段：R6-08A 关键页面直接视觉验收已完成。Q07、Q08 移动端与 R02 的剩余直接截图缺口已补齐；验收同时修复 TeX `\\int` 题干不能由“积分题”命中的有限语义别名缺口。前端 lint/TypeScript、Vite `925 modules`、R02/Q08 定向 `13 passed` 及双维独立 exact/related 交互通过。按用户指令完成本阶段后停止；R6-08 仍由用户逐页验收。
 
 ---
 
@@ -782,15 +782,24 @@
 - [x] R6-07 最终 69 文件 lint/TypeScript、Vite `925 modules`、后端 `229 passed, 1 skipped` 和 Playwright CLI 登录→创建→门禁→删除流程通过。
 - 详细记录：`docs/20260724/R6_05_07_FINAL_ENGINEERING_REGRESSION_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 
+### 9.4 R6-08A 关键页面直接视觉验收（2026-07-24）
+
+- [~] R6-03 的 Q07、R02 `1440×900` 直接缺图已补齐；两个页面均遵循 Figma 07/15 的版心、层级、圆角与克制配色，并保留用户确认的单页专精和双维分离覆盖。仍等待用户主观逐页确认，故保持 `[~]`。
+- [~] R6-04 的 Q08 `390×844` 移动缺图已补齐；完整页宽 390、无页面级横向溢出。原生 200% 与读屏待用户终验，故保持 `[~]`。
+- 交互验收发现并修复 TeX `\\int_0` 未进入“积分题”透明语义别名的问题；Bob exact → Q1 related 后学生维度保持不变。
+- 工程证据：69 文件 lint/TypeScript、Vite `925 modules` build、R02/Q08 定向 `13 passed, 5 warnings`。
+- 视觉证据：`Q07-question-tests-1440x900.png`、`Q08-material-import-mobile-390x844.png`、`Q08-material-import-mobile-full.png`、`R02-review-detail-1440x900.png`，位于 Codex 临时可视化目录 `r6-08a/`。
+- 详细记录：`docs/20260724/R6_08A_CRITICAL_PAGE_VISUAL_ACCEPTANCE_STAGE_CN.md`。R6-08 用户逐页验收继续保持 `[ ]`。
+
 - [x] QA-01 最终可见前端联合 TypeScript 检查通过；69 个用户可见源文件均进入编译。
 - [x] QA-02 最终 production build 通过；`925 modules transformed`。
 - [~] QA-03 题目、作答、批改、复核、正式结果的分段浏览器闭环和 229 项后端全量合同通过；真实 provider 端到端重放待测试 key。
 - [ ] QA-04 学期边界、标签去重、课程为空、智能匹配歧义测试。
-- [ ] QA-05 学生/题目双维筛选独立性和快捷键测试。
+- [x] QA-05 学生/题目双维筛选独立性和快捷键测试。完成：2026-07-24；R02 既有左右/上下键与输入焦点保护证据，加上 R6-08A 的 Bob exact、`积分题`→Q1 related 和双维 URL 保留已通过。
 - [ ] QA-06 自然语言筛选解释、清空、无匹配、大班级、限流和错误恢复测试。
 - [ ] QA-07 图表类型、数据版本、空数据、单学生/单题和导出测试。
 - [~] QA-08 BYOK 用户隔离、密钥掩码、外链和缺失门禁测试。进展：2026-07-24；G06A owner/shared 隔离、key 保留/脱敏、验证错误/CAS 和官方 HTTPS 白名单已有定向/全量后端回归，G06B 新增/修改/启停/验证确认/删除/外链/header 同源已有真实浏览器链路。真实 provider 成功验证与持久化重启测试仍未完成。
-- [~] QA-09 `1440x900` 逐帧对照 Figma；证据清单与三个缺口补图已完成，Q07/R02 直接截图及用户主观确认仍待完成。
+- [~] QA-09 `1440x900` 逐帧对照 Figma；工程直接截图缺口已于 R6-08A 清零，Q07/R02 1440 与 Q08 390 已补；用户主观逐页确认仍待完成。
 - [~] QA-10 桌面/移动、键盘、焦点、对比度、缩放、读屏和 reduced-motion 检查。工程与自动浏览器验收完成：2026-07-24；焦点门禁、AA 语义色、reduced-motion、1280/既有 390 回流及核心 route 可访问名称均通过。原生 200% 与 VoiceOver/NVDA 留待用户终验。
 - [x] QA-11 新页面替代的旧可见 UI 已删除，旧深链只做 canonical 跳转；用户可见开发说明已清理并由 lint 门禁防回归。
 - [ ] QA-12 用户逐页验收全部通过；在此之前不得宣称“前端已完成”或“只剩美工”。
