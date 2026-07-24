@@ -24,6 +24,11 @@ const rawChineseLiteralPropPattern =
 
 const visibleTextRules = [
   {
+    id: "visible-developer-jargon",
+    description: "Do not expose implementation-pending or in-memory developer language to teachers.",
+    pattern: /待后端|后端.{0,12}待接入|前端先行|前端预览|内存索引|in-memory (?:index|state)|backend.{0,30}pending|server persistence.{0,30}pending/i,
+  },
+  {
     id: "visible-lms-integration",
     description: "Do not show LMS/LTI/Canvas/Moodle integration as a visible capability.",
     pattern: /\b(?:LMS|LTI|SSO|Canvas|Moodle)\b|学校\s*LMS|成绩回传/i,

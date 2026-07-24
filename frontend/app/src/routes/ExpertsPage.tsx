@@ -212,8 +212,8 @@ export function ExpertsPage() {
           </h1>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
             {zh
-              ? "管理你自己的模型密钥、启用状态与连通性。密钥只提交给后端，不会在页面回显。"
-              : "Manage your model keys, enabled state, and connectivity. Keys are sent only to the backend and are never displayed again."}
+              ? "管理你自己的模型密钥、启用状态与连通性。密钥只用于模型请求，保存后不会在页面回显。"
+              : "Manage your model keys, enabled state, and connectivity. Keys are used only for model requests and are never displayed again."}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

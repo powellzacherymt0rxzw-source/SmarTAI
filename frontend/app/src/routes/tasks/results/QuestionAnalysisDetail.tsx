@@ -385,7 +385,7 @@ function buildReviewSignals(question: QuestionSummary, locale: Locale): CountedS
   for (const entry of question.entries) {
     const confidence = normalizeConfidence(entry.correction.confidence);
     if (confidence !== null && confidence < 0.65) add(tx(locale, "低置信度", "Low confidence"));
-    if (entry.correction.requires_human_review) add(tx(locale, "后端标记需人工复核", "Backend requested human review"));
+    if (entry.correction.requires_human_review) add(tx(locale, "系统标记需人工复核", "System requested human review"));
     for (const reason of entry.correction.review_reasons ?? []) {
       if (reason !== "high_indecisiveness" && reason !== "score_spread_high") add(reviewReasonLabel(reason, locale));
     }

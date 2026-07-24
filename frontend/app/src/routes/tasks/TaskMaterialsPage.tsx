@@ -47,10 +47,10 @@ const COPY = {
   chunks: ["个片段", "chunks"],
   delete: ["删除", "Delete"],
   deleting: ["删除中…", "Deleting…"],
-  boundaryTitle: ["存储边界", "Storage boundary"],
+  boundaryTitle: ["资料保留说明", "Document retention"],
   boundaryDescription: [
-    "资料只用于当前任务的检索增强；当前索引保存在内存中，后端重启或任务删除后可能失效。",
-    "Documents are used only for this task. The current in-memory index may be lost after a backend restart or task deletion.",
+    "资料只用于当前任务；试用环境可能在服务维护或任务删除后清空，请保留本地原文件。",
+    "Documents are used only for this task. Trial data may be cleared during service maintenance or after task deletion, so keep the original files.",
   ],
   back: ["返回批改设置", "Back to Grading Setup"],
   missingTask: ["缺少任务 ID，无法管理任务资料。", "The task ID is missing, so task documents cannot be managed."],
