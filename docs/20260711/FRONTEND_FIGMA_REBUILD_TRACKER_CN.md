@@ -6,9 +6,9 @@
 >
 > 视觉与页面结构以 `docs/20260710/figma/` 的 17 张导出图为基准；功能、状态和边界必须同时对照 2026-07-03 计划、2026-07-04 完整设计记录及其附录原话、2026-07-10 最新纠偏基线和 2026-07-11 用户补充。
 >
-> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02 与 A-00 记录位于 `docs/20260724/`。
+> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 当前阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02、A-00、K00/K01 与 G05 记录位于 `docs/20260724/`。
 >
-> 当前阶段：K01 已按 Figma 09 从头替换 `/knowledge-base`，接入 K00 真实文件/分组 API；搜索、分类、组内视图、上传/管理弹窗、中英文和双尺寸浏览器验收完成，等待用户视觉确认。用户已要求当前阶段结束后停止，不进入 G05。`auto-research-stateprep-v2` 已完成并空闲；官方只读接口显示周额度剩余 23%，43% 起点至当前 14 个独立阶段平均约 1.43 个百分点/阶段，仍高于 15% 硬保留线 8 个百分点。既有等待确认状态不变。
+> 当前阶段：G05 已从最右侧用户名菜单进入 `/settings/account`，按 Figma 09/14 的轻量标题、单层面板、克制状态色和宽行控件语言重写；真实账号资料、语言、主题、用户名菜单与退出入口通过中英文和双尺寸浏览器验收。用户已要求持续推进，现进入 G06 模型与 BYOK；既有等待视觉确认状态不变。
 
 ---
 
@@ -337,7 +337,7 @@
 ### G-04 课程资料库、G-05 账户设置、G-06 模型与 BYOK、G-00 登录
 
 - [~] G04-01 课程资料库使用 Figma 09 结构，支持真实文件、资料分组、标签、搜索和跨任务选择。K00/K01 工程完成：2026-07-24；真实解析上传/去重、分组/标签/课程、确定性 exact/related 查找、owner 隔离、任务引用与删除保护均已接入；可见页按 Figma 09 的标题动作、54px 搜索、分类行、扁平表格和底部概况从头重写。lint/typecheck、`945 modules` build、后端 `222 passed, 1 skipped`、1440×900/390×844 浏览器及真实交互通过；等待用户视觉确认，故保持 `[~]`。详细记录见 `docs/20260724/K00_COURSE_LIBRARY_BACKEND_STAGE_DECISION_AND_ACCEPTANCE_CN.md` 与 `K01_COURSE_LIBRARY_FIGMA_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
-- [ ] G05-01 账户设置从用户名菜单进入。
+- [~] G05-01 账户设置从用户名菜单进入。工程与浏览器验收完成：2026-07-24；账户设置、模型与 BYOK、退出登录继续只存在于最右侧用户名菜单，不占顶部主导航。`/settings/account` 已移除后端 URL、CPU、内存等开发者信息，改为真实会话账号摘要、浏览器本地语言/主题偏好和明确能力边界；中英文切换、1440×900/390×844 无横向溢出、lint/typecheck 与 Vite `946 modules` build 通过。等待用户视觉确认，故保持 `[~]`；详细记录见 `docs/20260724/G05_ACCOUNT_SETTINGS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 - [ ] G06-01 BYOK 页面支持添加、验证、修改、启用/停用和删除 key。
 - [ ] G06-02 展示官方 provider 官网/控制台/用量页面链接。
 - [ ] G06-03 Dashboard 模型摘要与 BYOK 页面使用同一真实状态源。
