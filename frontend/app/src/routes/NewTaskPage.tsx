@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, LoaderCircle, Save } from "lucide-react";
+import { ArrowRight, LoaderCircle, Save } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -44,6 +44,7 @@ export function NewTaskPage() {
   const [searchParams] = useSearchParams();
   const isEditing = Boolean(taskId);
   const returnTo = safeTaskReturnPath(searchParams.get("returnTo"), taskId);
+  const reachableStep = isEditing ? taskStepFromPath(returnTo) : 0;
   const semesterOptions = useMemo(() => buildSemesterOptions(), []);
   const initialSemester = useMemo(() => {
     const current = getCurrentSemesterId();
@@ -249,8 +250,8 @@ export function NewTaskPage() {
   if (isEditing && (taskQuery.isError || coursesQuery.isError || tagsQuery.isError)) {
     return (
       <div className="w-full max-w-[1300px]">
-        <TaskMetadataHeading editing returnTo={returnTo} returnState={location.state} />
-        <NewTaskStepper currentStep={0} />
+        <TaskMetadataHeading editing />
+        <NewTaskStepper currentStep={0} reachableStep={reachableStep} returnState={location.state} />
         <div role="alert" className="mx-auto mt-[45px] max-w-[900px] rounded-[8px] border bg-card px-6 py-12 text-center">
           <p className="text-base font-semibold text-foreground">{t("newTaskEditLoadError")}</p>
           <Link to={returnTo} state={location.state} replace className="mt-4 inline-flex h-9 items-center rounded-[7px] border px-4 text-sm font-semibold text-foreground hover:bg-muted">
@@ -264,8 +265,8 @@ export function NewTaskPage() {
   if (isEditing && !editHydrated) {
     return (
       <div className="w-full max-w-[1300px]">
-        <TaskMetadataHeading editing returnTo={returnTo} returnState={location.state} />
-        <NewTaskStepper currentStep={0} />
+        <TaskMetadataHeading editing />
+        <NewTaskStepper currentStep={0} reachableStep={reachableStep} returnState={location.state} />
         <div className="mx-auto mt-[45px] flex min-h-[280px] max-w-[900px] items-center justify-center rounded-[8px] border bg-card text-sm text-muted-foreground">
           <LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
           {t("newTaskEditLoading")}
@@ -276,8 +277,8 @@ export function NewTaskPage() {
 
   return (
     <div className="w-full max-w-[1300px]">
-      <TaskMetadataHeading editing={isEditing} returnTo={returnTo} returnState={location.state} />
-      <NewTaskStepper currentStep={0} />
+      <TaskMetadataHeading editing={isEditing} />
+      <NewTaskStepper currentStep={0} reachableStep={reachableStep} returnState={location.state} />
 
       <form id="new-task-form" onSubmit={handleSubmit} className="mt-[35px] min-h-[510px] max-w-full rounded-[8px] border bg-card p-5 sm:p-10 xl:ml-[200px] xl:w-[900px] xl:px-[49px] xl:pb-[39px] xl:pt-[39px]">
         <div className="grid gap-5 xl:block">
@@ -389,32 +390,28 @@ export function NewTaskPage() {
 
 function TaskMetadataHeading({
   editing,
-  returnTo,
-  returnState,
 }: {
   editing: boolean;
-  returnTo: string;
-  returnState?: unknown;
 }) {
   const { t } = useI18n();
   return (
-    <div className="flex min-h-9 items-center justify-between gap-4">
+    <div className="flex min-h-9 items-center gap-4">
       <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
         {t(editing ? "newTaskEditTitle" : "newTaskTitle")}
       </h1>
-      {editing ? (
-        <Link
-          to={returnTo}
-          state={returnState}
-          replace
-          className="inline-flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-          {t("newTaskBackToCurrentTask")}
-        </Link>
-      ) : null}
     </div>
   );
+}
+
+function taskStepFromPath(pathname: string) {
+  if (pathname.includes("/results")) return 7;
+  if (pathname.includes("/review")) return 6;
+  if (pathname.includes("/grading/progress")) return 5;
+  if (pathname.includes("/grading-setup") || pathname.includes("/grading/preflight")) return 4;
+  if (pathname.includes("/submissions") || pathname.includes("/students/")) return 3;
+  if (pathname.includes("/questions")) return 2;
+  if (pathname.includes("/upload/problems") || pathname.includes("/problems/progress")) return 1;
+  return 0;
 }
 
 function taskMetadataSignature(patch: TaskMetadataPatch): string {

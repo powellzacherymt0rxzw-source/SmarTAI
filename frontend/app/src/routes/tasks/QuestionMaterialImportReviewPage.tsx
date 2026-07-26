@@ -146,7 +146,7 @@ export function QuestionMaterialImportReviewPage() {
           {materialImportText(locale, "backToOverview")}
         </Link>
       </div>
-      <NewTaskStepper currentStep={1} />
+      <NewTaskStepper currentStep={2} />
 
       <section className="mt-[30px] min-w-0 overflow-hidden rounded-[10px] border bg-card">
         <div className="flex min-h-[64px] flex-col gap-2 border-b px-5 py-3 sm:flex-row sm:items-center sm:justify-between">

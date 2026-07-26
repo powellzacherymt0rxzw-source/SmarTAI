@@ -144,7 +144,7 @@ function ProgressFrame({ locale, children }: { locale: Locale; children: ReactNo
   return (
     <div className="min-w-0 w-full max-w-[1300px]">
       <h1 className="break-words text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">{aiCompletionText(locale, "progressTitle")}</h1>
-      <NewTaskStepper currentStep={1} />
+      <NewTaskStepper currentStep={2} />
       <div className="mx-auto mt-[45px] w-full max-w-[800px]">{children}</div>
     </div>
   );

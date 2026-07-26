@@ -3,6 +3,7 @@ import type { TaskMutationResponse } from "./task";
 export type ProblemSourceMode = "upload" | "library";
 export type ProblemSourceScope = "course" | "all";
 export type ProblemStructureMode = "organized" | "extract_from_source";
+export type PreparationSourceRole = "problem" | "reference_answer" | "rubric" | "programming_tests";
 
 export interface ProblemLibraryMaterial {
   material_id: string;
@@ -48,6 +49,7 @@ export interface ProblemSourcePreflightResponse {
   status: "ready" | string;
   source_token: string;
   source: ProblemSourceDescriptor | string;
+  role?: PreparationSourceRole;
   structure_mode: ProblemStructureMode;
   requires_confirmation: boolean;
   candidate_summary: ProblemCandidateSummary;
@@ -58,6 +60,7 @@ export interface ProblemSourcePreflightResponse {
 export interface ProblemSourcePreflightInput {
   taskId: string;
   mode: ProblemSourceMode;
+  role?: PreparationSourceRole;
   file?: File | null;
   libraryMaterialId?: string | null;
   structureMode: ProblemStructureMode;
@@ -73,3 +76,14 @@ export interface StartProblemExtractionInput {
 }
 
 export type StartProblemExtractionResponse = TaskMutationResponse;
+
+export interface StartQuestionPreparationInput {
+  taskId: string;
+  sourceTokens: string[];
+  expectedWorkflowRevision: number;
+  replaceConfirmed?: boolean;
+}
+
+export type StartQuestionPreparationResponse = TaskMutationResponse & {
+  source_count?: number;
+};

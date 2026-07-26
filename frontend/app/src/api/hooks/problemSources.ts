@@ -32,3 +32,16 @@ export function useStartProblemExtraction() {
     },
   });
 }
+
+export function useStartQuestionPreparation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: problemSourcesApi.startQuestionPreparation,
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: taskKeys.all });
+      queryClient.invalidateQueries({ queryKey: taskKeys.detail(variables.taskId) });
+      queryClient.invalidateQueries({ queryKey: taskKeys.state(variables.taskId) });
+    },
+  });
+}

@@ -19,6 +19,10 @@ export interface TestCase {
   input: string;
   expected_output: string;
   description: string;
+  title?: string;
+  visibility?: "example" | "hidden";
+  purpose?: "normal" | "boundary" | "error" | "performance" | "other";
+  io_mode?: "stdin" | "function";
   source: "teacher" | "llm_generated";
   sandbox_feasible: boolean;
   function_name?: string | null;
@@ -38,6 +42,18 @@ export interface ProblemInfo {
   test_cases?: TestCase[] | null;
   material_provenance?: Partial<Record<"criterion" | "reference_answer" | "test_cases", MaterialFieldProvenance>>;
   ai_completion_provenance?: Partial<Record<AICompletionTarget, AICompletionProvenance>>;
+  preparation_issues?: PreparationIssue[];
+}
+
+export interface PreparationIssue {
+  issue_id: string;
+  q_id?: string | null;
+  field: "stem" | "answer" | "rubric" | "programming_tests" | "source";
+  code: "low_confidence" | "source_conflict" | "ai_source_conflict" | "ambiguous_question_match" | "unmapped_source_content" | "parse_anomaly" | "generation_failed" | "rubric_step_reference_conflict" | "invalid_test_case" | "reference_solution_failed_case";
+  severity: "info" | "warning" | "blocking";
+  source_ids?: string[];
+  details?: Record<string, unknown>;
+  status: "open" | "acknowledged" | "resolved";
 }
 
 export interface MaterialFieldProvenance {

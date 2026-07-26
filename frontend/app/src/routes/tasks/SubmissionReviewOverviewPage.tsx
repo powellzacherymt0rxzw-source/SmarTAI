@@ -78,7 +78,7 @@ export function SubmissionReviewOverviewPage() {
       <h1 className="min-h-9 text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
         {t("submissionReviewTitle")}
       </h1>
-      <NewTaskStepper currentStep={2} />
+      <NewTaskStepper currentStep={3} />
 
       <section className="mt-[22px] min-w-0" aria-labelledby="submission-review-matrix">
         <h2 id="submission-review-matrix" className="sr-only">{t("submissionReviewMatrixLabel")}</h2>

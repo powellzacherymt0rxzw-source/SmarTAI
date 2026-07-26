@@ -163,7 +163,7 @@ export function StudentSubmissionOverviewPage() {
           {t("studentSubmissionBackMatrix")}
         </Link>
       </div>
-      <NewTaskStepper currentStep={2} />
+      <NewTaskStepper currentStep={3} />
 
       {taskQuery.isLoading ? (
         <PageState title={t("studentSubmissionLoading")} busy />

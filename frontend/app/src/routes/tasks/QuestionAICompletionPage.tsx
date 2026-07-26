@@ -120,7 +120,7 @@ export function QuestionAICompletionPage() {
       <h1 className="min-h-9 break-words text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
         {aiCompletionText(locale, "title")}
       </h1>
-      <NewTaskStepper currentStep={1} />
+      <NewTaskStepper currentStep={2} />
 
       <section className="mx-auto mt-[35px] w-full max-w-[900px] rounded-[10px] border bg-card px-5 pb-6 pt-7 sm:flex sm:h-[558px] sm:min-h-0 sm:flex-col sm:overflow-hidden sm:px-[49px] sm:pb-[28px] sm:pt-[32px]">
         <header>

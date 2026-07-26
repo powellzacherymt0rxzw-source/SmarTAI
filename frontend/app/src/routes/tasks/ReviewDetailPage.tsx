@@ -194,7 +194,7 @@ export function ReviewDetailPage() {
           </Link>
         ) : null}
       </div>
-      <NewTaskStepper currentStep={5} />
+      <NewTaskStepper currentStep={6} />
 
       {!taskId ? (
         <PageState title={tx(locale, "缺少任务 ID", "Task ID is missing")} />

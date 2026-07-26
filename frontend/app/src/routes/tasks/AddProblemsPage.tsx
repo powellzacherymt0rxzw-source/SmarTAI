@@ -1,11 +1,16 @@
-import { FileText, KeyRound, LoaderCircle, Pencil, Search } from "lucide-react";
 import {
-  useEffect,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type DragEvent,
-} from "react";
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  FileText,
+  KeyRound,
+  LoaderCircle,
+  Plus,
+  Search,
+  Trash2,
+  UploadCloud,
+} from "lucide-react";
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { normalizeAPIError } from "@/api/client";
@@ -13,927 +18,507 @@ import {
   useExperts,
   useProblemSourceLibrary,
   useProblemSourcePreflight,
-  useStartProblemExtraction,
+  useStartQuestionPreparation,
   useTask,
 } from "@/api/hooks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { useI18n } from "@/i18n/I18nProvider";
-import type { MessageKey } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import type {
+  PreparationSourceRole,
   ProblemLibraryMaterial,
   ProblemSourceMode,
-  ProblemSourcePreflightResponse,
   ProblemSourceScope,
   ProblemStructureMode,
 } from "@/types";
 
-const ACCEPTED_PROBLEM_EXTENSIONS = [".pdf", ".txt", ".md"] as const;
+const SOURCE_ROLES: PreparationSourceRole[] = ["problem", "reference_answer", "rubric", "programming_tests"];
+
+type SourceDraft = {
+  id: string;
+  role: PreparationSourceRole;
+  sourceMode: ProblemSourceMode;
+  file: File | null;
+  libraryScope: ProblemSourceScope;
+  librarySearch: string;
+  libraryMaterial: ProblemLibraryMaterial | null;
+  structureMode: ProblemStructureMode;
+  extractionHint: string;
+  saveToLibrary: boolean;
+};
+
+type AddProblemsRouteState = {
+  questionPreparationDraft?: {
+    taskId: string;
+    activeRole: PreparationSourceRole;
+    sources: SourceDraft[];
+  };
+};
 
 export function AddProblemsPage() {
   const { taskId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const { t } = useI18n();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const restoredDraft = getProblemSourceDraft(location.state, taskId);
+  const { locale } = useI18n();
+  const restored = getRestoredDraft(location.state, taskId);
   const taskQuery = useTask(taskId);
   const expertsQuery = useExperts();
-  const preflightMutation = useProblemSourcePreflight();
-  const extractionMutation = useStartProblemExtraction();
-
-  const [sourceMode, setSourceMode] = useState<ProblemSourceMode>(() => restoredDraft?.sourceMode ?? "upload");
-  const [selectedFile, setSelectedFile] = useState<File | null>(() => restoredDraft?.selectedFile ?? null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [libraryScope, setLibraryScope] = useState<ProblemSourceScope>(() => restoredDraft?.libraryScope ?? "course");
-  const [librarySearch, setLibrarySearch] = useState(() => restoredDraft?.librarySearch ?? "");
-  const debouncedLibrarySearch = useDebouncedValue(librarySearch, 220);
-  const [selectedMaterial, setSelectedMaterial] = useState<ProblemLibraryMaterial | null>(() => restoredDraft?.selectedMaterial ?? null);
-  const [structureMode, setStructureMode] = useState<ProblemStructureMode>(() => restoredDraft?.structureMode ?? "organized");
-  const [extractionHint, setExtractionHint] = useState(() => restoredDraft?.extractionHint ?? "");
-  const [saveToLibrary, setSaveToLibrary] = useState(() => restoredDraft?.saveToLibrary ?? false);
+  const preflight = useProblemSourcePreflight();
+  const startPreparation = useStartQuestionPreparation();
+  const [activeRole, setActiveRole] = useState<PreparationSourceRole>(restored?.activeRole ?? "problem");
+  const [sources, setSources] = useState<SourceDraft[]>(restored?.sources ?? [createSourceDraft("problem")]);
   const [formError, setFormError] = useState<string | null>(null);
-  const [preflightResult, setPreflightResult] = useState<ProblemSourcePreflightResponse | null>(null);
-  const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
-  const [candidateReviewConfirmed, setCandidateReviewConfirmed] = useState(false);
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [showByokRequired, setShowByokRequired] = useState(false);
 
-  const task = taskQuery.data;
-  const hasTaskCourse = Boolean(task?.course_id);
-  const libraryQuery = useProblemSourceLibrary(
-    taskId,
-    libraryScope,
-    debouncedLibrarySearch,
-    sourceMode === "library" && taskQuery.isSuccess,
-  );
+  const activeSources = sources.filter((source) => source.role === activeRole);
   const enabledExperts = (expertsQuery.data ?? []).filter((expert) => expert.enabled);
-  const isBusy = preflightMutation.isPending || extractionMutation.isPending;
-  const isRecognitionRunning = task?.status === "extracting_problems";
-  const hasExistingProblems = Boolean(task?.problem_file_name || task?.problem_count);
-  const hasSource = sourceMode === "upload" ? Boolean(selectedFile) : Boolean(selectedMaterial);
-  const needsConfirmation = Boolean(preflightResult?.requires_confirmation);
-
-  const sourceSummary = sourceMode === "upload"
-    ? selectedFile
-      ? `${selectedFile.name} · ${formatFileSize(selectedFile.size)}`
-      : t("addProblemsNoSourceSelected")
-    : selectedMaterial
-      ? `${selectedMaterial.filename} · ${formatFileSize(selectedMaterial.size_bytes)}`
-      : t("addProblemsNoSourceSelected");
-
-  const modelSummary = expertsQuery.isLoading
-    ? t("addProblemsModelsLoading")
-    : expertsQuery.isError
-      ? t("addProblemsModelsUnavailable")
-      : enabledExperts.length
-        ? `${t("addProblemsModelsPrefix")}${enabledExperts.length}${t("addProblemsModelsSuffix")}${enabledExperts
-          .slice(0, 2)
-          .map((expert) => expert.display_name || expert.model)
-          .join(t("addProblemsModelSeparator"))}${enabledExperts.length > 2 ? t("addProblemsModelsMore") : ""}`
-        : t("addProblemsModelsMissing");
-
-  const disabledReason = isRecognitionRunning
-    ? null
-    : taskQuery.isLoading
-      ? t("addProblemsTaskLoading")
-      : taskQuery.isError || !task
-        ? t("addProblemsTaskUnavailable")
-        : expertsQuery.isLoading
-          ? t("addProblemsModelsLoading")
-          : expertsQuery.isError
-            ? t("addProblemsModelsUnavailable")
-            : enabledExperts.length === 0
-              ? t("addProblemsModelsRequired")
-              : !hasSource
-                ? t("addProblemsSourceRequired")
-                : null;
-  const actionDisabledReason = disabledReason
-    ?? (needsConfirmation && !candidateReviewConfirmed
-      ? t("addProblemsCandidateSelectionRequired")
-      : null);
-  const sourceIsOnlyDisabledReason = actionDisabledReason === t("addProblemsSourceRequired");
-  const byokIsOnlyDisabledReason = actionDisabledReason === t("addProblemsModelsRequired");
-  const visibleDisabledReason = sourceIsOnlyDisabledReason ? null : actionDisabledReason;
-  const byokReturnTo = taskId ? `/tasks/${taskId}/upload/problems` : "/tasks/new";
-  const byokRouteState: ProblemSourceRouteState = {
-    problemSourceDraft: {
+  const isBusy = preflight.isPending || startPreparation.isPending;
+  const hasExistingProblems = Boolean(taskQuery.data?.problem_file_name || taskQuery.data?.problem_count);
+  const hasProblemSource = sources.some((source) => source.role === "problem" && sourceHasValue(source));
+  const missingConfiguredSource = sources.some((source) => !sourceHasValue(source));
+  const taskReturnPath = taskId ? `/tasks/${taskId}/upload/problems` : "/tasks/new";
+  const routeState: AddProblemsRouteState = {
+    questionPreparationDraft: {
       taskId: taskId ?? "",
-      sourceMode,
-      selectedFile,
-      libraryScope,
-      librarySearch,
-      selectedMaterial,
-      structureMode,
-      extractionHint,
-      saveToLibrary,
+      activeRole,
+      sources,
     },
   };
 
-  function resetPreflight() {
-    setPreflightResult(null);
-    setSelectedCandidateIds([]);
-    setCandidateReviewConfirmed(false);
+  const primaryDisabledReason = expertsQuery.isLoading
+    ? tx(locale, "正在读取模型配置。", "Loading model configuration.")
+    : expertsQuery.isError
+      ? tx(locale, "模型配置暂时不可用。", "Model configuration is unavailable.")
+      : enabledExperts.length === 0
+        ? tx(locale, "需要先添加并启用一个 BYOK 模型。", "Add and enable a BYOK model first.")
+        : !hasProblemSource
+          ? tx(locale, "至少添加一份题目来源。", "Add at least one problem source.")
+          : missingConfiguredSource
+            ? tx(locale, "请完成或删除尚未选择来源的资料项。", "Complete or remove every empty source row.")
+            : null;
+  const byokBlocked = enabledExperts.length === 0 && !expertsQuery.isLoading && !expertsQuery.isError;
+
+  function updateSource(id: string, patch: Partial<SourceDraft>) {
+    setSources((current) => current.map((source) => source.id === id ? { ...source, ...patch } : source));
     setFormError(null);
   }
 
-  function changeSourceMode(nextMode: ProblemSourceMode) {
-    if (isBusy) return;
-    if (nextMode === sourceMode) return;
-    setSourceMode(nextMode);
-    resetPreflight();
+  function addSource(role: PreparationSourceRole) {
+    setSources((current) => [...current, createSourceDraft(role)]);
+    setFormError(null);
   }
 
-  function selectFile(file: File | undefined) {
-    if (isBusy) return;
-    if (!file) return;
-    if (!isAcceptedProblemSource(file.name)) {
-      setFormError(t("addProblemsUnsupportedFile"));
+  function removeSource(id: string) {
+    setSources((current) => current.filter((source) => source.id !== id));
+    setFormError(null);
+  }
+
+  function moveRole(direction: -1 | 1) {
+    const current = SOURCE_ROLES.indexOf(activeRole);
+    const next = Math.max(0, Math.min(SOURCE_ROLES.length - 1, current + direction));
+    setActiveRole(SOURCE_ROLES[next]);
+  }
+
+  async function handleStart() {
+    setFormError(null);
+    if (!taskId || !taskQuery.data) {
+      setFormError(tx(locale, "任务信息不可用，请刷新后重试。", "Task details are unavailable. Refresh and retry."));
       return;
     }
-    setSelectedFile(file);
-    setSourceMode("upload");
-    resetPreflight();
+    if (primaryDisabledReason) {
+      if (byokBlocked) setShowByokRequired(true);
+      else setFormError(primaryDisabledReason);
+      return;
+    }
+    try {
+      const tokens: string[] = [];
+      for (let index = 0; index < sources.length; index += 1) {
+        const source = sources[index];
+        setBusyLabel(tx(locale, `正在检查资料 ${index + 1}/${sources.length}`, `Checking source ${index + 1}/${sources.length}`));
+        const result = await preflight.mutateAsync({
+          taskId,
+          role: source.role,
+          mode: source.sourceMode,
+          file: source.file,
+          libraryMaterialId: source.libraryMaterial?.material_id,
+          structureMode: source.structureMode,
+          extractionHint: source.extractionHint,
+          saveToLibrary: source.sourceMode === "upload" && source.saveToLibrary,
+        });
+        tokens.push(result.source_token);
+      }
+      setBusyLabel(tx(locale, "正在启动统一识别", "Starting unified preparation"));
+      const response = await startPreparation.mutateAsync({
+        taskId,
+        sourceTokens: tokens,
+        expectedWorkflowRevision: taskQuery.data.workflow_revision,
+        replaceConfirmed: hasExistingProblems,
+      });
+      toast.success(
+        ["already_running", "already_done"].includes(response.status)
+          ? tx(locale, "已有相同的题目准备任务。", "The same preparation job already exists.")
+          : tx(locale, "题目与资料已进入统一识别。", "Question materials are being prepared."),
+      );
+      navigate(`/tasks/${taskId}/problems/progress`);
+    } catch (error) {
+      setFormError(normalizeAPIError(error).message);
+    } finally {
+      setBusyLabel(null);
+    }
   }
 
-  function handleFileInput(event: ChangeEvent<HTMLInputElement>) {
-    selectFile(event.target.files?.[0]);
-    event.target.value = "";
+  const roleIndex = SOURCE_ROLES.indexOf(activeRole);
+  return (
+    <div className="w-full max-w-[1300px]">
+      <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
+        {tx(locale, "题目与资料上传", "Upload Questions & Materials")}
+      </h1>
+      <NewTaskStepper currentStep={1} returnState={routeState} />
+
+      <div className="mx-auto mt-9 w-full max-w-[940px]">
+        <section className="overflow-hidden rounded-[10px] border bg-card">
+          <div className="flex items-center justify-between border-b px-5 py-4 sm:px-7">
+            <button
+              type="button"
+              onClick={() => moveRole(-1)}
+              disabled={roleIndex === 0 || isBusy}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-[7px] border text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
+              aria-label={tx(locale, "上一类资料", "Previous source type")}
+            >
+              <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+            </button>
+            <div className="min-w-0 text-center">
+              <p className="text-[17px] font-bold text-foreground">{roleMeta(activeRole, locale).title}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{roleMeta(activeRole, locale).description}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => moveRole(1)}
+              disabled={roleIndex === SOURCE_ROLES.length - 1 || isBusy}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-[7px] border text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
+              aria-label={tx(locale, "下一类资料", "Next source type")}
+            >
+              <ArrowRight aria-hidden="true" className="h-4 w-4" />
+            </button>
+          </div>
+
+          <nav className="grid grid-cols-2 border-b sm:grid-cols-4" aria-label={tx(locale, "题目资料类型", "Question material types")}>
+            {SOURCE_ROLES.map((role, index) => {
+              const count = sources.filter((source) => source.role === role && sourceHasValue(source)).length;
+              const active = role === activeRole;
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => setActiveRole(role)}
+                  className={cn(
+                    "min-h-[62px] border-b-2 px-3 text-left transition-colors sm:text-center",
+                    active ? "border-primary bg-blue-50/60 text-primary dark:bg-blue-950/20" : "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  )}
+                >
+                  <span className="block text-[13px] font-semibold">{index + 1}. {roleMeta(role, locale).shortTitle}</span>
+                  <span className="mt-1 block text-[11px]">{role === "problem" ? tx(locale, "必填", "Required") : tx(locale, "可选", "Optional")} · {count}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="space-y-4 bg-slate-50/60 p-4 dark:bg-slate-950/20 sm:p-6">
+            {activeSources.length ? activeSources.map((source, index) => (
+              <SourceEditor
+                key={source.id}
+                source={source}
+                number={index + 1}
+                taskId={taskId}
+                taskReady={taskQuery.isSuccess}
+                disabled={isBusy}
+                hasTaskCourse={Boolean(taskQuery.data?.course_id)}
+                locale={locale}
+                onUpdate={(patch) => updateSource(source.id, patch)}
+                onRemove={() => removeSource(source.id)}
+              />
+            )) : (
+              <div className="rounded-[10px] border border-dashed bg-card px-5 py-12 text-center">
+                <p className="text-sm font-semibold text-foreground">{tx(locale, "尚未添加这类资料", "No source added for this type")}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{tx(locale, "可以跳过，系统会在统一识别时生成需要的内容。", "You can skip it; required content will be generated during preparation.")}</p>
+              </div>
+            )}
+            <button
+              type="button"
+              disabled={isBusy}
+              onClick={() => addSource(activeRole)}
+              className="inline-flex h-10 items-center gap-2 rounded-[8px] border bg-card px-4 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              {tx(locale, `再添加一份${roleMeta(activeRole, locale).shortTitle}`, `Add another ${roleMeta(activeRole, locale).shortTitle}`)}
+            </button>
+          </div>
+        </section>
+
+        <section className="mt-5 flex flex-col gap-3 rounded-[10px] border bg-card px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">{tx(locale, "一次识别并准备全部题目资料", "Prepare all question materials in one job")}</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              {enabledExperts.length
+                ? tx(locale, `已启用 ${enabledExperts.length} 个模型；未上传的标答和评分标准会由 AI 生成。`, `${enabledExperts.length} model(s) enabled. Missing answers and rubrics will be generated.`)
+                : tx(locale, "尚未启用模型；点击主按钮可查看原因并前往 BYOK。", "No model is enabled. Use the main button to open BYOK guidance.")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleStart()}
+            disabled={isBusy || Boolean(primaryDisabledReason && !byokBlocked)}
+            title={primaryDisabledReason ?? undefined}
+            className={cn(
+              "inline-flex h-10 w-full shrink-0 items-center justify-center rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45 sm:w-[210px]",
+              byokBlocked && "cursor-help opacity-50 hover:opacity-65",
+            )}
+          >
+            {isBusy ? <LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {busyLabel ?? (hasExistingProblems
+              ? tx(locale, "重新识别全部资料", "Reprepare All Materials")
+              : tx(locale, "识别并准备题目资料", "Prepare Question Materials"))}
+          </button>
+        </section>
+        {formError ? <p role="alert" className="mt-3 text-sm text-danger">{formError}</p> : null}
+      </div>
+
+      <ByokRequiredDialog
+        open={showByokRequired}
+        returnTo={taskReturnPath}
+        routeState={routeState}
+        locale={locale}
+        onClose={() => setShowByokRequired(false)}
+      />
+    </div>
+  );
+}
+
+function SourceEditor({
+  source,
+  number,
+  taskId,
+  taskReady,
+  disabled,
+  hasTaskCourse,
+  locale,
+  onUpdate,
+  onRemove,
+}: {
+  source: SourceDraft;
+  number: number;
+  taskId: string | undefined;
+  taskReady: boolean;
+  disabled: boolean;
+  hasTaskCourse: boolean;
+  locale: string;
+  onUpdate: (patch: Partial<SourceDraft>) => void;
+  onRemove: () => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const debouncedLibrarySearch = useDebouncedValue(source.librarySearch, 220);
+  const libraryQuery = useProblemSourceLibrary(
+    taskId,
+    source.libraryScope,
+    debouncedLibrarySearch,
+    taskReady && source.sourceMode === "library",
+  );
+  const libraryItems: ProblemLibraryMaterial[] = libraryQuery.data?.items ?? [];
+  const libraryLoading = libraryQuery.isFetching;
+  const accept = source.role === "programming_tests" ? ".pdf,.txt,.md,.json" : ".pdf,.txt,.md";
+
+  function selectFile(file?: File) {
+    if (!file || disabled) return;
+    onUpdate({ file, sourceMode: "upload", libraryMaterial: null });
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    if (isBusy) return;
-    setIsDragging(false);
+    setDragging(false);
     selectFile(event.dataTransfer.files?.[0]);
   }
 
-  function selectStructure(nextMode: ProblemStructureMode) {
-    if (isBusy) return;
-    setStructureMode(nextMode);
-    resetPreflight();
-  }
-
-  async function beginExtraction(result: ProblemSourcePreflightResponse) {
-    if (!taskId) return;
-    const response = await extractionMutation.mutateAsync({
-      taskId,
-      sourceToken: result.source_token,
-      confirmedCandidateIds: selectedCandidateIds,
-      replaceConfirmed: hasExistingProblems,
-    });
-
-    if (["already_running", "already_done"].includes(response.status)) {
-      toast.info(t("addProblemsRecognitionExists"));
-    } else {
-      toast.success(t("addProblemsRecognitionStarted"));
-    }
-    navigate(`/tasks/${taskId}/problems/progress`);
-  }
-
-  async function handlePrimaryAction() {
-    setFormError(null);
-    if (!taskId) {
-      setFormError(t("addProblemsTaskUnavailable"));
-      return;
-    }
-    if (isRecognitionRunning) {
-      navigate(`/tasks/${taskId}/problems/progress`);
-      return;
-    }
-    if (actionDisabledReason) {
-      setFormError(actionDisabledReason);
-      return;
-    }
-    try {
-      if (needsConfirmation && preflightResult) {
-        await beginExtraction(preflightResult);
-        return;
-      }
-
-      const result = await preflightMutation.mutateAsync({
-        taskId,
-        mode: sourceMode,
-        file: selectedFile,
-        libraryMaterialId: selectedMaterial?.material_id,
-        structureMode,
-        extractionHint,
-        saveToLibrary: sourceMode === "upload" && saveToLibrary,
-      });
-      setPreflightResult(result);
-      setCandidateReviewConfirmed(false);
-
-      if (result.requires_confirmation) {
-        toast.info(t("addProblemsCandidatesReady"));
-        return;
-      }
-      await beginExtraction(result);
-    } catch (error) {
-      setFormError(localizeProblemSourceError(error, t));
-    }
-  }
-
   return (
-    <div className="w-full max-w-[1300px]">
-      <div className="flex min-h-9 items-center justify-between gap-4">
-        <h1 className="shrink-0 text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
-          {t("addProblemsTitle")}
-        </h1>
-        <Link
-          to={taskId
-            ? `/tasks/${taskId}/edit?returnTo=${encodeURIComponent(byokReturnTo)}`
-            : "/tasks/new"}
-          state={byokRouteState}
-          className="inline-flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
-          title={t("addProblemsEditTask")}
-        >
-          <Pencil aria-hidden="true" className="h-4 w-4 shrink-0" />
-          <span>{t("addProblemsEditTask")}</span>
-        </Link>
-      </div>
-      <NewTaskStepper currentStep={0} />
+    <article className="overflow-hidden rounded-[10px] border bg-card">
+      <header className="flex items-center justify-between border-b px-4 py-3 sm:px-5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-primary dark:bg-blue-950/50">{number}</span>
+          <p className="truncate text-sm font-semibold text-foreground">{sourceSummary(source, locale)}</p>
+        </div>
+        <button type="button" disabled={disabled} onClick={onRemove} className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-red-50 hover:text-danger disabled:opacity-40" aria-label={tx(locale, "删除这份资料", "Remove this source")}>
+          <Trash2 aria-hidden="true" className="h-4 w-4" />
+        </button>
+      </header>
 
-      <div className="mx-auto mt-[45px] w-full max-w-[900px]">
-        {sourceMode === "upload" ? (
-          <UploadSourceWorkspace
-            disabled={isBusy}
-            file={selectedFile}
-            inputRef={fileInputRef}
-            isDragging={isDragging}
-            onChoose={() => fileInputRef.current?.click()}
-            onDragChange={setIsDragging}
+      <div className="p-4 sm:p-5">
+        <div className="grid grid-cols-2 gap-2 rounded-[8px] bg-muted/60 p-1">
+          <ModeButton active={source.sourceMode === "upload"} disabled={disabled} onClick={() => onUpdate({ sourceMode: "upload", libraryMaterial: null })} icon={<UploadCloud className="h-4 w-4" />} label={tx(locale, "上传新文件", "Upload File")} />
+          <ModeButton active={source.sourceMode === "library"} disabled={disabled} onClick={() => onUpdate({ sourceMode: "library", file: null })} icon={<BookOpen className="h-4 w-4" />} label={tx(locale, "课程资料库", "Course Library")} />
+        </div>
+
+        {source.sourceMode === "upload" ? (
+          <div
+            onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
+            onDragOver={(event) => event.preventDefault()}
+            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
             onDrop={handleDrop}
-            onFileInput={handleFileInput}
-            t={t}
-          />
+            className={cn("mt-4 flex min-h-[145px] flex-col items-center justify-center rounded-[9px] border border-dashed px-5 text-center transition-colors", dragging ? "border-primary bg-blue-50/60 dark:bg-blue-950/20" : "bg-slate-50/70 dark:bg-slate-950/20")}
+          >
+            <FileText aria-hidden="true" className="h-7 w-7 text-primary" />
+            <p className="mt-2 max-w-full truncate text-sm font-semibold text-foreground">{source.file?.name ?? tx(locale, "拖入或选择文件", "Drop or choose a file")}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{accept.replaceAll(".", "").toUpperCase().replaceAll(",", " / ")}</p>
+            <label className="mt-3 inline-flex h-9 cursor-pointer items-center rounded-[7px] border bg-card px-4 text-xs font-semibold text-foreground hover:bg-muted">
+              {source.file ? tx(locale, "替换文件", "Replace File") : tx(locale, "选择文件", "Choose File")}
+              <input type="file" accept={accept} className="sr-only" disabled={disabled} onChange={(event: ChangeEvent<HTMLInputElement>) => { selectFile(event.target.files?.[0]); event.target.value = ""; }} />
+            </label>
+          </div>
         ) : (
-          <LibrarySourceWorkspace
-            disabled={isBusy}
-            hasTaskCourse={hasTaskCourse}
-            isError={libraryQuery.isError}
-            isFetching={libraryQuery.isFetching}
-            materials={libraryQuery.data?.items ?? []}
-            query={librarySearch}
-            scope={libraryScope}
-            selected={selectedMaterial}
-            onQueryChange={setLibrarySearch}
-            onRetry={() => void libraryQuery.refetch()}
-            onScopeChange={(scope) => {
-              setLibraryScope(scope);
-              setSelectedMaterial(null);
-              resetPreflight();
-            }}
-            onSelect={(material) => {
-              setSelectedMaterial(material);
-              resetPreflight();
-            }}
-            t={t}
-          />
+          <div className="mt-4 rounded-[9px] border p-4">
+            <div className="grid gap-3 sm:grid-cols-[150px_minmax(0,1fr)]">
+              <select value={source.libraryScope} disabled={disabled} onChange={(event) => onUpdate({ libraryScope: event.target.value as ProblemSourceScope, libraryMaterial: null })} className="h-10 rounded-[7px] border bg-card px-3 text-sm outline-none focus:border-primary">
+                <option value="course">{tx(locale, "当前课程", "Current Course")}</option>
+                <option value="all">{tx(locale, "全部资料", "All Materials")}</option>
+              </select>
+              <label className="relative">
+                <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <input value={source.librarySearch} disabled={disabled} onChange={(event) => onUpdate({ librarySearch: event.target.value })} placeholder={tx(locale, "搜索资料名称", "Search materials")} className="h-10 w-full rounded-[7px] border bg-card pl-9 pr-3 text-sm outline-none focus:border-primary" />
+              </label>
+            </div>
+            {!hasTaskCourse && source.libraryScope === "course" ? <p className="mt-3 text-xs text-warning">{tx(locale, "当前任务未选择课程，请改选全部资料。", "This task has no course; choose all materials.")}</p> : null}
+            <div className="mt-3 max-h-44 overflow-y-auto rounded-[7px] border">
+              {libraryLoading ? <p className="px-4 py-6 text-center text-xs text-muted-foreground">{tx(locale, "正在读取资料库…", "Loading library…")}</p> : libraryItems.length ? libraryItems.map((material) => (
+                <button key={material.material_id} type="button" disabled={disabled} onClick={() => onUpdate({ libraryMaterial: material })} className={cn("flex w-full items-center justify-between gap-3 border-b px-4 py-3 text-left text-sm last:border-b-0", source.libraryMaterial?.material_id === material.material_id ? "bg-blue-50 text-primary dark:bg-blue-950/20" : "hover:bg-muted/50")}>
+                  <span className="truncate font-medium">{material.filename}</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{formatFileSize(material.size_bytes)}</span>
+                </button>
+              )) : <p className="px-4 py-6 text-center text-xs text-muted-foreground">{tx(locale, "没有匹配资料", "No matching material")}</p>}
+            </div>
+          </div>
         )}
 
-        <section className="mt-10 min-h-[120px] rounded-[10px] border bg-card px-[29px] pb-6 pt-[28px] sm:h-[120px]">
-          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-[17px] font-bold leading-[22px] text-foreground">{t("addProblemsSourceTitle")}</h2>
-            <p className="min-w-0 truncate text-[13px] leading-5 text-muted-foreground" title={sourceSummary}>
-              {t("addProblemsSelectedPrefix")}{sourceSummary}
-            </p>
-          </div>
-          <div className="mt-[19px] flex flex-wrap items-center gap-3 sm:gap-5">
-            <SourceModeButton active={sourceMode === "upload"} disabled={isBusy} onClick={() => changeSourceMode("upload")}>
-              {t("addProblemsUploadNew")}
-            </SourceModeButton>
-            <SourceModeButton active={sourceMode === "library"} disabled={isBusy} wide onClick={() => changeSourceMode("library")}>
-              {t("addProblemsChooseLibrary")}
-            </SourceModeButton>
-            {sourceMode === "upload" ? (
-              <label className="ml-0 inline-flex min-w-0 items-center gap-2 text-[13px] leading-5 text-muted-foreground sm:ml-auto">
-                <input
-                  type="checkbox"
-                  checked={saveToLibrary}
-                  disabled={isBusy}
-                  onChange={(event) => {
-                    setSaveToLibrary(event.target.checked);
-                    resetPreflight();
-                  }}
-                  className="h-4 w-4 rounded border-border accent-primary"
-                />
-                <span>{t("addProblemsSaveToLibrary")}</span>
-              </label>
-            ) : null}
-          </div>
-        </section>
-
-        <section className="mt-[25px] overflow-hidden rounded-[10px] border bg-card">
-          <div className="grid min-h-[86px] gap-3 px-[29px] pb-[15px] pt-[21px] sm:grid-cols-[190px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)]">
-            <h2 className="pt-[5px] text-[16px] font-bold leading-[22px] text-foreground">{t("addProblemsStructureTitle")}</h2>
-            <div className="min-w-0">
-              <div className="flex flex-wrap gap-5">
-                <StructureModeButton active={structureMode === "organized"} disabled={isBusy} onClick={() => selectStructure("organized")}>
-                  {t("addProblemsOrganized")}
-                </StructureModeButton>
-                <StructureModeButton active={structureMode === "extract_from_source"} disabled={isBusy} onClick={() => selectStructure("extract_from_source")}>
-                  {t("addProblemsExtractSource")}
-                </StructureModeButton>
-              </div>
-              <p className="mt-1.5 break-words text-[12px] leading-4 text-muted-foreground sm:truncate" title={`${modelSummary} · ${t("addProblemsOcrUnavailable")}`}>
-                {modelSummary} · {t("addProblemsOcrUnavailable")}{" "}
-                {enabledExperts.length === 0 || expertsQuery.isError ? (
-                  <Link
-                    className="font-semibold text-primary underline-offset-2 hover:underline"
-                    to={`/settings/byok?returnTo=${encodeURIComponent(byokReturnTo)}`}
-                    state={byokRouteState}
-                  >
-                    {t("addProblemsOpenByok")}
-                  </Link>
-                ) : null}
-              </p>
+        <div className="mt-4 grid gap-4 border-t pt-4 sm:grid-cols-[220px_minmax(0,1fr)]">
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground">{tx(locale, "文件结构", "File Structure")}</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <StructureButton active={source.structureMode === "organized"} disabled={disabled} onClick={() => onUpdate({ structureMode: "organized" })}>{tx(locale, "已按题整理", "Organized")}</StructureButton>
+              <StructureButton active={source.structureMode === "extract_from_source"} disabled={disabled} onClick={() => onUpdate({ structureMode: "extract_from_source" })}>{tx(locale, "从原文提取", "Extract")}</StructureButton>
             </div>
           </div>
-
-          {structureMode === "extract_from_source" ? (
-            <div className="border-t px-[29px] pb-6 pt-4">
-              <label htmlFor="problem-extraction-hint" className="text-[14px] font-semibold leading-5 text-foreground">
-                {t("addProblemsExtractionHintLabel")}
-              </label>
-              <textarea
-                id="problem-extraction-hint"
-                value={extractionHint}
-                maxLength={2000}
-                disabled={isBusy}
-                onChange={(event) => {
-                  setExtractionHint(event.target.value);
-                  resetPreflight();
-                }}
-                placeholder={t("addProblemsExtractionHintPlaceholder")}
-                className="mt-2 min-h-[72px] w-full resize-y rounded-[8px] border bg-card px-3 py-2 text-[14px] leading-5 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
-              />
-              <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{t("addProblemsExtractionHintHelp")}</p>
-            </div>
-          ) : null}
-
-          {needsConfirmation && preflightResult ? (
-            <CandidateSummaryPanel
-              result={preflightResult}
-              selectedCandidateIds={selectedCandidateIds}
-              reviewConfirmed={candidateReviewConfirmed}
-              disabled={isBusy}
-              onReviewConfirmedChange={setCandidateReviewConfirmed}
-              onToggleCandidate={(candidateId) => {
-                setSelectedCandidateIds((current) => current.includes(candidateId)
-                  ? current.filter((id) => id !== candidateId)
-                  : [...current, candidateId]);
-                setCandidateReviewConfirmed(false);
-                setFormError(null);
-              }}
-              t={t}
-            />
-          ) : null}
-        </section>
-
-        <div className="mt-[27px] flex min-h-10 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0 text-[13px] leading-5">
-            {formError ? (
-              <p id="add-problems-action-message" role="alert" className="text-danger">{formError}</p>
-            ) : visibleDisabledReason ? (
-              <p id="add-problems-action-message" className="text-muted-foreground">{visibleDisabledReason}</p>
-            ) : hasExistingProblems ? (
-              <p id="add-problems-action-message" className="text-muted-foreground">
-                {t("addProblemsOverwriteWarning")}{" "}
-                <Link to="/tasks/new" className="font-semibold text-primary underline-offset-2 hover:underline">
-                  {t("addProblemsCreateSeparateTask")}
-                </Link>
-              </p>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            className={cn(
-              "inline-flex h-10 w-full shrink-0 items-center justify-center rounded-[8px] bg-primary px-4 text-[15px] font-semibold leading-[19px] text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[180px]",
-              byokIsOnlyDisabledReason && "cursor-help opacity-50 hover:opacity-65",
-            )}
-            disabled={!isRecognitionRunning && Boolean(isBusy || (actionDisabledReason && !byokIsOnlyDisabledReason))}
-            aria-disabled={!isRecognitionRunning && Boolean(isBusy || (actionDisabledReason && !byokIsOnlyDisabledReason))}
-            aria-haspopup={byokIsOnlyDisabledReason ? "dialog" : undefined}
-            aria-describedby={actionDisabledReason || hasExistingProblems ? "add-problems-action-message" : undefined}
-            title={byokIsOnlyDisabledReason ? t("addProblemsByokButtonHint") : undefined}
-            onClick={() => {
-              if (byokIsOnlyDisabledReason) {
-                setShowByokRequired(true);
-                return;
-              }
-              void handlePrimaryAction();
-            }}
-          >
-            {isBusy ? (
-              <><LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />{t("addProblemsChecking")}</>
-            ) : isRecognitionRunning ? t("addProblemsViewProgress")
-              : hasExistingProblems ? t("addProblemsOverwriteAndStart")
-                : needsConfirmation ? t("addProblemsConfirmAndStart")
-                : t("addProblemsStart")}
-          </button>
-          {sourceIsOnlyDisabledReason ? (
-            <span id="add-problems-action-message" className="sr-only">{actionDisabledReason}</span>
-          ) : null}
+          {source.structureMode === "extract_from_source" ? (
+            <label className="grid gap-2 text-xs font-semibold text-muted-foreground">
+              {tx(locale, "提取说明", "Extraction Hint")}
+              <textarea value={source.extractionHint} disabled={disabled} maxLength={2000} onChange={(event) => onUpdate({ extractionHint: event.target.value })} placeholder={tx(locale, "例如：第 3 章习题 1–8，只提取正文中的题目与对应答案", "Example: Chapter 3, exercises 1–8")} className="min-h-[74px] resize-y rounded-[7px] border bg-card px-3 py-2 text-sm font-normal leading-5 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
+            </label>
+          ) : <p className="self-end pb-1 text-xs leading-5 text-muted-foreground">{tx(locale, "系统按明确题号匹配到同一道题。", "Content is matched by explicit question numbers.")}</p>}
         </div>
+
+        {source.sourceMode === "upload" ? (
+          <label className="mt-4 inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={source.saveToLibrary} disabled={disabled} onChange={(event) => onUpdate({ saveToLibrary: event.target.checked })} className="h-4 w-4 rounded border-border accent-primary" />
+            {tx(locale, "同时保存到课程资料库", "Also save to course library")}
+          </label>
+        ) : null}
       </div>
-      <ByokRequiredDialog
-        open={showByokRequired}
-        returnTo={byokReturnTo}
-        routeState={byokRouteState}
-        onClose={() => setShowByokRequired(false)}
-        t={t}
-      />
-    </div>
+    </article>
   );
 }
 
-interface TranslationProps {
-  t: (key: MessageKey) => string;
+function ModeButton({ active, disabled, onClick, icon, label }: { active: boolean; disabled: boolean; onClick: () => void; icon: ReactNode; label: string }) {
+  return <button type="button" disabled={disabled} onClick={onClick} className={cn("inline-flex h-9 items-center justify-center gap-2 rounded-[6px] text-xs font-semibold transition", active ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>{icon}{label}</button>;
 }
 
-function ByokRequiredDialog({
-  open,
-  returnTo,
-  routeState,
-  onClose,
-  t,
-}: TranslationProps & {
-  open: boolean;
-  returnTo: string;
-  routeState: ProblemSourceRouteState;
-  onClose: () => void;
-}) {
-  const configureRef = useRef<HTMLAnchorElement>(null);
-  const cancelRef = useRef<HTMLButtonElement>(null);
+function StructureButton({ active, disabled, onClick, children }: { active: boolean; disabled: boolean; onClick: () => void; children: ReactNode }) {
+  return <button type="button" disabled={disabled} onClick={onClick} className={cn("h-9 rounded-[7px] border px-2 text-xs font-semibold transition", active ? "border-primary bg-blue-50 text-primary dark:bg-blue-950/20" : "bg-card text-muted-foreground hover:bg-muted")}>{children}</button>;
+}
 
+function ByokRequiredDialog({ open, returnTo, routeState, locale, onClose }: { open: boolean; returnTo: string; routeState: AddProblemsRouteState; locale: string; onClose: () => void }) {
+  const actionRef = useRef<HTMLAnchorElement>(null);
   useEffect(() => {
     if (!open) return;
-    const previousOverflow = document.body.style.overflow;
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    document.body.style.overflow = "hidden";
-    const frame = window.requestAnimationFrame(() => configureRef.current?.focus());
-
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = [configureRef.current, cancelRef.current].filter(
-        (item): item is HTMLAnchorElement | HTMLButtonElement => Boolean(item),
-      );
-      if (!focusable.length) return;
-      const currentIndex = focusable.indexOf(document.activeElement as HTMLAnchorElement | HTMLButtonElement);
-      const nextIndex = event.shiftKey
-        ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
-        : (currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
-      event.preventDefault();
-      focusable[nextIndex].focus();
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", handleKeyDown);
-      if (previouslyFocused && document.contains(previouslyFocused)) previouslyFocused.focus();
-    };
+    const frame = window.requestAnimationFrame(() => actionRef.current?.focus());
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => { window.cancelAnimationFrame(frame); document.removeEventListener("keydown", onKey); };
   }, [onClose, open]);
-
   if (!open) return null;
   return (
-    <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 p-5"
-      role="presentation"
-      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-problems-byok-title"
-        aria-describedby="add-problems-byok-description"
-        className="w-full max-w-[420px] rounded-[10px] border bg-card p-6 shadow-xl"
-      >
-        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-primary dark:bg-blue-950/50">
-          <KeyRound aria-hidden="true" className="h-5 w-5" />
-        </span>
-        <h2 id="add-problems-byok-title" className="mt-4 text-lg font-bold text-foreground">
-          {t("addProblemsByokDialogTitle")}
-        </h2>
-        <p id="add-problems-byok-description" className="mt-2 text-sm leading-6 text-muted-foreground">
-          {t("addProblemsByokDialogDescription")}
-        </p>
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 p-5" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="byok-required-title" className="w-full max-w-[420px] rounded-[10px] border bg-card p-6 shadow-xl">
+        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-primary dark:bg-blue-950/50"><KeyRound aria-hidden="true" className="h-5 w-5" /></span>
+        <h2 id="byok-required-title" className="mt-4 text-lg font-bold text-foreground">{tx(locale, "需要先启用模型", "Enable a Model First")}</h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{tx(locale, "题目识别、标答补全过程和评分标准生成都需要模型。当前草稿会保留，配置后可直接回来继续。", "Question recognition and material generation require an enabled model. Your draft will be preserved while you configure BYOK.")}</p>
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button ref={cancelRef} type="button" className="h-10 rounded-[8px] border px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring" onClick={onClose}>
-            {t("addProblemsByokDialogStay")}
-          </button>
-          <Link
-            ref={configureRef}
-            to={`/settings/byok?returnTo=${encodeURIComponent(returnTo)}`}
-            state={routeState}
-            className="inline-flex h-10 items-center justify-center rounded-[8px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          >
-            {t("addProblemsByokDialogOpen")}
-          </Link>
+          <button type="button" onClick={onClose} className="h-10 rounded-[8px] border px-4 text-sm font-semibold text-foreground hover:bg-muted">{tx(locale, "留在此页", "Stay Here")}</button>
+          <Link ref={actionRef} to={`/settings/byok?returnTo=${encodeURIComponent(returnTo)}`} state={routeState} className="inline-flex h-10 items-center justify-center rounded-[8px] bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90">{tx(locale, "前往 BYOK", "Open BYOK")}</Link>
         </div>
       </div>
     </div>
   );
 }
 
-function UploadSourceWorkspace({
-  disabled,
-  file,
-  inputRef,
-  isDragging,
-  onChoose,
-  onDragChange,
-  onDrop,
-  onFileInput,
-  t,
-}: TranslationProps & {
-  disabled: boolean;
-  file: File | null;
-  inputRef: React.RefObject<HTMLInputElement | null>;
-  isDragging: boolean;
-  onChoose: () => void;
-  onDragChange: (dragging: boolean) => void;
-  onDrop: (event: DragEvent<HTMLDivElement>) => void;
-  onFileInput: (event: ChangeEvent<HTMLInputElement>) => void;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex h-[250px] w-full flex-col items-center rounded-[10px] border bg-card text-center outline-none transition-colors",
-        isDragging ? "border-primary bg-blue-50/50 dark:bg-blue-950/20" : "border-primary",
-      )}
-      onDragEnter={(event) => {
-        event.preventDefault();
-        if (!disabled) onDragChange(true);
-      }}
-      onDragOver={(event) => event.preventDefault()}
-      onDragLeave={(event) => {
-        if (!disabled && !event.currentTarget.contains(event.relatedTarget as Node | null)) onDragChange(false);
-      }}
-      onDrop={onDrop}
-      aria-disabled={disabled}
-    >
-      <span aria-hidden="true" className="mt-[27px] h-14 w-14 shrink-0 rounded-full bg-[#DBE8FF]" />
-      <p className="mt-4 max-w-[760px] truncate px-5 text-[18px] font-bold leading-[22px] text-foreground" title={file?.name}>
-        {file?.name ?? t("addProblemsDropTitle")}
-      </p>
-      <p className="mt-[9px] text-[14px] leading-5 text-muted-foreground">
-        {file ? `${formatFileSize(file.size)} · ${t("addProblemsLocalOnly")}` : t("addProblemsFormats")}
-      </p>
-      <button
-        type="button"
-        className="mt-[41px] h-10 w-[130px] rounded-[8px] border bg-card text-[15px] font-semibold leading-[18px] text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={onChoose}
-        disabled={disabled}
-      >
-        {file ? t("addProblemsReplaceFile") : t("addProblemsChooseFile")}
-      </button>
-      <input
-        ref={inputRef}
-        type="file"
-        className="sr-only"
-        aria-label={t("addProblemsChooseFile")}
-        tabIndex={-1}
-        disabled={disabled}
-        accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-        onChange={onFileInput}
-      />
-    </div>
-  );
+function createSourceDraft(role: PreparationSourceRole): SourceDraft {
+  return {
+    id: globalThis.crypto?.randomUUID?.() ?? `source-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    role,
+    sourceMode: "upload",
+    file: null,
+    libraryScope: "course",
+    librarySearch: "",
+    libraryMaterial: null,
+    structureMode: "organized",
+    extractionHint: "",
+    saveToLibrary: false,
+  };
 }
 
-function LibrarySourceWorkspace({
-  disabled,
-  hasTaskCourse,
-  isError,
-  isFetching,
-  materials,
-  query,
-  scope,
-  selected,
-  onQueryChange,
-  onRetry,
-  onScopeChange,
-  onSelect,
-  t,
-}: TranslationProps & {
-  disabled: boolean;
-  hasTaskCourse: boolean;
-  isError: boolean;
-  isFetching: boolean;
-  materials: ProblemLibraryMaterial[];
-  query: string;
-  scope: ProblemSourceScope;
-  selected: ProblemLibraryMaterial | null;
-  onQueryChange: (query: string) => void;
-  onRetry: () => void;
-  onScopeChange: (scope: ProblemSourceScope) => void;
-  onSelect: (material: ProblemLibraryMaterial) => void;
-}) {
-  return (
-    <div className="min-h-[250px] w-full rounded-[10px] border border-primary bg-card px-5 py-5 sm:h-[250px] sm:px-[29px]">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="flex shrink-0 gap-2">
-          <SourceModeButton active={scope === "course"} disabled={disabled} onClick={() => onScopeChange("course")}>
-            {hasTaskCourse ? t("addProblemsCurrentCourse") : t("addProblemsUncategorized")}
-          </SourceModeButton>
-          <SourceModeButton active={scope === "all"} disabled={disabled} onClick={() => onScopeChange("all")}>
-            {t("addProblemsAllMine")}
-          </SourceModeButton>
-        </div>
-        <label className="relative min-w-0 flex-1">
-          <span className="sr-only">{t("addProblemsLibrarySearchLabel")}</span>
-          <Search aria-hidden="true" className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={query}
-            disabled={disabled}
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder={t("addProblemsLibrarySearchPlaceholder")}
-            className="h-10 w-full rounded-[8px] border bg-card pl-9 pr-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
-          />
-        </label>
-      </div>
-
-      <div className="mt-4 h-[146px] overflow-y-auto rounded-[8px] border" aria-busy={isFetching}>
-        {isError ? (
-          <div className="flex h-full items-center justify-center gap-3 text-[13px] text-danger">
-            {t("addProblemsLibraryError")}
-            <button type="button" onClick={onRetry} className="font-semibold text-primary hover:underline">{t("retry")}</button>
-          </div>
-        ) : isFetching && materials.length === 0 ? (
-          <div className="flex h-full items-center justify-center gap-2 text-[13px] text-muted-foreground">
-            <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />{t("loading")}
-          </div>
-        ) : materials.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-[13px] text-muted-foreground">{t("addProblemsLibraryEmpty")}</div>
-        ) : (
-          <ul className="divide-y">
-            {materials.map((material) => {
-              const supported = isAcceptedProblemSource(material.filename);
-              const active = selected?.material_id === material.material_id;
-              return (
-                <li key={material.material_id}>
-                  <button
-                    type="button"
-                    disabled={disabled || !supported}
-                    aria-pressed={active}
-                    onClick={() => onSelect(material)}
-                    className={cn(
-                      "flex min-h-12 w-full items-center gap-3 px-4 py-2 text-left outline-none transition hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-                      active && "bg-blue-50 dark:bg-blue-950/30",
-                    )}
-                  >
-                    <FileText aria-hidden="true" className={cn("h-4 w-4 shrink-0", active ? "text-primary" : "text-muted-foreground")} />
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{material.filename}</span>
-                    <span className="shrink-0 text-[12px] text-muted-foreground">
-                      {supported ? formatFileSize(material.size_bytes) : t("addProblemsUnsupportedShort")}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-    </div>
-  );
+function getRestoredDraft(state: unknown, taskId?: string) {
+  const draft = (state as AddProblemsRouteState | null)?.questionPreparationDraft;
+  return draft && draft.taskId === taskId && draft.sources?.length ? draft : null;
 }
 
-function SourceModeButton({
-  active,
-  children,
-  disabled = false,
-  onClick,
-  wide = false,
-}: {
-  active: boolean;
-  children: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  wide?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        "h-7 shrink-0 rounded-full px-4 text-[13px] font-semibold leading-4 outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-        wide ? "min-w-[150px]" : "min-w-[110px]",
-        active ? "bg-[#DBE8FF] text-primary" : "bg-[#F8FAFC] text-muted-foreground hover:text-foreground dark:bg-muted",
-      )}
-    >
-      {children}
-    </button>
-  );
+function sourceHasValue(source: SourceDraft) {
+  return source.sourceMode === "upload" ? Boolean(source.file) : Boolean(source.libraryMaterial);
 }
 
-function StructureModeButton({ active, children, disabled = false, onClick }: { active: boolean; children: React.ReactNode; disabled?: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        "h-7 w-[130px] rounded-full text-[13px] font-semibold leading-4 outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-        active ? "bg-[#DBE8FF] text-primary" : "bg-[#F8FAFC] text-muted-foreground hover:text-foreground dark:bg-muted",
-      )}
-    >
-      {children}
-    </button>
-  );
+function sourceSummary(source: SourceDraft, locale: string) {
+  if (source.sourceMode === "upload" && source.file) return source.file.name;
+  if (source.sourceMode === "library" && source.libraryMaterial) return source.libraryMaterial.filename;
+  return tx(locale, `${roleMeta(source.role, locale).shortTitle}来源`, `${roleMeta(source.role, locale).shortTitle} source`);
 }
 
-function CandidateSummaryPanel({
-  result,
-  selectedCandidateIds,
-  reviewConfirmed,
-  disabled,
-  onReviewConfirmedChange,
-  onToggleCandidate,
-  t,
-}: TranslationProps & {
-  result: ProblemSourcePreflightResponse;
-  selectedCandidateIds: string[];
-  reviewConfirmed: boolean;
-  disabled: boolean;
-  onReviewConfirmedChange: (confirmed: boolean) => void;
-  onToggleCandidate: (candidateId: string) => void;
-}) {
-  const summary = result.candidate_summary;
-  const candidates = [...summary.matched, ...summary.possible_matches];
-  return (
-    <div className="border-t px-[29px] py-4">
-      <p className="text-[14px] font-semibold leading-5 text-foreground">{t("addProblemsCandidateSummaryTitle")}</p>
-      <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-        {t("addProblemsMatched")}{summary.matched.length} · {t("addProblemsPossible")}{summary.possible_matches.length} · {t("addProblemsNotFound")}{summary.not_found.length}
-      </p>
-      {candidates.length ? (
-        <ul className="mt-2 grid max-h-48 gap-2 overflow-y-auto pr-1 text-[13px] leading-5 text-foreground sm:grid-cols-2">
-          {candidates.map((candidate) => (
-            <li key={candidate.candidate_id}>
-              <label className="flex min-w-0 cursor-pointer items-start gap-2 rounded-[8px] border px-3 py-2 hover:border-primary/50">
-                <input
-                  type="checkbox"
-                  checked={selectedCandidateIds.includes(candidate.candidate_id)}
-                  disabled={disabled}
-                  onChange={() => onToggleCandidate(candidate.candidate_id)}
-                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-primary"
-                />
-                <span className="min-w-0">
-                  <span className="block truncate font-semibold">
-                    {candidate.question_number || candidate.candidate_id}
-                    <span className="ml-2 font-normal text-muted-foreground">
-                      {candidate.match_kind === "matched" ? t("addProblemsCandidateMatched") : t("addProblemsCandidatePossible")}
-                    </span>
-                  </span>
-                  <span className="block truncate text-muted-foreground">{candidate.preview || candidate.reason || t("addProblemsCandidateNoPreview")}</span>
-                </span>
-              </label>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {summary.not_found.length ? (
-        <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
-          {t("addProblemsNotFoundNumbers")}{summary.not_found.join(t("addProblemsModelSeparator"))}
-        </p>
-      ) : null}
-      <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-        {summary.semantic_match_performed ? t("addProblemsSemanticPerformed") : t("addProblemsSemanticNotPerformed")}
-      </p>
-      <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-[8px] bg-muted/40 px-3 py-2 text-[13px] leading-5 text-foreground">
-        <input
-          type="checkbox"
-          checked={reviewConfirmed}
-          disabled={disabled}
-          onChange={(event) => onReviewConfirmedChange(event.target.checked)}
-          className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-primary"
-        />
-        <span>{t("addProblemsCandidateReviewConfirmed")}</span>
-      </label>
-    </div>
-  );
-}
-
-function isAcceptedProblemSource(filename: string) {
-  const lower = filename.trim().toLowerCase();
-  return ACCEPTED_PROBLEM_EXTENSIONS.some((extension) => lower.endsWith(extension));
+function roleMeta(role: PreparationSourceRole, locale: string) {
+  const zh = {
+    problem: { title: "题目文件（必填）", shortTitle: "题目", description: "上传题目正文，或从课程资料库选择题目来源。" },
+    reference_answer: { title: "标答 / 解答（可选）", shortTitle: "标答", description: "可只提供最终答案；AI 会补全可审核的解题过程。" },
+    rubric: { title: "评分标准（可选）", shortTitle: "评分标准", description: "评分步骤会与标答步骤一并呈现，便于一次审核。" },
+    programming_tests: { title: "编程题测试资料（可选）", shortTitle: "测试样例", description: "仅编程题使用，支持输入、期望输出、解释与隐藏测试。" },
+  } as const;
+  const en = {
+    problem: { title: "Problem Files (Required)", shortTitle: "Problems", description: "Upload problem statements or choose them from the course library." },
+    reference_answer: { title: "Answers / Solutions (Optional)", shortTitle: "Answers", description: "A final answer is enough; AI will expand it into a reviewable solution." },
+    rubric: { title: "Grading Rubrics (Optional)", shortTitle: "Rubrics", description: "Rubric items are reviewed alongside the matching answer steps." },
+    programming_tests: { title: "Programming Tests (Optional)", shortTitle: "Test Cases", description: "Programming problems only: inputs, expected outputs, explanations and hidden tests." },
+  } as const;
+  return locale === "zh-CN" ? zh[role] : en[role];
 }
 
 function formatFileSize(value?: number | null) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "—";
+  if (!value || value <= 0) return "—";
   if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function useDebouncedValue(value: string, delay: number) {
   const [debounced, setDebounced] = useState(value);
-
   useEffect(() => {
     const timeout = window.setTimeout(() => setDebounced(value), delay);
     return () => window.clearTimeout(timeout);
   }, [delay, value]);
-
   return debounced;
 }
 
-interface ProblemSourceDraft {
-  taskId: string;
-  sourceMode: ProblemSourceMode;
-  selectedFile: File | null;
-  libraryScope: ProblemSourceScope;
-  librarySearch: string;
-  selectedMaterial: ProblemLibraryMaterial | null;
-  structureMode: ProblemStructureMode;
-  extractionHint: string;
-  saveToLibrary: boolean;
-}
-
-interface ProblemSourceRouteState {
-  problemSourceDraft: ProblemSourceDraft;
-}
-
-function getProblemSourceDraft(state: unknown, taskId: string | undefined): ProblemSourceDraft | null {
-  if (!state || typeof state !== "object" || !("problemSourceDraft" in state)) return null;
-  const draft = (state as { problemSourceDraft?: ProblemSourceDraft }).problemSourceDraft;
-  return draft?.taskId === taskId ? (draft ?? null) : null;
-}
-
-const PROBLEM_SOURCE_ERROR_KEYS: Record<string, MessageKey> = {
-  problem_source_decode_failed: "addProblemsErrorInvalidSource",
-  problem_source_character_limit_exceeded: "addProblemsErrorTextTooLong",
-  problem_source_token_limit_exceeded: "addProblemsErrorTextTooLong",
-  pdf_extraction_timeout: "addProblemsErrorPdfTimeout",
-  pdf_extraction_busy: "addProblemsErrorPdfBusy",
-  pdf_page_limit_exceeded: "addProblemsErrorPdfTooManyPages",
-  pdf_character_limit_exceeded: "addProblemsErrorTextTooLong",
-  pdf_extraction_failed: "addProblemsErrorInvalidSource",
-  course_material_too_large: "addProblemsErrorSourceTooLarge",
-  course_material_owner_count_limit: "addProblemsErrorStorageLimit",
-  course_material_global_count_limit: "addProblemsErrorStorageLimit",
-  course_material_owner_bytes_limit: "addProblemsErrorStorageLimit",
-  course_material_global_bytes_limit: "addProblemsErrorStorageLimit",
-  problem_source_draft_too_large: "addProblemsErrorSourceTooLarge",
-  problem_source_draft_owner_count_limit: "addProblemsErrorDraftLimit",
-  problem_source_draft_global_count_limit: "addProblemsErrorDraftLimit",
-  problem_source_draft_owner_bytes_limit: "addProblemsErrorStorageLimit",
-  problem_source_draft_global_bytes_limit: "addProblemsErrorStorageLimit",
-  problem_source_material_changed: "addProblemsErrorSourceChanged",
-  problem_source_text_unavailable: "addProblemsErrorSourceExpired",
-  candidate_confirmation_required: "addProblemsCandidateSelectionRequired",
-  unknown_candidate_ids: "addProblemsErrorCandidatesChanged",
-  stale_problem_source: "addProblemsErrorStale",
-  task_workflow_busy: "addProblemsErrorBusy",
-  different_problem_source_running: "addProblemsErrorDifferentRunning",
-  problem_replacement_confirmation_required: "addProblemsErrorReplacementRequired",
-};
-
-function localizeProblemSourceError(
-  error: unknown,
-  t: (key: MessageKey) => string,
-): string {
-  const normalized = normalizeAPIError(error);
-  const code = getProblemSourceErrorCode(normalized.payload?.detail);
-  const mappedKey = code ? PROBLEM_SOURCE_ERROR_KEYS[code] : undefined;
-  if (mappedKey) return t(mappedKey);
-
-  switch (normalized.status) {
-    case 0:
-      return t("addProblemsErrorNetwork");
-    case 400:
-      return t("addProblemsErrorInvalidSource");
-    case 404:
-      return t("addProblemsErrorSourceExpired");
-    case 408:
-      return t("addProblemsErrorPdfTimeout");
-    case 409:
-      return t("addProblemsErrorConflict");
-    case 413:
-      return t("addProblemsErrorSourceTooLarge");
-    case 422:
-      return t("addProblemsErrorCandidatesChanged");
-    case 429:
-      return t("addProblemsErrorStorageLimit");
-    case 503:
-      return t("addProblemsErrorModelUnavailable");
-    default:
-      return t("addProblemsErrorGeneric");
-  }
-}
-
-function getProblemSourceErrorCode(detail: unknown): string | null {
-  if (!detail || typeof detail !== "object" || !("code" in detail)) return null;
-  const code = (detail as { code?: unknown }).code;
-  return typeof code === "string" ? code : null;
+function tx(locale: string, zh: string, en: string) {
+  return locale === "zh-CN" ? zh : en;
 }

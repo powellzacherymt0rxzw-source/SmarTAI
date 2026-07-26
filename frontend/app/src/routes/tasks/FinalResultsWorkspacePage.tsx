@@ -109,7 +109,7 @@ export function FinalResultsWorkspacePage() {
         </Link>
       </div>
 
-      <NewTaskStepper currentStep={6} />
+      <NewTaskStepper currentStep={7} />
 
       <ResultStateBanner locale={locale} finalization={finalization} />
 

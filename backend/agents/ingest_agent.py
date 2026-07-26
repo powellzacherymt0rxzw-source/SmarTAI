@@ -773,8 +773,11 @@ Return exactly one JSON object:
 }]}
 
 Rules:
-- criterion: a concrete, usable scoring rubric.
-- reference_answer: a correct model answer or derivation suitable for teacher review.
+- criterion: a concrete, usable scoring rubric whose numbered scoring steps align with the
+  corresponding numbered reference-answer steps and whose points add up to the full score.
+- reference_answer: a correct model answer or derivation suitable for teacher review. If an
+  existing teacher answer contains only a final answer, preserve that conclusion and expand it
+  into explicit, checkable solution steps rather than replacing it with an unrelated approach.
 - solution_code: only for programming questions; return reference implementation text, never run it.
 - test_cases: only for programming questions; return structured cases, at most the requested count.
 - For tests requiring GUI, network, files, special packages, or large resources, set sandbox_feasible=false.

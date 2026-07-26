@@ -6,6 +6,8 @@ import type {
   ProblemSourceScope,
   StartProblemExtractionInput,
   StartProblemExtractionResponse,
+  StartQuestionPreparationInput,
+  StartQuestionPreparationResponse,
 } from "@/types";
 
 export function listProblemSourceLibrary(
@@ -31,13 +33,34 @@ export async function preflightProblemSource(
     formData.append("library_material_id", input.libraryMaterialId);
   }
   formData.append("structure_mode", input.structureMode);
+  formData.append("role", input.role ?? "problem");
   formData.append("extraction_hint", input.extractionHint?.trim() ?? "");
   formData.append("save_to_library", String(input.saveToLibrary));
 
   try {
     const response = await apiClient.post<ProblemSourcePreflightResponse>(
-      `/tasks/${input.taskId}/problem-sources/preflight`,
+      `/tasks/${input.taskId}/question-preparation/sources/preflight`,
       formData,
+      { timeout: 180_000 },
+    );
+    return response.data;
+  } catch (error) {
+    throw normalizeAPIError(error);
+  }
+}
+
+export async function startQuestionPreparation(
+  input: StartQuestionPreparationInput,
+): Promise<StartQuestionPreparationResponse> {
+  try {
+    const response = await apiClient.post<StartQuestionPreparationResponse>(
+      `/tasks/${input.taskId}/question-preparation/jobs`,
+      {
+        source_tokens: input.sourceTokens,
+        expected_workflow_revision: input.expectedWorkflowRevision,
+        replace_confirmed: input.replaceConfirmed ?? false,
+        generation_policy: "complete_required_materials",
+      },
       { timeout: 180_000 },
     );
     return response.data;

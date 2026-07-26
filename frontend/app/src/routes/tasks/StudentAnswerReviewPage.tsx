@@ -230,7 +230,7 @@ export function StudentAnswerReviewPage() {
           {t(searchParams.get("from") === "student" ? "answerReviewBackStudent" : "answerReviewBackMatrix")}
         </Link>
       </div>
-      <NewTaskStepper currentStep={2} />
+      <NewTaskStepper currentStep={3} />
 
       {taskQuery.isLoading ? (
         <PageState title={t("answerReviewLoading")} busy />

@@ -36,7 +36,7 @@ export function QuestionMaterialImportProgressPage() {
       <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
         {materialImportText(locale, "progressTitle")}
       </h1>
-      <NewTaskStepper currentStep={1} />
+      <NewTaskStepper currentStep={2} />
 
       <section className="mx-auto mt-[45px] w-full max-w-[800px] rounded-[10px] border bg-card px-6 py-7 sm:min-h-[390px] sm:px-10 sm:py-9">
         <div className="text-center">

@@ -185,7 +185,7 @@ export function QuestionMaterialImportPage() {
           {materialImportText(locale, "title")}
         </h1>
       </div>
-      <NewTaskStepper currentStep={1} />
+      <NewTaskStepper currentStep={2} />
 
       <form
         className="mx-auto mt-[35px] min-h-[558px] w-full max-w-[900px] rounded-[10px] border bg-card px-6 pb-6 pt-7 sm:px-[49px] sm:pb-[28px] sm:pt-[38px]"

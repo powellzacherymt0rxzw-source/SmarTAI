@@ -1,20 +1,35 @@
 import { Check } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { MessageKey } from "@/i18n/messages";
 
 const STEP_KEYS: MessageKey[] = [
-  "newTaskStepProblems",
-  "newTaskStepMaterials",
-  "newTaskStepAnswers",
-  "newTaskStepConfirm",
-  "newTaskStepGrade",
+  "newTaskStepTask",
+  "newTaskStepUpload",
+  "newTaskStepQuestionReview",
+  "newTaskStepSubmissions",
+  "newTaskStepGradingSetup",
+  "newTaskStepGrading",
   "newTaskStepReview",
   "newTaskStepComplete",
 ];
 
-export function NewTaskStepper({ currentStep = 0 }: { currentStep?: number }) {
+const STEP_PATHS = [
+  "edit",
+  "upload/problems",
+  "questions",
+  "submissions/upload",
+  "grading-setup",
+  "grading/progress",
+  "review",
+  "results",
+] as const;
+
+export function NewTaskStepper({ currentStep = 0, reachableStep = currentStep, returnState }: { currentStep?: number; reachableStep?: number; returnState?: unknown }) {
   const { t } = useI18n();
+  const { taskId } = useParams();
+  const location = useLocation();
   const navRef = useRef<HTMLElement>(null);
   const currentStepRef = useRef<HTMLLIElement>(null);
 
@@ -28,34 +43,61 @@ export function NewTaskStepper({ currentStep = 0 }: { currentStep?: number }) {
 
   return (
     <nav ref={navRef} aria-label={t("newTaskWorkflow")} className="mt-[14px] overflow-x-auto pb-1">
-      <ol className="flex min-w-[1130px] items-center">
+      <ol className="flex min-w-[1220px] items-center">
         {STEP_KEYS.map((key, index) => (
           <li
             ref={index === currentStep ? currentStepRef : undefined}
             key={key}
-            className={`relative flex shrink-0 items-center ${index < STEP_KEYS.length - 1 ? "w-[176px]" : "w-auto"}`}
+            className={`relative flex shrink-0 items-center ${index < STEP_KEYS.length - 1 ? "w-[166px]" : "w-auto"}`}
           >
-            <div className="flex shrink-0 items-center gap-2">
-              <span
-                className={`inline-flex h-[26px] w-[26px] items-center justify-center rounded-full text-xs font-semibold ${
-                  index < currentStep
-                    ? "bg-accent text-white"
-                    : index === currentStep
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-slate-200 text-white dark:bg-slate-600"
-                }`}
+            {index <= reachableStep && (taskId || index === 0) ? (
+              <Link
+                to={stepHref(taskId, index, location.pathname, location.search)}
+                state={returnState}
                 aria-current={index === currentStep ? "step" : undefined}
+                className="group flex shrink-0 items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
-                {index < currentStep ? <Check aria-hidden="true" size={15} strokeWidth={3} /> : index + 1}
-              </span>
-              <span className={`whitespace-nowrap text-[13px] font-medium ${index === currentStep ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{t(key)}</span>
-            </div>
+                <StepMarker index={index} currentStep={currentStep} />
+                <span className={`whitespace-nowrap text-[13px] font-medium transition-colors group-hover:text-primary ${index === currentStep ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{t(key)}</span>
+              </Link>
+            ) : (
+              <div className="flex shrink-0 cursor-not-allowed items-center gap-2" aria-disabled="true">
+                <StepMarker index={index} currentStep={currentStep} />
+                <span className="whitespace-nowrap text-[13px] font-medium text-muted-foreground">{t(key)}</span>
+              </div>
+            )}
             {index < STEP_KEYS.length - 1 ? (
-              <span aria-hidden="true" className={`absolute left-[104px] top-[13px] h-px w-14 ${index < currentStep ? "bg-accent" : "bg-border"}`} />
+              <span aria-hidden="true" className={`absolute left-[100px] top-[13px] h-px w-12 ${index < currentStep ? "bg-accent" : "bg-border"}`} />
             ) : null}
           </li>
         ))}
       </ol>
     </nav>
+  );
+}
+
+function stepHref(taskId: string | undefined, index: number, pathname: string, search: string) {
+  if (!taskId) return "/tasks/new";
+  if (index === 0) {
+    if (pathname.endsWith("/edit")) return `${pathname}${search}`;
+    const returnTo = `${pathname}${search}`;
+    return `/tasks/${encodeURIComponent(taskId)}/edit?returnTo=${encodeURIComponent(returnTo)}`;
+  }
+  return `/tasks/${encodeURIComponent(taskId)}/${STEP_PATHS[index]}`;
+}
+
+function StepMarker({ index, currentStep }: { index: number; currentStep: number }) {
+  return (
+    <span
+      className={`inline-flex h-[26px] w-[26px] items-center justify-center rounded-full text-xs font-semibold ${
+        index < currentStep
+          ? "bg-accent text-white"
+          : index === currentStep
+            ? "bg-primary text-primary-foreground"
+            : "bg-slate-200 text-white dark:bg-slate-600"
+      }`}
+    >
+      {index < currentStep ? <Check aria-hidden="true" size={15} strokeWidth={3} /> : index + 1}
+    </span>
   );
 }

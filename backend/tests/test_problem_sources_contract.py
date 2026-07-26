@@ -65,18 +65,153 @@ def _preflight(
     mode: str = "organized",
     hint: str = "",
     save_to_library: bool = False,
+    role: str = "problem",
+    unified_route: bool = False,
     headers=HEADERS,
 ):
     return client.post(
-        f"/tasks/{task_id}/problem-sources/preflight",
+        (
+            f"/tasks/{task_id}/question-preparation/sources/preflight"
+            if unified_route
+            else f"/tasks/{task_id}/problem-sources/preflight"
+        ),
         headers=headers,
         data={
             "structure_mode": mode,
             "extraction_hint": hint,
             "save_to_library": str(save_to_library).lower(),
+            "role": role,
         },
         files={"file": (filename, body, "text/plain")},
     )
+
+
+def test_unified_preparation_accepts_independent_roles_and_commits_once(client, monkeypatch):
+    task_id = _create_task(client)
+    task = get_task_store().get(task_id)
+    assert task is not None
+    revision = task.workflow_revision
+    problem = _preflight(client, task_id, unified_route=True).json()
+    answer = _preflight(
+        client,
+        task_id,
+        body=b"1. x = 2",
+        filename="answers.txt",
+        role="reference_answer",
+        unified_route=True,
+    ).json()
+    tests = _preflight(
+        client,
+        task_id,
+        body=b'[{"input":"1","expected_output":"2"}]',
+        filename="tests.json",
+        role="programming_tests",
+        unified_route=True,
+    ).json()
+    assert answer["role"] == "reference_answer"
+    assert answer["candidate_summary"]["matched"] == []
+    assert tests["role"] == "programming_tests"
+
+    observed: dict = {}
+
+    async def fake_prepare(sources, provider, *, provider_id, reporter):
+        observed["roles"] = [draft.role for draft, _text in sources]
+        observed["provider_id"] = provider_id
+        return {
+            "q1": {
+                "q_id": "q1",
+                "number": "1",
+                "type": "calculation",
+                "stem": "$x+1=3$",
+                "criterion": "1. Solve (10 points)",
+                "reference_answer": "1. Subtract 1, so $x=2$.",
+                "review_status": "needs_review",
+                "preparation_issues": [],
+            },
+        }
+
+    monkeypatch.setattr("backend.api.tasks.prepare_question_packages", fake_prepare)
+    monkeypatch.setattr(
+        "backend.llm.registry.ExpertRegistryView.pick_default",
+        lambda self: MagicMock(provider_id="mock-unified"),
+    )
+    started = client.post(
+        f"/tasks/{task_id}/question-preparation/jobs",
+        headers=HEADERS,
+        json={
+            "source_tokens": [
+                problem["source_token"],
+                answer["source_token"],
+                tests["source_token"],
+            ],
+            "expected_workflow_revision": revision,
+        },
+    )
+    assert started.status_code == 200, started.text
+    assert started.json()["status"] == "started"
+    assert started.json()["source_count"] == 3
+    asyncio.run(asyncio.sleep(0.1))
+    completed = client.get(f"/tasks/{task_id}", headers=HEADERS).json()
+    assert completed["status"] == "problems_ready"
+    assert completed["problem_data"]["q1"]["reference_answer"].endswith("$x=2$.")
+    assert observed == {
+        "roles": ["problem", "reference_answer", "programming_tests"],
+        "provider_id": "mock-unified",
+    }
+
+
+def test_non_problem_source_token_cannot_enter_legacy_extraction(client):
+    task_id = _create_task(client)
+    answer = _preflight(
+        client,
+        task_id,
+        body=b"1. final answer",
+        filename="answers.txt",
+        role="reference_answer",
+        unified_route=True,
+    ).json()
+    response = client.post(
+        f"/tasks/{task_id}/extract_problems",
+        headers=HEADERS,
+        data={"source_token": answer["source_token"]},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "problem_source_role_mismatch",
+        "role": "reference_answer",
+    }
+
+
+def test_teacher_edit_resolves_only_the_matching_preparation_risk(client):
+    task_id = _create_task(client)
+    task = get_task_store().get(task_id)
+    assert task is not None
+    task.status = "problems_ready"
+    task.problem_data = {
+        "q1": {
+            "q_id": "q1",
+            "number": "1",
+            "type": "calculation",
+            "stem": "Solve",
+            "criterion": "old rubric",
+            "reference_answer": "answer",
+            "review_status": "needs_review",
+            "preparation_issues": [
+                {"issue_id": "i-rubric", "field": "rubric", "code": "low_confidence", "status": "open"},
+                {"issue_id": "i-answer", "field": "answer", "code": "source_conflict", "status": "open"},
+            ],
+        },
+    }
+    response = client.put(
+        f"/tasks/{task_id}/problems/q1",
+        headers=HEADERS,
+        json={"criterion": "teacher rubric"},
+    )
+    assert response.status_code == 200, response.text
+    issues = response.json()["problem"]["preparation_issues"]
+    assert issues[0]["status"] == "resolved"
+    assert issues[0]["resolution"] == "teacher_edited"
+    assert issues[1]["status"] == "open"
 
 
 def test_original_source_hint_is_optional_but_confirmation_is_explicit(client, monkeypatch):

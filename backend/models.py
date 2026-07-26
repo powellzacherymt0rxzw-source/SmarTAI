@@ -90,6 +90,9 @@ class Correction(BaseModel):
 # ─── Problem & student answer models ──────────────────────────────────────────
 
 MaterialImportTarget = Literal["criterion", "reference_answer", "test_cases"]
+PreparationSourceRole = Literal[
+    "problem", "reference_answer", "rubric", "programming_tests",
+]
 AICompletionTarget = Literal[
     "criterion", "reference_answer", "solution_code", "test_cases",
 ]
@@ -122,6 +125,10 @@ class TestCase(BaseModel):
     input: str = ""
     expected_output: str = ""
     description: str = ""
+    title: str = ""
+    visibility: Literal["example", "hidden"] = "example"
+    purpose: Literal["normal", "boundary", "error", "performance", "other"] = "normal"
+    io_mode: Literal["stdin", "function"] = "stdin"
     source: Literal["teacher", "llm_generated"] = "teacher"
     sandbox_feasible: bool = Field(
         default=True,
@@ -571,6 +578,7 @@ class ProblemSourceDraft(BaseModel):
     source_token: str
     task_id: str
     owner_id: str
+    role: PreparationSourceRole = "problem"
     source_kind: Literal["upload", "library"]
     structure_mode: ProblemStructureMode
     extraction_hint: str = ""

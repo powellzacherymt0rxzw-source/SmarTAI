@@ -1,6 +1,6 @@
 # Q01–Q03 题目资料统一准备与审核：后端实施契约（2026-07-26）
 
-> 状态：产品与后端目标契约已锁定，尚未实现。
+> 状态：兼容期统一编排首版已实现并通过定向回归；结构化题目包、字段级 CAS、持久化与沙箱校验仍按本文继续实施。
 >
 > 适用范围：Q01 题目资料来源、Q02 统一处理进度、Q03 风险矩阵，以及后续连续题目审核页。
 >
@@ -403,3 +403,34 @@ draft
 - HackerRank 官方 custom checker 文档说明近似答案需要受控校验逻辑，并可返回逐例结果、分数和消息：<https://support.hackerrank.com/articles/6515044510-creating-a-custom-checker>。
 
 SmarTAI 只借鉴上述清晰的信息层次和防泄漏边界，不复制 LeetCode 的视觉样式；可见外观仍以本项目 Figma 的留白、字体、圆角和克制配色为准。
+
+## 14. 2026-07-26 兼容期实施快照
+
+本节记录已经进入代码的事实，避免后续后端把“目标契约”和“现有能力”混为一谈。目标数据模型与最终 API 仍以前文为准。
+
+### 14.1 本轮已经实现
+
+- `PreparationSourceRole` 已进入 `backend/models.py`，来源草稿按 `problem / reference_answer / rubric / programming_tests` 绑定角色；旧抽题接口拒绝复用非题目 token。
+- `POST /tasks/{id}/question-preparation/sources/preflight` 已作为 role-aware 预检入口；上传和课程资料库来源都继续复用 owner、task、hash、workflow revision 与过期校验。JSON 只新增为编程测试资料可接受格式，不代表 OCR/DOCX 已支持。
+- `POST /tasks/{id}/question-preparation/jobs` 已接入一次性编排：一个请求收集四类多来源、一个 fingerprint、一个后台任务、一个 `ProgressReporter` 和一次 `TaskStore.commit_problem_extraction` 原子提交。相同请求继续沿用既有 running/done 幂等门禁。
+- 新增 `backend/agents/question_preparation_agent.py` 作为兼容期编排层，顺序执行题目抽取、可选资料匹配、缺项生成、答案过程扩展、rubric 对齐提示、编程测试归一化与风险收集。任一步异常都走旧成功版本保留/失败恢复路径。
+- 未上传的标答与评分标准会在同一任务内生成；上传标答即使只有最终答案，也会进入“保留最终答案并补全过程”的生成要求。非编程题在提交前删除 `solution_code/test_cases`。
+- `TestCase` 已补 `title / visibility / purpose / io_mode`，前端可按成熟 OJ 的“示例/隐藏、输入、期望输出、解释”层次审核；当前仍未执行参考解沙箱。
+- 当前兼容数据在每题 `preparation_issues` 中记录 open risk；教师编辑某一字段时，只把同字段的 open risk 标记为 resolved，不会顺手清掉其他冲突。
+- 契约回归覆盖 role-aware 预检、JSON、统一任务一次提交、旧 token 角色隔离及逐字段风险解除；2026-07-26 定向结果为 `51 passed, 1 skipped`，随后整库回归为 `233 passed, 1 skipped`。
+
+### 14.2 本轮尚未实现，后端不得误判为完成
+
+1. 当前 `ProblemInfo` 仍以字符串题干/标答/评分标准和松散 provenance 为主；`PreparedField`、`SolutionStep`、`RubricItem.answer_step_ids`、独立 `field_version` 尚未落地。
+2. 当前风险来自资料匹配置信度、来源候选差异和生成失败；真正的 AI/原文逐字段冲突检测、alternatives 完整保留和 blocking/warning 确认规则仍需 BQ-03。
+3. `/question-preparation/index`、分页 questions、独立 issues 查询、字段级 PATCH/CAS、confirm-all 和准备资料导出仍未成为正式后端 API；前端首版暂时通过现有 task/problem 更新合同完成连续审核。
+4. repository protocol、PostgreSQL、对象存储、可恢复 job 和 hidden test 独立权限仍未实现；来源、任务、问题包依旧受进程内存生命周期限制。
+5. OJ 测试只完成展示字段兼容；参考解执行、逐例结果、超时/容差、hidden 防泄漏接口与 tests 导出仍属于 BQ-04。
+6. 旧 Q08/Q09 route 仍保留兼容能力，但新前端主流程已删除对应“批量导入资料 / AI 补全缺失项”入口。后端后续应让旧 endpoint 调用统一 domain service，再做 deprecate，不复制新分支。
+
+### 14.3 后续后端一次做对的顺序
+
+1. 先完成 `PreparedField + SolutionStep + StructuredRubric + PreparationIssue` 与旧数据转换器，并建立 repository protocol；这是字段级编辑、步骤对应和持久化的共同前置。
+2. 再把当前兼容编排从松散 `problem_data` 迁入统一 domain service，补 alternatives、结构化 provenance、语义冲突检测和稳定 issue code。
+3. 接着交付 index / questions / issues / field-CAS / confirm-all API，让连续审核页不再逐题循环调用旧 PUT。
+4. 最后完成 OJ 沙箱与导出，再替换 PostgreSQL/对象存储 adapter。每一步继续保留旧 route 适配和 idempotency 回归，直到前端迁移完成。

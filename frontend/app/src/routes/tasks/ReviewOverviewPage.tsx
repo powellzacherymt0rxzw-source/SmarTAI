@@ -88,7 +88,7 @@ export function ReviewOverviewPage() {
       <h1 className="min-h-9 text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
         {copy(locale, "title")}
       </h1>
-      <NewTaskStepper currentStep={5} />
+      <NewTaskStepper currentStep={6} />
 
       {!taskId ? (
         <PageState title={copy(locale, "missingTask")} href="/history" action={copy(locale, "viewHistory")} />

@@ -234,7 +234,7 @@ function ProgressPageFrame({ title, children }: { title: string; children: React
       <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
         {title}
       </h1>
-      <NewTaskStepper currentStep={2} />
+      <NewTaskStepper currentStep={3} />
       <div className="mx-auto mt-[45px] w-full max-w-[800px]">{children}</div>
     </div>
   );

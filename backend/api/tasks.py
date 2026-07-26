@@ -57,6 +57,7 @@ from backend.models import (
     MaterialImportDraft,
     MaterialImportPlan,
     MaterialImportTarget,
+    PreparationSourceRole,
     ProblemSourceDraft,
     SubmissionIdentityMode,
     Task,
@@ -81,6 +82,7 @@ from backend.agents.ingest_agent import (
     generate_missing_question_materials,
 )
 from backend.agents.grading_agent import grade_batch
+from backend.agents.question_preparation_agent import prepare_question_packages
 from backend.tools.file_processing import (
     decode_text_bytes, extract_files_from_archive, extract_text_from_pdf,
 )
@@ -164,6 +166,13 @@ class UpdateProblemRequest(BaseModel):
 
 class StartMaterialImportRequest(BaseModel):
     source_token: str = Field(min_length=1, max_length=128)
+
+
+class StartQuestionPreparationRequest(BaseModel):
+    source_tokens: List[str] = Field(min_length=1, max_length=20)
+    expected_workflow_revision: int = Field(ge=0)
+    replace_confirmed: bool = False
+    generation_policy: Literal["complete_required_materials"] = "complete_required_materials"
 
 
 class ApplyMaterialImportRequest(BaseModel):
@@ -499,7 +508,7 @@ def _grading_setup_payload(
         payload["status"] = mutation_status
     return payload
 _AI_COMPLETION_MAX_GENERATED_BYTES = 2 * 1024 * 1024
-_PROBLEM_SOURCE_EXTENSIONS = {".pdf", ".txt", ".md"}
+_PROBLEM_SOURCE_EXTENSIONS = {".pdf", ".txt", ".md", ".json"}
 _PROBLEM_SOURCE_MAX_CHARACTERS = 400_000
 _PROBLEM_SOURCE_MAX_ESTIMATED_TOKENS = 120_000
 _SUBMISSION_SOURCE_MAX_BYTES = 50 * 1024 * 1024
@@ -549,7 +558,7 @@ async def _read_problem_source_upload(
     if not filename or extension not in _PROBLEM_SOURCE_EXTENSIONS:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported problem source type. Allowed: PDF, TXT, MD. DOCX and OCR/images are not supported yet.",
+            detail="Unsupported problem source type. Allowed: PDF, TXT, MD, JSON. DOCX and OCR/images are not supported yet.",
         )
     body = await file.read(_PROBLEM_SOURCE_MAX_BYTES + 1)
     if not body:
@@ -1640,6 +1649,7 @@ def list_problem_source_library(
 
 
 @router.post("/{task_id}/problem-sources/preflight")
+@router.post("/{task_id}/question-preparation/sources/preflight")
 async def preflight_problem_source(
     task_id: str,
     file: Optional[UploadFile] = File(default=None),
@@ -1647,6 +1657,7 @@ async def preflight_problem_source(
     structure_mode: Literal["organized", "extract_from_source"] = Form(default="organized"),
     extraction_hint: str = Form(default=""),
     save_to_library: bool = Form(default=False),
+    role: PreparationSourceRole = Form(default="problem"),
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
     material_store: CourseMaterialStore = Depends(get_course_material_store),
@@ -1713,12 +1724,16 @@ async def preflight_problem_source(
     if file is not None:
         source_size_bytes = len(raw_bytes)
 
-    candidates, not_found = _detect_problem_source_candidates(
-        text,
-        structure_mode=structure_mode,
-        extraction_hint=hint,
+    candidates, not_found = (
+        _detect_problem_source_candidates(
+            text,
+            structure_mode=structure_mode,
+            extraction_hint=hint,
+        )
+        if role == "problem"
+        else ([], [])
     )
-    requires_confirmation = structure_mode == "extract_from_source"
+    requires_confirmation = role == "problem" and structure_mode == "extract_from_source"
     now = time.time()
     library_backed = material_id is not None
     draft_text = None if library_backed else text
@@ -1731,6 +1746,7 @@ async def preflight_problem_source(
         source_token=f"ps_{uuid.uuid4().hex}",
         task_id=task.task_id,
         owner_id=task.owner_id,
+        role=role,
         source_kind=source_kind,
         structure_mode=structure_mode,
         extraction_hint=hint,
@@ -1771,6 +1787,7 @@ async def preflight_problem_source(
             "sha256": content_sha256,
             "library_material_id": draft.library_material_id,
         },
+        "role": role,
         "structure_mode": structure_mode,
         "requires_confirmation": requires_confirmation,
         "candidate_summary": {
@@ -3132,6 +3149,244 @@ async def _run_extract(
         )
 
 
+def _question_preparation_fingerprint(drafts: List[ProblemSourceDraft]) -> str:
+    payload = [
+        {
+            "role": draft.role,
+            "sha256": draft.content_sha256,
+            "structure_mode": draft.structure_mode,
+            "extraction_hint": " ".join(draft.extraction_hint.split()),
+            "library_material_id": draft.library_material_id,
+        }
+        for draft in sorted(
+            drafts,
+            key=lambda item: (item.role, item.content_sha256, item.filename),
+        )
+    ]
+    return hashlib.sha256(json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+async def _run_question_preparation(
+    *,
+    task_id: str,
+    sources: List[tuple[ProblemSourceDraft, str]],
+    provider,
+    provider_id: str,
+    job_id: str,
+    task_store: TaskStore,
+    job_store: JobStore,
+    superseded_job_ids: List[str],
+):
+    reporter = get_or_create_reporter(job_id)
+    problem_drafts = [draft for draft, _ in sources if draft.role == "problem"]
+    try:
+        new_problem_data = await prepare_question_packages(
+            sources,
+            provider,
+            provider_id=provider_id,
+            reporter=reporter,
+        )
+        structure_mode: Literal["organized", "extract_from_source"] = (
+            "extract_from_source"
+            if any(draft.structure_mode == "extract_from_source" for draft in problem_drafts)
+            else "organized"
+        )
+        extraction_hint = "\n".join(
+            draft.extraction_hint
+            for draft in problem_drafts
+            if draft.extraction_hint
+        )
+        candidate_ids = [
+            str(candidate.get("candidate_id") or "")
+            for draft in problem_drafts
+            for candidate in draft.candidates
+            if candidate.get("candidate_id")
+        ]
+        library_material_id = next(
+            (draft.library_material_id for draft in problem_drafts if draft.library_material_id),
+            None,
+        )
+        committed, old_grading_job_id = task_store.commit_problem_extraction(
+            task_id,
+            job_id=job_id,
+            problem_data=new_problem_data,
+            structure_mode=structure_mode,
+            extraction_hint=extraction_hint,
+            confirmed_candidates=candidate_ids,
+            library_material_id=library_material_id,
+        )
+        if committed is None:
+            logger.warning("[task:%s] ignored stale unified preparation worker %s", task_id, job_id)
+            return
+        if old_grading_job_id:
+            job_store.discard(old_grading_job_id)
+        for superseded_job_id in superseded_job_ids:
+            remove_reporter(superseded_job_id)
+        from backend.api.analytics import clear_task_analytics_cache
+        clear_task_analytics_cache(task_id)
+        await reporter.set_current_step(
+            "completed",
+            message="Question materials are ready for teacher review.",
+        )
+        await reporter.set_phase("done")
+    except Exception as exc:
+        logger.error(
+            "[task:%s] unified question preparation failed; exception_type=%s",
+            task_id,
+            type(exc).__name__,
+        )
+        await reporter.set_error(
+            "Question material preparation failed. Check the source files and model configuration, then retry."
+        )
+        task_store.fail_problem_extraction(
+            task_id,
+            job_id=job_id,
+            error="question_preparation_failed",
+        )
+
+
+@router.post("/{task_id}/question-preparation/jobs")
+async def start_question_preparation(
+    task_id: str,
+    req: StartQuestionPreparationRequest,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+    job_store: JobStore = Depends(get_job_store),
+    material_store: CourseMaterialStore = Depends(get_course_material_store),
+    source_draft_store: ProblemSourceDraftStore = Depends(get_problem_source_draft_store),
+    registry: ExpertRegistry = Depends(get_expert_registry),
+):
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    _require_task_llm_principal(task, current)
+    tokens = list(dict.fromkeys(token.strip() for token in req.source_tokens if token.strip()))
+    if not tokens:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "question_source_required"})
+
+    drafts: List[ProblemSourceDraft] = []
+    sources: List[tuple[ProblemSourceDraft, str]] = []
+    for token in tokens:
+        draft = source_draft_store.get_for_owner_task(
+            token,
+            owner_id=task.owner_id,
+            task_id=task.task_id,
+        )
+        if draft is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail={"code": "question_preparation_source_expired", "source_token": token},
+            )
+        if draft.base_workflow_revision != req.expected_workflow_revision:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "question_preparation_source_stale"},
+            )
+        if draft.library_material_id:
+            material = material_store.get_for_owner(draft.library_material_id, task.owner_id)
+            if material is None or material.sha256 != draft.content_sha256:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail={"code": "question_preparation_library_source_changed"},
+                )
+            text = material.text
+        else:
+            text = draft.text
+        if text is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "question_preparation_source_text_unavailable"},
+            )
+        drafts.append(draft.model_copy(deep=True))
+        sources.append((draft.model_copy(deep=True), text))
+
+    if not any(draft.role == "problem" for draft in drafts):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "question_source_required"})
+    if task.workflow_revision != req.expected_workflow_revision:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed", "workflow_revision": task.workflow_revision},
+        )
+
+    fingerprint = _question_preparation_fingerprint(drafts)
+    combined_hash = hashlib.sha256("".join(sorted(draft.content_sha256 for draft in drafts)).encode("utf-8")).hexdigest()
+    inspected_outcome, inspected_task = task_store.inspect_problem_extraction(
+        task_id,
+        expected_revision=req.expected_workflow_revision,
+        request_fingerprint=fingerprint,
+        legacy_same_completed_request=False,
+        replace_confirmed=req.replace_confirmed,
+    )
+    inspected_response = _problem_extraction_gate_response(
+        inspected_outcome,
+        inspected_task,
+        expected_workflow_revision=req.expected_workflow_revision,
+    )
+    if inspected_response is not None:
+        return inspected_response
+
+    provider = registry.for_owner(current.id).pick_default()
+    if provider is None:
+        raise HTTPException(503, detail="No LLM provider configured. Add an API key first.")
+    job_id = str(uuid.uuid4())
+    filename = drafts[0].filename if len(drafts) == 1 else f"{drafts[0].filename} + {len(drafts) - 1} sources"
+    outcome, current_task = task_store.begin_problem_extraction(
+        task_id,
+        expected_revision=req.expected_workflow_revision,
+        job_id=job_id,
+        request_fingerprint=fingerprint,
+        content_sha256=combined_hash,
+        filename=filename,
+        legacy_same_completed_request=False,
+        replace_confirmed=req.replace_confirmed,
+    )
+    existing_response = _problem_extraction_gate_response(
+        outcome,
+        current_task,
+        expected_workflow_revision=req.expected_workflow_revision,
+    )
+    if existing_response is not None:
+        return existing_response
+    assert current_task is not None
+    superseded_job_ids = [
+        job for job in {
+            task.extract_job_id,
+            task.parse_job_id,
+            task.grading_job_id,
+            task.reference_parse_job_id,
+            task.test_cases_parse_job_id,
+            task.material_import_job_id,
+            task.last_material_import_job_id,
+            task.ai_completion_job_id,
+            task.last_ai_completion_job_id,
+            task.last_failed_job_id,
+        }
+        if job
+    ]
+    asyncio.create_task(_run_question_preparation(
+        task_id=task_id,
+        sources=sources,
+        provider=provider,
+        provider_id=provider.provider_id,
+        job_id=job_id,
+        task_store=task_store,
+        job_store=job_store,
+        superseded_job_ids=superseded_job_ids,
+    ))
+    return {
+        "status": "started",
+        "job_id": job_id,
+        "task_id": task_id,
+        "request_fingerprint": fingerprint,
+        "workflow_revision": current_task.workflow_revision,
+        "source_count": len(drafts),
+    }
+
+
 @router.post("/{task_id}/extract_problems")
 async def task_extract_problems(
     task_id: str,
@@ -3181,6 +3436,11 @@ async def task_extract_problems(
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND,
                 detail="Problem source token not found or expired.",
+            )
+        if draft.role != "problem":
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "problem_source_role_mismatch", "role": draft.role},
             )
         confirmed_candidate_ids_list, selected_candidates = _parse_confirmed_candidate_ids(
             confirmed_candidate_ids,
@@ -4580,6 +4840,37 @@ def update_problem(
                     "review_status": "confirmed",
                     "updated_at": time.time(),
                 }
+
+    reviewed_issue_fields = set()
+    if stem_edited or (req.review_status == "confirmed" and "stem" in req.model_fields_set):
+        reviewed_issue_fields.add("stem")
+    if "criterion" in req.model_fields_set:
+        reviewed_issue_fields.add("rubric")
+    if "reference_answer" in req.model_fields_set:
+        reviewed_issue_fields.add("answer")
+    if {"solution_code", "test_cases"} & req.model_fields_set:
+        reviewed_issue_fields.add("programming_tests")
+    if reviewed_issue_fields:
+        resolved_at = time.time()
+        new_problem["preparation_issues"] = [
+            {
+                **issue,
+                "status": "resolved",
+                "resolved_at": resolved_at,
+                "resolution": (
+                    "teacher_confirmed"
+                    if req.review_status == "confirmed"
+                    else "teacher_edited"
+                ),
+            }
+            if (
+                isinstance(issue, dict)
+                and issue.get("status") == "open"
+                and issue.get("field") in reviewed_issue_fields
+            )
+            else issue
+            for issue in list(new_problem.get("preparation_issues") or [])
+        ]
 
     # ProblemInfo.review_status belongs only to recognized stem/content.
     # A slot-only request uses review_status to confirm the included provenance

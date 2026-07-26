@@ -196,7 +196,7 @@ export function GradingSetupPage() {
       <h1 className="min-h-9 break-words text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
         {gradingSetupText(locale, "title")}
       </h1>
-      <NewTaskStepper currentStep={1} />
+      <NewTaskStepper currentStep={4} />
 
       <section className="mx-auto mt-[35px] w-full max-w-[900px] rounded-[10px] border bg-card px-5 pb-4 pt-5 sm:min-h-[540px] sm:px-10 sm:pb-5 sm:pt-5 lg:h-[620px] lg:overflow-hidden">
         {!taskId ? (

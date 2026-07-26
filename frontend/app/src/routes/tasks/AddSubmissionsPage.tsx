@@ -197,7 +197,7 @@ export function AddSubmissionsPage() {
         </Link>
       </div>
 
-      <NewTaskStepper currentStep={2} />
+      <NewTaskStepper currentStep={3} />
 
       <div className="mx-auto mt-[45px] w-full max-w-[900px]">
         <div
