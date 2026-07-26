@@ -1,4 +1,4 @@
-import { ArrowRight, LoaderCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, LoaderCircle, Save } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -7,7 +7,15 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Link, useBeforeUnload, useBlocker, useNavigate } from "react-router-dom";
+import {
+  Link,
+  useBeforeUnload,
+  useBlocker,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { toast } from "sonner";
 import { normalizeAPIError } from "@/api/client";
 import {
@@ -17,18 +25,25 @@ import {
   useCreateTag,
   useCreateTask,
   useExperts,
+  useTask,
   useTags,
   useTagSearch,
+  useUpdateTask,
 } from "@/api/hooks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { SmartCatalogField } from "@/components/new-task/SmartCatalogField";
 import { useI18n } from "@/i18n/I18nProvider";
 import { buildSemesterOptions, formatSemesterLabel, getCurrentSemesterId } from "@/lib/semesters";
-import type { Course, TaskTag } from "@/types";
+import type { Course, TaskMetadataPatch, TaskTag } from "@/types";
 
 export function NewTaskPage() {
   const { t } = useI18n();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { taskId } = useParams();
+  const [searchParams] = useSearchParams();
+  const isEditing = Boolean(taskId);
+  const returnTo = safeTaskReturnPath(searchParams.get("returnTo"), taskId);
   const semesterOptions = useMemo(() => buildSemesterOptions(), []);
   const initialSemester = useMemo(() => {
     const current = getCurrentSemesterId();
@@ -43,6 +58,8 @@ export function NewTaskPage() {
   const [tags, setTags] = useState<TaskTag[]>([]);
   const [tagDraft, setTagDraft] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [editHydrated, setEditHydrated] = useState(false);
+  const [initialEditSignature, setInitialEditSignature] = useState<string | null>(null);
   const submittedRef = useRef(false);
   const idempotencyRef = useRef<{ signature: string; key: string } | null>(null);
   const stayButtonRef = useRef<HTMLButtonElement>(null);
@@ -57,19 +74,68 @@ export function NewTaskPage() {
   const createCourse = useCreateCourse();
   const createTag = useCreateTag();
   const createTask = useCreateTask();
+  const updateTask = useUpdateTask();
+  const taskQuery = useTask(taskId);
   const expertsQuery = useExperts();
   const enabledExperts = (expertsQuery.data ?? []).filter((expert) => expert.enabled);
   const courseQueryIsCurrent = debouncedCourseDraft.trim() === courseDraft.trim();
   const tagQueryIsCurrent = debouncedTagDraft.trim() === tagDraft.trim();
+  const isSaving = createTask.isPending || updateTask.isPending;
 
-  const isDirty = Boolean(
-    name.trim()
-    || course
-    || courseDraft.trim()
-    || tags.length
-    || tagDraft.trim()
-    || semesterId !== initialSemester,
-  );
+  useEffect(() => {
+    if (!isEditing || editHydrated || !taskQuery.data || !coursesQuery.isSuccess || !tagsQuery.isSuccess) return;
+    const task = taskQuery.data;
+    const hydratedSemester = task.semester_id && semesterOptions.some((option) => option.id === task.semester_id)
+      ? task.semester_id
+      : initialSemester;
+    const hydratedCourse = (coursesQuery.data ?? []).find((item) => item.id === task.course_id) ?? null;
+    const selectedTagIds = new Set(task.tag_ids ?? []);
+    const hydratedTags = (tagsQuery.data ?? []).filter((item) => selectedTagIds.has(item.id));
+    const signature = taskMetadataSignature({
+      name: task.name,
+      semester_id: hydratedSemester,
+      course_id: hydratedCourse?.id ?? null,
+      tag_ids: hydratedTags.map((item) => item.id),
+    });
+
+    setName(task.name);
+    setSemesterId(hydratedSemester);
+    setCourse(hydratedCourse);
+    setTags(hydratedTags);
+    setInitialEditSignature(signature);
+    setEditHydrated(true);
+  }, [
+    coursesQuery.data,
+    coursesQuery.isSuccess,
+    editHydrated,
+    initialSemester,
+    isEditing,
+    semesterOptions,
+    tagsQuery.data,
+    tagsQuery.isSuccess,
+    taskQuery.data,
+  ]);
+
+  const currentEditSignature = taskMetadataSignature({
+    name: name.trim(),
+    semester_id: semesterId,
+    course_id: course?.id ?? null,
+    tag_ids: tags.map((tag) => tag.id),
+  });
+  const isDirty = isEditing
+    ? Boolean(editHydrated && (
+      currentEditSignature !== initialEditSignature
+      || courseDraft.trim()
+      || tagDraft.trim()
+    ))
+    : Boolean(
+      name.trim()
+      || course
+      || courseDraft.trim()
+      || tags.length
+      || tagDraft.trim()
+      || semesterId !== initialSemester,
+    );
   const blocker = useBlocker(({ currentLocation, nextLocation }) => (
     !submittedRef.current && isDirty && currentLocation.pathname !== nextLocation.pathname
   ));
@@ -142,7 +208,20 @@ export function NewTaskPage() {
       semester_id: semesterId,
       course_id: course?.id ?? null,
       tag_ids: tags.map((tag) => tag.id).sort(),
-    };
+    } satisfies TaskMetadataPatch;
+
+    if (isEditing && taskId) {
+      try {
+        await updateTask.mutateAsync({ taskId, patch: payload });
+        submittedRef.current = true;
+        toast.success(t("newTaskUpdateSuccess"));
+        navigate(returnTo, { replace: true, state: location.state });
+      } catch (error) {
+        setFormError(normalizeAPIError(error).message);
+      }
+      return;
+    }
+
     const signature = JSON.stringify(payload);
     if (!idempotencyRef.current || idempotencyRef.current.signature !== signature) {
       idempotencyRef.current = { signature, key: createIdempotencyKey() };
@@ -167,10 +246,38 @@ export function NewTaskPage() {
       ? `${t("newTaskModelsConfiguredPrefix")}${enabledExperts.length}${t("newTaskModelsConfiguredSuffix")}${enabledExperts.slice(0, 2).map((expert) => expert.display_name || expert.model).join("、")}${enabledExperts.length > 2 ? t("newTaskModelsMore") : ""}`
       : t("newTaskModelsMissing");
 
+  if (isEditing && (taskQuery.isError || coursesQuery.isError || tagsQuery.isError)) {
+    return (
+      <div className="w-full max-w-[1300px]">
+        <TaskMetadataHeading editing returnTo={returnTo} returnState={location.state} />
+        <NewTaskStepper currentStep={0} />
+        <div role="alert" className="mx-auto mt-[45px] max-w-[900px] rounded-[8px] border bg-card px-6 py-12 text-center">
+          <p className="text-base font-semibold text-foreground">{t("newTaskEditLoadError")}</p>
+          <Link to={returnTo} state={location.state} replace className="mt-4 inline-flex h-9 items-center rounded-[7px] border px-4 text-sm font-semibold text-foreground hover:bg-muted">
+            {t("newTaskBackToCurrentTask")}
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (isEditing && !editHydrated) {
+    return (
+      <div className="w-full max-w-[1300px]">
+        <TaskMetadataHeading editing returnTo={returnTo} returnState={location.state} />
+        <NewTaskStepper currentStep={0} />
+        <div className="mx-auto mt-[45px] flex min-h-[280px] max-w-[900px] items-center justify-center rounded-[8px] border bg-card text-sm text-muted-foreground">
+          <LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
+          {t("newTaskEditLoading")}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full max-w-[1300px]">
-      <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">{t("newTaskTitle")}</h1>
-      <NewTaskStepper />
+      <TaskMetadataHeading editing={isEditing} returnTo={returnTo} returnState={location.state} />
+      <NewTaskStepper currentStep={0} />
 
       <form id="new-task-form" onSubmit={handleSubmit} className="mt-[35px] min-h-[510px] max-w-full rounded-[8px] border bg-card p-5 sm:p-10 xl:ml-[200px] xl:w-[900px] xl:px-[49px] xl:pb-[39px] xl:pt-[39px]">
         <div className="grid gap-5 xl:block">
@@ -179,7 +286,7 @@ export function NewTaskPage() {
             <input
               id="new-task-name"
               autoFocus
-              disabled={createTask.isPending}
+              disabled={isSaving}
               value={name}
               onChange={(event) => { setName(event.target.value); setFormError(null); }}
               placeholder={t("newTaskNamePlaceholder")}
@@ -192,7 +299,7 @@ export function NewTaskPage() {
             <div>
               <label htmlFor="new-task-semester" className="block text-[14px] font-semibold leading-5 text-foreground">{t("newTaskSemesterLabel")}</label>
               <p className="sr-only">{t("newTaskSemesterHint")}</p>
-              <select id="new-task-semester" disabled={createTask.isPending} value={semesterId} onChange={(event) => setSemesterId(event.target.value)} className="mt-1 h-11 w-full rounded-[8px] border bg-card px-3 text-[14px] text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-wait disabled:opacity-60" required>
+              <select id="new-task-semester" disabled={isSaving} value={semesterId} onChange={(event) => setSemesterId(event.target.value)} className="mt-1 h-11 w-full rounded-[8px] border bg-card px-3 text-[14px] text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-wait disabled:opacity-60" required>
                 {semesterOptions.map((semester) => <option key={semester.id} value={semester.id}>{formatSemesterLabel(semester.id, t)}</option>)}
               </select>
             </div>
@@ -207,7 +314,7 @@ export function NewTaskPage() {
               initialItems={coursesQuery.data ?? []}
               searchCandidates={courseQueryIsCurrent ? courseSearch.data?.items ?? [] : []}
               isSearching={!courseQueryIsCurrent || courseSearch.isFetching}
-              isCreating={createCourse.isPending || createTask.isPending}
+              isCreating={createCourse.isPending || isSaving}
               getId={(item) => item.id}
               getLabel={(item) => item.name}
               getMeta={(item) => item.code || undefined}
@@ -229,7 +336,7 @@ export function NewTaskPage() {
               initialItems={tagsQuery.data ?? []}
               searchCandidates={tagQueryIsCurrent ? tagSearch.data?.items ?? [] : []}
               isSearching={!tagQueryIsCurrent || tagSearch.isFetching}
-              isCreating={createTag.isPending || createTask.isPending}
+              isCreating={createTag.isPending || isSaving}
               multiple
               getId={(item) => item.id}
               getLabel={(item) => item.name}
@@ -245,7 +352,7 @@ export function NewTaskPage() {
               <p className="text-[13px] font-semibold text-foreground">{t("newTaskModelSummaryLabel")}</p>
               <p className="mt-1 truncate text-xs text-muted-foreground">{modelSummary}</p>
             </div>
-            <Link to="/settings/byok" aria-disabled={createTask.isPending} tabIndex={createTask.isPending ? -1 : undefined} onClick={(event) => { if (createTask.isPending) event.preventDefault(); }} className="shrink-0 text-xs font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-wait aria-disabled:opacity-50">{t("newTaskManageModels")}</Link>
+            <Link to="/settings/byok" aria-disabled={isSaving} tabIndex={isSaving ? -1 : undefined} onClick={(event) => { if (isSaving) event.preventDefault(); }} className="shrink-0 text-xs font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-wait aria-disabled:opacity-50">{t("newTaskManageModels")}</Link>
           </div>
 
           {formError ? <div role="alert" className="rounded-[6px] border border-danger/30 bg-red-50 px-3 py-2 text-xs text-danger dark:bg-red-950/30 xl:mt-[19px]">{formError}</div> : null}
@@ -253,18 +360,22 @@ export function NewTaskPage() {
       </form>
 
       <div className="mt-[30px] flex max-w-full justify-end xl:ml-[200px] xl:w-[900px] xl:pr-[10px]">
-        <button form="new-task-form" type="submit" disabled={createTask.isPending} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-5 text-[14px] font-semibold text-primary-foreground outline-none transition hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[180px]">
-          {createTask.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
-          {createTask.isPending ? t("newTaskCreatingTask") : t("newTaskCreateAndAdd")}
-          {!createTask.isPending ? <ArrowRight aria-hidden="true" className="h-4 w-4" /> : null}
+        <button form="new-task-form" type="submit" disabled={isSaving} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-5 text-[14px] font-semibold text-primary-foreground outline-none transition hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[180px]">
+          {isSaving ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
+          {isSaving
+            ? t(isEditing ? "newTaskSavingTask" : "newTaskCreatingTask")
+            : t(isEditing ? "newTaskSaveAndReturn" : "newTaskCreateAndAdd")}
+          {!isSaving ? (isEditing
+            ? <Save aria-hidden="true" className="h-4 w-4" />
+            : <ArrowRight aria-hidden="true" className="h-4 w-4" />) : null}
         </button>
       </div>
 
       {blocker.state === "blocked" ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/35 p-5" role="presentation">
           <div role="alertdialog" aria-modal="true" aria-labelledby="leave-new-task-title" aria-describedby="leave-new-task-description" className="w-full max-w-sm rounded-[10px] border bg-card p-5 shadow-xl">
-            <h2 id="leave-new-task-title" className="text-base font-semibold text-foreground">{t("newTaskLeaveTitle")}</h2>
-            <p id="leave-new-task-description" className="mt-2 text-sm leading-5 text-muted-foreground">{t("newTaskLeaveDescription")}</p>
+            <h2 id="leave-new-task-title" className="text-base font-semibold text-foreground">{t(isEditing ? "newTaskEditLeaveTitle" : "newTaskLeaveTitle")}</h2>
+            <p id="leave-new-task-description" className="mt-2 text-sm leading-5 text-muted-foreground">{t(isEditing ? "newTaskEditLeaveDescription" : "newTaskLeaveDescription")}</p>
             <div className="mt-5 flex justify-end gap-2">
               <button ref={stayButtonRef} type="button" className="h-9 rounded-md border px-4 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" onClick={() => blocker.reset()}>{t("newTaskStay")}</button>
               <button ref={leaveButtonRef} type="button" className="h-9 rounded-md bg-danger px-4 text-sm font-medium text-white outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" onClick={() => blocker.proceed()}>{t("newTaskLeave")}</button>
@@ -274,6 +385,61 @@ export function NewTaskPage() {
       ) : null}
     </div>
   );
+}
+
+function TaskMetadataHeading({
+  editing,
+  returnTo,
+  returnState,
+}: {
+  editing: boolean;
+  returnTo: string;
+  returnState?: unknown;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="flex min-h-9 items-center justify-between gap-4">
+      <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
+        {t(editing ? "newTaskEditTitle" : "newTaskTitle")}
+      </h1>
+      {editing ? (
+        <Link
+          to={returnTo}
+          state={returnState}
+          replace
+          className="inline-flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+          {t("newTaskBackToCurrentTask")}
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+function taskMetadataSignature(patch: TaskMetadataPatch): string {
+  return JSON.stringify({
+    name: patch.name?.trim() ?? "",
+    semester_id: patch.semester_id ?? null,
+    course_id: patch.course_id ?? null,
+    tag_ids: [...(patch.tag_ids ?? [])].sort(),
+  });
+}
+
+function safeTaskReturnPath(raw: string | null, taskId?: string): string {
+  const fallback = taskId ? `/tasks/${taskId}/upload/problems` : "/tasks/new";
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return fallback;
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    const belongsToTask = Boolean(taskId && (
+      parsed.pathname === `/tasks/${taskId}`
+      || parsed.pathname.startsWith(`/tasks/${taskId}/`)
+    ));
+    if (!belongsToTask && parsed.pathname !== "/history" && parsed.pathname !== "/") return fallback;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return fallback;
+  }
 }
 
 function useDebouncedValue(value: string, delay: number): string {

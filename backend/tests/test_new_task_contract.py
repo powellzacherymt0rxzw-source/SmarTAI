@@ -237,3 +237,55 @@ def test_task_create_idempotency_is_atomic_and_legacy_list_stays_dict():
     assert legacy.status_code == 200
     assert isinstance(legacy.json(), dict)
     assert list(legacy.json()) == [results[0]["task_id"]]
+
+
+def test_task_metadata_can_be_edited_without_cross_owner_catalog_access(client):
+    own_course = client.post(
+        "/courses/", headers=HEADERS,
+        json={"name": "Numerical Analysis", "code": "MATH 321"},
+    ).json()
+    own_tag = client.post(
+        "/tags/", headers=HEADERS,
+        json={"name": "Needs examples", "color": "blue"},
+    ).json()
+    other_tag = client.post(
+        "/tags/", headers=OTHER_HEADERS,
+        json={"name": "Private section", "color": "rose"},
+    ).json()
+    task = client.post(
+        "/tasks/", headers=HEADERS,
+        json={"name": "Draft task"},
+    ).json()
+
+    updated = client.put(
+        f"/tasks/{task['task_id']}", headers=HEADERS,
+        json={
+            "name": "  Week 3 problems  ",
+            "semester_id": "2025-2026-autumn",
+            "course_id": own_course["id"],
+            "tag_ids": [own_tag["id"], own_tag["id"]],
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["name"] == "Week 3 problems"
+    assert updated.json()["semester_id"] == "2025-2026-autumn"
+    assert updated.json()["course_id"] == own_course["id"]
+    assert updated.json()["tag_ids"] == [own_tag["id"]]
+
+    blank = client.put(
+        f"/tasks/{task['task_id']}", headers=HEADERS,
+        json={"name": "   "},
+    )
+    assert blank.status_code == 422
+
+    foreign_catalog = client.put(
+        f"/tasks/{task['task_id']}", headers=HEADERS,
+        json={"tag_ids": [other_tag["id"]]},
+    )
+    assert foreign_catalog.status_code == 404
+
+    foreign_task = client.put(
+        f"/tasks/{task['task_id']}", headers=OTHER_HEADERS,
+        json={"name": "Stolen"},
+    )
+    assert foreign_task.status_code == 403

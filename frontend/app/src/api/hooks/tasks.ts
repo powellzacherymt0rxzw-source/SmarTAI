@@ -142,7 +142,10 @@ export function useUpdateTask() {
     onSuccess: (task) => {
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
       queryClient.invalidateQueries({ queryKey: tagKeys.all });
-      queryClient.setQueryData(taskKeys.detail(task.task_id), task);
+      // The update endpoint returns TaskLite while the detail cache stores a
+      // full Task. Let the invalidation refetch instead of replacing detail
+      // data and accidentally dropping problem_data/student_data.
+      queryClient.invalidateQueries({ queryKey: taskKeys.detail(task.task_id) });
     },
   });
 }

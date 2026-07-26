@@ -99,12 +99,12 @@ export function SmartCatalogField<T>({
     return () => document.removeEventListener("mousedown", closeOutside);
   }, []);
 
-  function selectItem(item: T) {
+  function selectItem(item: T, closeAfterSelection = false) {
     onSelect(item);
     onQueryChange("");
     setCreateError(null);
     setConflictCandidates([]);
-    setOpen(multiple);
+    setOpen(closeAfterSelection ? false : multiple);
   }
 
   async function createValue(force: boolean) {
@@ -112,7 +112,9 @@ export function SmartCatalogField<T>({
     setCreateError(null);
     try {
       const item = await onCreate(trimmedQuery, force);
-      selectItem(item);
+      // A newly created catalog value is a completed action. Close the menu
+      // even for multi-select tags so it does not cover the rest of the form.
+      selectItem(item, true);
     } catch (error) {
       const normalized = normalizeAPIError(error);
       const detail = normalized.payload?.detail;

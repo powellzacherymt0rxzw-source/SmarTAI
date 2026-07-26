@@ -123,6 +123,7 @@ const router = createBrowserRouter([
       { path: "history", element: routeElement(<HistoryPage />) },
       { path: "knowledge-base", element: routeElement(<KnowledgeBasePage />) },
       { path: "tasks/new", element: routeElement(<NewTaskPage />) },
+      { path: "tasks/:taskId/edit", element: routeElement(<NewTaskPage />) },
       { path: "tasks/:taskId", element: routeElement(<TaskEntryRedirect />) },
       { path: "tasks/:taskId/setup", element: routeElement(<TaskEntryRedirect />) },
       { path: "tasks/:taskId/materials", element: routeElement(<TaskMaterialsPage />) },

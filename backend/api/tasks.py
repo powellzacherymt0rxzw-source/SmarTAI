@@ -113,7 +113,7 @@ class CreateTaskRequest(BaseModel):
 
 
 class UpdateTaskRequest(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=200)
     semester_id: Optional[str] = None
     course_id: Optional[str] = None
     tag_ids: Optional[List[str]] = Field(default=None, max_length=30)
@@ -1545,7 +1545,13 @@ def update_task(
     _check_owner(t, current)
     fields: Dict[str, Any] = {}
     if req.name is not None:
-        fields["name"] = req.name
+        effective_name = req.name.strip()
+        if not effective_name:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Task name cannot be blank.",
+            )
+        fields["name"] = effective_name
     if "semester_id" in req.model_fields_set:
         fields["semester_id"] = _validate_semester_id(req.semester_id)
     if "course_id" in req.model_fields_set:

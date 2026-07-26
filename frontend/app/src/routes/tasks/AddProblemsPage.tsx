@@ -1,4 +1,4 @@
-import { ArrowLeft, FileText, LoaderCircle, Search } from "lucide-react";
+import { FileText, KeyRound, LoaderCircle, Pencil, Search } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -56,6 +56,7 @@ export function AddProblemsPage() {
   const [preflightResult, setPreflightResult] = useState<ProblemSourcePreflightResponse | null>(null);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [candidateReviewConfirmed, setCandidateReviewConfirmed] = useState(false);
+  const [showByokRequired, setShowByokRequired] = useState(false);
 
   const task = taskQuery.data;
   const hasTaskCourse = Boolean(task?.course_id);
@@ -111,6 +112,7 @@ export function AddProblemsPage() {
       ? t("addProblemsCandidateSelectionRequired")
       : null);
   const sourceIsOnlyDisabledReason = actionDisabledReason === t("addProblemsSourceRequired");
+  const byokIsOnlyDisabledReason = actionDisabledReason === t("addProblemsModelsRequired");
   const visibleDisabledReason = sourceIsOnlyDisabledReason ? null : actionDisabledReason;
   const byokReturnTo = taskId ? `/tasks/${taskId}/upload/problems` : "/tasks/new";
   const byokRouteState: ProblemSourceRouteState = {
@@ -237,12 +239,15 @@ export function AddProblemsPage() {
           {t("addProblemsTitle")}
         </h1>
         <Link
-          to="/history"
+          to={taskId
+            ? `/tasks/${taskId}/edit?returnTo=${encodeURIComponent(byokReturnTo)}`
+            : "/tasks/new"}
+          state={byokRouteState}
           className="inline-flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
-          title={t("addProblemsBackToTask")}
+          title={t("addProblemsEditTask")}
         >
-          <ArrowLeft aria-hidden="true" className="h-4 w-4 shrink-0" />
-          <span>{t("addProblemsBackToTask")}</span>
+          <Pencil aria-hidden="true" className="h-4 w-4 shrink-0" />
+          <span>{t("addProblemsEditTask")}</span>
         </Link>
       </div>
       <NewTaskStepper currentStep={0} />
@@ -401,10 +406,22 @@ export function AddProblemsPage() {
           </div>
           <button
             type="button"
-            className="inline-flex h-10 w-full shrink-0 items-center justify-center rounded-[8px] bg-primary px-4 text-[15px] font-semibold leading-[19px] text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[180px]"
-            disabled={!isRecognitionRunning && Boolean(actionDisabledReason || isBusy)}
+            className={cn(
+              "inline-flex h-10 w-full shrink-0 items-center justify-center rounded-[8px] bg-primary px-4 text-[15px] font-semibold leading-[19px] text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[180px]",
+              byokIsOnlyDisabledReason && "cursor-help opacity-50 hover:opacity-65",
+            )}
+            disabled={!isRecognitionRunning && Boolean(isBusy || (actionDisabledReason && !byokIsOnlyDisabledReason))}
+            aria-disabled={!isRecognitionRunning && Boolean(isBusy || (actionDisabledReason && !byokIsOnlyDisabledReason))}
+            aria-haspopup={byokIsOnlyDisabledReason ? "dialog" : undefined}
             aria-describedby={actionDisabledReason || hasExistingProblems ? "add-problems-action-message" : undefined}
-            onClick={() => void handlePrimaryAction()}
+            title={byokIsOnlyDisabledReason ? t("addProblemsByokButtonHint") : undefined}
+            onClick={() => {
+              if (byokIsOnlyDisabledReason) {
+                setShowByokRequired(true);
+                return;
+              }
+              void handlePrimaryAction();
+            }}
           >
             {isBusy ? (
               <><LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />{t("addProblemsChecking")}</>
@@ -418,12 +435,112 @@ export function AddProblemsPage() {
           ) : null}
         </div>
       </div>
+      <ByokRequiredDialog
+        open={showByokRequired}
+        returnTo={byokReturnTo}
+        routeState={byokRouteState}
+        onClose={() => setShowByokRequired(false)}
+        t={t}
+      />
     </div>
   );
 }
 
 interface TranslationProps {
   t: (key: MessageKey) => string;
+}
+
+function ByokRequiredDialog({
+  open,
+  returnTo,
+  routeState,
+  onClose,
+  t,
+}: TranslationProps & {
+  open: boolean;
+  returnTo: string;
+  routeState: ProblemSourceRouteState;
+  onClose: () => void;
+}) {
+  const configureRef = useRef<HTMLAnchorElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    document.body.style.overflow = "hidden";
+    const frame = window.requestAnimationFrame(() => configureRef.current?.focus());
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [configureRef.current, cancelRef.current].filter(
+        (item): item is HTMLAnchorElement | HTMLButtonElement => Boolean(item),
+      );
+      if (!focusable.length) return;
+      const currentIndex = focusable.indexOf(document.activeElement as HTMLAnchorElement | HTMLButtonElement);
+      const nextIndex = event.shiftKey
+        ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+        : (currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
+      event.preventDefault();
+      focusable[nextIndex].focus();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+      if (previouslyFocused && document.contains(previouslyFocused)) previouslyFocused.focus();
+    };
+  }, [onClose, open]);
+
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 p-5"
+      role="presentation"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-problems-byok-title"
+        aria-describedby="add-problems-byok-description"
+        className="w-full max-w-[420px] rounded-[10px] border bg-card p-6 shadow-xl"
+      >
+        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-primary dark:bg-blue-950/50">
+          <KeyRound aria-hidden="true" className="h-5 w-5" />
+        </span>
+        <h2 id="add-problems-byok-title" className="mt-4 text-lg font-bold text-foreground">
+          {t("addProblemsByokDialogTitle")}
+        </h2>
+        <p id="add-problems-byok-description" className="mt-2 text-sm leading-6 text-muted-foreground">
+          {t("addProblemsByokDialogDescription")}
+        </p>
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button ref={cancelRef} type="button" className="h-10 rounded-[8px] border px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring" onClick={onClose}>
+            {t("addProblemsByokDialogStay")}
+          </button>
+          <Link
+            ref={configureRef}
+            to={`/settings/byok?returnTo=${encodeURIComponent(returnTo)}`}
+            state={routeState}
+            className="inline-flex h-10 items-center justify-center rounded-[8px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            {t("addProblemsByokDialogOpen")}
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function UploadSourceWorkspace({
