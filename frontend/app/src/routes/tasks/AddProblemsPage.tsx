@@ -69,14 +69,14 @@ export function AddProblemsPage() {
   const [sources, setSources] = useState<SourceDraft[]>(restored?.sources ?? [createSourceDraft("problem")]);
   const [formError, setFormError] = useState<string | null>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
-  const [showByokRequired, setShowByokRequired] = useState(false);
+  const [showStartRequirements, setShowStartRequirements] = useState(false);
 
   const activeSources = sources.filter((source) => source.role === activeRole);
+  const configuredSources = sources.filter(sourceHasValue);
   const enabledExperts = (expertsQuery.data ?? []).filter((expert) => expert.enabled);
   const isBusy = preflight.isPending || startPreparation.isPending;
   const hasExistingProblems = Boolean(taskQuery.data?.problem_file_name || taskQuery.data?.problem_count);
-  const hasProblemSource = sources.some((source) => source.role === "problem" && sourceHasValue(source));
-  const missingConfiguredSource = sources.some((source) => !sourceHasValue(source));
+  const hasProblemSource = configuredSources.some((source) => source.role === "problem");
   const taskReturnPath = taskId ? `/tasks/${taskId}/upload/problems` : "/tasks/new";
   const routeState: AddProblemsRouteState = {
     questionPreparationDraft: {
@@ -86,18 +86,20 @@ export function AddProblemsPage() {
     },
   };
 
+  const needsByok = enabledExperts.length === 0 && !expertsQuery.isLoading && !expertsQuery.isError;
+  const needsProblemSource = !hasProblemSource;
+  const startBlocked = needsByok || needsProblemSource;
   const primaryDisabledReason = expertsQuery.isLoading
     ? tx(locale, "正在读取模型配置。", "Loading model configuration.")
     : expertsQuery.isError
       ? tx(locale, "模型配置暂时不可用。", "Model configuration is unavailable.")
-      : enabledExperts.length === 0
+      : needsByok && needsProblemSource
+        ? tx(locale, "还需要上传题目并启用一个 BYOK 模型。", "Upload questions and enable a BYOK model first.")
+        : needsByok
         ? tx(locale, "需要先添加并启用一个 BYOK 模型。", "Add and enable a BYOK model first.")
-        : !hasProblemSource
+        : needsProblemSource
           ? tx(locale, "至少添加一份题目来源。", "Add at least one problem source.")
-          : missingConfiguredSource
-            ? tx(locale, "请完成或删除尚未选择来源的资料项。", "Complete or remove every empty source row.")
-            : null;
-  const byokBlocked = enabledExperts.length === 0 && !expertsQuery.isLoading && !expertsQuery.isError;
+          : null;
 
   function updateSource(id: string, patch: Partial<SourceDraft>) {
     setSources((current) => current.map((source) => source.id === id ? { ...source, ...patch } : source));
@@ -127,15 +129,15 @@ export function AddProblemsPage() {
       return;
     }
     if (primaryDisabledReason) {
-      if (byokBlocked) setShowByokRequired(true);
+      if (startBlocked) setShowStartRequirements(true);
       else setFormError(primaryDisabledReason);
       return;
     }
     try {
       const tokens: string[] = [];
-      for (let index = 0; index < sources.length; index += 1) {
-        const source = sources[index];
-        setBusyLabel(tx(locale, `正在检查资料 ${index + 1}/${sources.length}`, `Checking source ${index + 1}/${sources.length}`));
+      for (let index = 0; index < configuredSources.length; index += 1) {
+        const source = configuredSources[index];
+        setBusyLabel(tx(locale, `正在检查资料 ${index + 1}/${configuredSources.length}`, `Checking source ${index + 1}/${configuredSources.length}`));
         const result = await preflight.mutateAsync({
           taskId,
           role: source.role,
@@ -268,11 +270,11 @@ export function AddProblemsPage() {
           <button
             type="button"
             onClick={() => void handleStart()}
-            disabled={isBusy || Boolean(primaryDisabledReason && !byokBlocked)}
+            disabled={isBusy || expertsQuery.isLoading || expertsQuery.isError}
             title={primaryDisabledReason ?? undefined}
             className={cn(
               "inline-flex h-10 w-full shrink-0 items-center justify-center rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45 sm:w-[210px]",
-              byokBlocked && "cursor-help opacity-50 hover:opacity-65",
+              startBlocked && "cursor-help opacity-50 hover:opacity-65",
             )}
           >
             {isBusy ? <LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -284,12 +286,18 @@ export function AddProblemsPage() {
         {formError ? <p role="alert" className="mt-3 text-sm text-danger">{formError}</p> : null}
       </div>
 
-      <ByokRequiredDialog
-        open={showByokRequired}
+      <StartRequirementsDialog
+        open={showStartRequirements}
+        needsByok={needsByok}
+        needsProblemSource={needsProblemSource}
         returnTo={taskReturnPath}
         routeState={routeState}
         locale={locale}
-        onClose={() => setShowByokRequired(false)}
+        onClose={() => setShowStartRequirements(false)}
+        onGoToProblems={() => {
+          setActiveRole("problem");
+          setShowStartRequirements(false);
+        }}
       />
     </div>
   );
@@ -432,25 +440,63 @@ function StructureButton({ active, disabled, onClick, children }: { active: bool
   return <button type="button" disabled={disabled} onClick={onClick} className={cn("h-9 rounded-[7px] border px-2 text-xs font-semibold transition", active ? "border-primary bg-blue-50 text-primary dark:bg-blue-950/20" : "bg-card text-muted-foreground hover:bg-muted")}>{children}</button>;
 }
 
-function ByokRequiredDialog({ open, returnTo, routeState, locale, onClose }: { open: boolean; returnTo: string; routeState: AddProblemsRouteState; locale: string; onClose: () => void }) {
-  const actionRef = useRef<HTMLAnchorElement>(null);
+function StartRequirementsDialog({
+  open,
+  needsByok,
+  needsProblemSource,
+  returnTo,
+  routeState,
+  locale,
+  onClose,
+  onGoToProblems,
+}: {
+  open: boolean;
+  needsByok: boolean;
+  needsProblemSource: boolean;
+  returnTo: string;
+  routeState: AddProblemsRouteState;
+  locale: string;
+  onClose: () => void;
+  onGoToProblems: () => void;
+}) {
+  const byokActionRef = useRef<HTMLAnchorElement>(null);
+  const problemActionRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!open) return;
-    const frame = window.requestAnimationFrame(() => actionRef.current?.focus());
+    const frame = window.requestAnimationFrame(() => (byokActionRef.current ?? problemActionRef.current)?.focus());
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
     return () => { window.cancelAnimationFrame(frame); document.removeEventListener("keydown", onKey); };
   }, [onClose, open]);
   if (!open) return null;
+  const requirementCount = Number(needsProblemSource) + Number(needsByok);
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 p-5" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div role="dialog" aria-modal="true" aria-labelledby="byok-required-title" className="w-full max-w-[420px] rounded-[10px] border bg-card p-6 shadow-xl">
-        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-primary dark:bg-blue-950/50"><KeyRound aria-hidden="true" className="h-5 w-5" /></span>
-        <h2 id="byok-required-title" className="mt-4 text-lg font-bold text-foreground">{tx(locale, "需要先启用模型", "Enable a Model First")}</h2>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">{tx(locale, "题目识别、标答补全过程和评分标准生成都需要模型。当前草稿会保留，配置后可直接回来继续。", "Question recognition and material generation require an enabled model. Your draft will be preserved while you configure BYOK.")}</p>
-        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button type="button" onClick={onClose} className="h-10 rounded-[8px] border px-4 text-sm font-semibold text-foreground hover:bg-muted">{tx(locale, "留在此页", "Stay Here")}</button>
-          <Link ref={actionRef} to={`/settings/byok?returnTo=${encodeURIComponent(returnTo)}`} state={routeState} className="inline-flex h-10 items-center justify-center rounded-[8px] bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90">{tx(locale, "前往 BYOK", "Open BYOK")}</Link>
+      <div role="dialog" aria-modal="true" aria-labelledby="start-requirements-title" className="w-full max-w-[480px] rounded-[10px] border bg-card p-6 shadow-xl">
+        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-primary dark:bg-blue-950/50">
+          {needsProblemSource ? <FileText aria-hidden="true" className="h-5 w-5" /> : <KeyRound aria-hidden="true" className="h-5 w-5" />}
+        </span>
+        <h2 id="start-requirements-title" className="mt-4 text-lg font-bold text-foreground">
+          {tx(locale, `开始前还需要完成 ${requirementCount} 项`, `${requirementCount} requirement${requirementCount === 1 ? "" : "s"} remaining`)}
+        </h2>
+        <div className="mt-4 space-y-3">
+          {needsProblemSource ? (
+            <div className="rounded-[8px] border bg-slate-50 px-4 py-3 dark:bg-slate-950/30">
+              <p className="text-sm font-semibold text-foreground">{tx(locale, "上传题目", "Upload Questions")}</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{tx(locale, "至少选择一份题目文件，或从课程资料库选择题目来源。其他三类资料仍可留空。", "Choose at least one problem file or a problem source from the course library. The other material types may remain empty.")}</p>
+            </div>
+          ) : null}
+          {needsByok ? (
+            <div className="rounded-[8px] border bg-slate-50 px-4 py-3 dark:bg-slate-950/30">
+              <p className="text-sm font-semibold text-foreground">{tx(locale, "启用 BYOK 模型", "Enable a BYOK Model")}</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{tx(locale, "题目识别、标答补全过程和评分标准生成需要模型；往返配置时当前草稿会保留。", "Question recognition and material generation require a model. Your draft is preserved while you configure BYOK.")}</p>
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+          <button type="button" onClick={onClose} className="h-10 rounded-[8px] border px-4 text-sm font-semibold text-foreground hover:bg-muted">{tx(locale, "暂不处理", "Not Now")}</button>
+          {needsProblemSource ? <button ref={problemActionRef} type="button" onClick={onGoToProblems} className="inline-flex h-10 items-center justify-center rounded-[8px] border px-4 text-sm font-semibold text-foreground hover:bg-muted">{tx(locale, "上传题目", "Upload Questions")}</button> : null}
+          {needsByok ? <Link ref={byokActionRef} to={`/settings/byok?returnTo=${encodeURIComponent(returnTo)}`} state={routeState} className="inline-flex h-10 items-center justify-center rounded-[8px] bg-primary px-4 text-sm font-semibold text-primary-foreground hover:opacity-90">{tx(locale, "前往 BYOK", "Open BYOK")}</Link> : null}
         </div>
       </div>
     </div>
