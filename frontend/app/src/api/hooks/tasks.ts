@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as tasksApi from "@/api/tasks";
 import type { UploadOptions } from "@/api/client";
-import type { Task, TaskHistoryQuery, TaskMetadataPatch, TaskResultResponse, TaskStatus } from "@/types";
+import type {
+  Task,
+  TaskHistoryQuery,
+  TaskMetadataPatch,
+  TaskResultResponse,
+  TaskStateSnapshot,
+  TaskStatus,
+} from "@/types";
 import { tagKeys, taskKeys } from "./keys";
 
 const ACTIVE_TASK_STATUSES = new Set<TaskStatus>([
@@ -176,7 +183,19 @@ export function useParseSubmissions() {
 
   return useMutation({
     mutationFn: tasksApi.parseSubmissions,
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
+      if (data.status === "started" || data.status === "already_running") {
+        const activeTaskPatch = {
+          status: "parsing_submissions" as const,
+          parse_job_id: data.job_id ?? null,
+        };
+        queryClient.setQueryData<Task>(taskKeys.detail(variables.taskId), (current) => (
+          current ? { ...current, ...activeTaskPatch } : current
+        ));
+        queryClient.setQueryData<TaskStateSnapshot>(taskKeys.state(variables.taskId), (current) => (
+          current ? { ...current, ...activeTaskPatch } : current
+        ));
+      }
       invalidateTask(queryClient, variables.taskId);
     },
   });

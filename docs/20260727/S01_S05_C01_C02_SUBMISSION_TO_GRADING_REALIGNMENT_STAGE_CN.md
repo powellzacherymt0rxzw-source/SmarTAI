@@ -120,3 +120,10 @@ review_status: pending | confirmed
 ## 6. 状态
 
 代码、合同、自动回归和文档已完成。按总 tracker 规则，本阶段保持 `[~]` 等待用户主观视觉确认；不把工程完成写成“用户已验收”。
+
+## 7. S01 → S02 单击跳转纠正（2026-07-27）
+
+- 用户在第 4 步点击“开始识别作答”后，只需这一次动作；后端返回 `started` 或 `already_running` 就直接进入 `/tasks/:id/submissions/progress`。
+- 原问题不是缺少目标路由，而是 React Query 仍保留旧的 `problems_ready` 任务快照：S02 首次渲染会按旧状态退回上传页，稍后状态刷新后上传页才显示“查看识别进度”，造成伪二次确认。
+- 修复在作答识别 mutation 成功回调中同步更新任务详情与任务状态两份缓存的 `status / parse_job_id`，随后再执行统一失效刷新。错误响应仍停留上传页展示原有恢复提示，`already_done` 仍直接进入校对作答，不用伪造进度。
+- 隔离浏览器将后端任务详情与状态刷新故意延迟 800ms：单击“开始识别作答”后 URL 立即并持续为 `/tasks/T_QA_SUBMISSION/submissions/progress`，显示真实进度卡，页面内不再出现“查看识别进度”；控制台 `0 errors / 0 warnings`，未调用真实模型。
