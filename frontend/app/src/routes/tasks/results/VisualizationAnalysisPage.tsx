@@ -19,8 +19,8 @@ import {
   YAxis,
 } from "recharts";
 import { toast } from "sonner";
-import { normalizeAPIError } from "@/api/client";
 import { useAnalyticsQuery } from "@/api/hooks/analytics";
+import { RecoverableActionState } from "@/components/ui/RecoverableActionState";
 import {
   effectiveCorrectionScore,
   formatPercent,
@@ -31,6 +31,7 @@ import {
 } from "@/components/tasks/resultsModel";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
+import { classifyRecoverableError } from "@/lib/taskActionGuards";
 import type { ChartAnalyticsResult, ChartTrace, Correction } from "@/types";
 
 type ScopeFilter = "all" | "pass" | "fail" | "review";
@@ -79,10 +80,8 @@ export function VisualizationAnalysisPage({ locale, taskId, version, model }: { 
     setSearchParams(next, { replace: true });
   };
 
-  const submitChart = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const question = prompt.trim();
-    if (!question) return;
+  const runChart = (question: string) => {
+    if (!question.trim()) return;
     chartQuery.mutate({ taskId, question, mode: "chart" }, {
       onSuccess: (result) => {
         if (result.mode !== "chart") {
@@ -92,9 +91,26 @@ export function VisualizationAnalysisPage({ locale, taskId, version, model }: { 
         setPreview(result);
         toast.success(tx(locale, "图表已生成", "Chart generated"));
       },
-      onError: (error) => toast.error(tx(locale, "图表生成失败", "Chart generation failed"), { description: normalizeAPIError(error).message }),
     });
   };
+
+  const submitChart = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    runChart(prompt.trim());
+  };
+
+  const updatePrompt = (value: string) => {
+    chartQuery.reset();
+    setPrompt(value);
+  };
+
+  const recoveryInfo = chartQuery.isError
+    ? classifyRecoverableError(chartQuery.error, {
+      locale,
+      phase: "analytics_chart",
+      returnTo: `${root}/visualizations`,
+    })
+    : null;
 
   const savePreview = () => {
     if (!preview) return;
@@ -145,9 +161,24 @@ export function VisualizationAnalysisPage({ locale, taskId, version, model }: { 
       <div className="border-t p-5">
         <section className="rounded-[9px] border px-4 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="flex items-center gap-2 text-[15px] font-bold text-foreground"><Sparkles aria-hidden="true" className="h-4 w-4 text-primary" />{tx(locale, "自然语言生成更多图表", "Generate another chart with natural language")}</h3><p className="mt-1 text-[11px] text-muted-foreground">{tx(locale, "每次提交只调用当前模型一次；可生成柱状图、散点图、饼图、直方图或箱线图，单次最多 4 组、每组 50 个点。", "Each submission calls the current model once. It can create bar, scatter, pie, histogram, or box charts, with up to 4 series and 50 points per series.")}</p></div><span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-700">{tx(locale, "不会自动调用", "Never automatic")}</span></div>
-          <div className="mt-3 flex flex-wrap gap-2">{[tx(locale, "比较各题得分率与低置信题次", "Compare question score rates and low-confidence counts"), tx(locale, "画出总分率与平均置信度散点图", "Scatter total score rate against mean confidence"), tx(locale, "显示及格与未及格人数", "Show passed versus failed counts")].map((suggestion) => <button key={suggestion} type="button" onClick={() => setPrompt(suggestion)} className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground">{suggestion}</button>)}</div>
-          <form onSubmit={submitChart} className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]"><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={2} maxLength={500} disabled={chartQuery.isPending} aria-label={tx(locale, "自然语言图表请求", "Natural-language chart request")} className="min-h-20 resize-y rounded-[8px] border bg-background px-3 py-2 text-[12px] leading-5 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" /><button type="submit" disabled={chartQuery.isPending || !prompt.trim()} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[8px] bg-primary px-4 text-[11px] font-semibold text-primary-foreground disabled:opacity-50 lg:self-end">{chartQuery.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : <BarChart3 aria-hidden="true" className="h-4 w-4" />}{chartQuery.isPending ? tx(locale, "生成中…", "Generating…") : tx(locale, "确认生成", "Generate")}</button></form>
-          {chartQuery.isError ? <p className="mt-2 text-[11px] font-medium text-rose-600">{normalizeAPIError(chartQuery.error).message}</p> : null}
+          <div className="mt-3 flex flex-wrap gap-2">{[tx(locale, "比较各题得分率与低置信题次", "Compare question score rates and low-confidence counts"), tx(locale, "画出总分率与平均置信度散点图", "Scatter total score rate against mean confidence"), tx(locale, "显示及格与未及格人数", "Show passed versus failed counts")].map((suggestion) => <button key={suggestion} type="button" onClick={() => updatePrompt(suggestion)} className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground">{suggestion}</button>)}</div>
+          <form onSubmit={submitChart} className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]"><textarea value={prompt} onChange={(event) => updatePrompt(event.target.value)} rows={2} maxLength={500} disabled={chartQuery.isPending} aria-label={tx(locale, "自然语言图表请求", "Natural-language chart request")} className="min-h-20 resize-y rounded-[8px] border bg-background px-3 py-2 text-[12px] leading-5 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" /><button type="submit" disabled={chartQuery.isPending || !prompt.trim()} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[8px] bg-primary px-4 text-[11px] font-semibold text-primary-foreground disabled:opacity-50 lg:self-end">{chartQuery.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : <BarChart3 aria-hidden="true" className="h-4 w-4" />}{chartQuery.isPending ? tx(locale, "生成中…", "Generating…") : tx(locale, "确认生成", "Generate")}</button></form>
+          {recoveryInfo ? (
+            <RecoverableActionState
+              info={recoveryInfo}
+              locale={locale}
+              compact
+              className="mt-3"
+              primaryAction={recoveryInfo.actionKind === "byok" ? undefined : {
+                label: recoveryInfo.actionLabel,
+                onClick: () => runChart(prompt.trim()),
+                busy: chartQuery.isPending,
+              }}
+              secondaryAction={recoveryInfo.actionKind === "byok"
+                ? { label: tx(locale, "关闭提示", "Dismiss"), onClick: () => chartQuery.reset() }
+                : { label: tx(locale, "查看模型配置", "View model settings"), href: `/settings/byok?returnTo=${encodeURIComponent(`${root}/visualizations`)}` }}
+            />
+          ) : null}
           {preview ? <GeneratedResult locale={locale} id="generated-preview" result={preview} version={version} onSave={savePreview} /> : <div className="mt-3 rounded-[8px] border border-dashed px-4 py-6 text-center text-[11px] text-muted-foreground">{tx(locale, "尚未生成自定义图表；上方五张默认图表始终可用且不消耗模型额度。", "No custom chart generated yet; the five default charts remain available without model usage.")}</div>}
         </section>
 

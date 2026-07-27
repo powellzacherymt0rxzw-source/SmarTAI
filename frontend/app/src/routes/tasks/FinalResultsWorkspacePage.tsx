@@ -13,6 +13,7 @@ import { lazy, Suspense, useEffect, type ComponentType, type ReactNode } from "r
 import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { useTask, useTaskFinalization, useTaskResult } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
+import { RecoverableActionState } from "@/components/ui/RecoverableActionState";
 import {
   buildResultsModel,
   clampPercent,
@@ -25,6 +26,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import { formatTaskTime, getTaskDestination } from "@/lib/taskFlow";
+import { classifyRecoverableError } from "@/lib/taskActionGuards";
 import { QuestionAnalysisDetail } from "@/routes/tasks/results/QuestionAnalysisDetail";
 import { QuestionAnalysisOverview } from "@/routes/tasks/results/QuestionAnalysisOverview";
 import { StudentAnalysisDetail } from "@/routes/tasks/results/StudentAnalysisDetail";
@@ -83,6 +85,8 @@ export function FinalResultsWorkspacePage() {
     return (
       <WorkspaceState
         locale={locale}
+        error={taskQuery.error ?? resultQuery.error ?? finalizationQuery.error ?? "formal_result_unavailable"}
+        returnTo={`/tasks/${taskId}/results`}
         onRetry={() => void Promise.all([taskQuery.refetch(), resultQuery.refetch(), finalizationQuery.refetch()])}
       />
     );
@@ -486,12 +490,38 @@ function Metric({ value, label, tone }: { value: string; label: string; tone: "p
   );
 }
 
-function WorkspaceState({ locale, loading = false, onRetry }: { locale: Locale; loading?: boolean; onRetry?: () => void }) {
+function WorkspaceState({
+  locale,
+  loading = false,
+  error,
+  returnTo,
+  onRetry,
+}: {
+  locale: Locale;
+  loading?: boolean;
+  error?: unknown;
+  returnTo?: string;
+  onRetry?: () => void;
+}) {
+  if (!loading && error) {
+    const info = classifyRecoverableError(error, { locale, phase: "formal_results", returnTo });
+    return (
+      <RecoverableActionState
+        info={info}
+        locale={locale}
+        className="min-h-[420px]"
+        primaryAction={info.actionKind === "byok" ? undefined : onRetry ? {
+          label: tx(locale, "重新读取", "Try again"),
+          onClick: onRetry,
+        } : undefined}
+        secondaryAction={{ label: tx(locale, "返回历史任务", "View task history"), href: "/history" }}
+      />
+    );
+  }
   return (
     <div className="flex min-h-[420px] flex-col items-center justify-center rounded-[10px] border bg-card px-6 text-center">
-      {loading ? <LoaderCircle aria-hidden="true" className="h-8 w-8 animate-spin text-primary" /> : <AlertTriangle aria-hidden="true" className="h-8 w-8 text-amber-500" />}
+      <LoaderCircle aria-hidden="true" className="h-8 w-8 animate-spin text-primary" />
       <h1 className="mt-4 text-lg font-bold text-foreground">{loading ? tx(locale, "正在读取正式结果…", "Loading formal results…") : tx(locale, "正式结果暂时无法读取", "Formal results are unavailable")}</h1>
-      {!loading && onRetry ? <button type="button" onClick={onRetry} className="mt-4 rounded-[8px] bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">{tx(locale, "重试", "Retry")}</button> : null}
     </div>
   );
 }

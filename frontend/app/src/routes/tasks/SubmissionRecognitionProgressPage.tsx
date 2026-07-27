@@ -10,10 +10,12 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useTask } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { Button } from "@/components/ui/Button";
+import { RecoverableActionState } from "@/components/ui/RecoverableActionState";
 import { useTaskProgress } from "@/hooks/useTaskProgress";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { MessageKey } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
+import { classifyRecoverableError } from "@/lib/taskActionGuards";
 import { getTaskDestination } from "@/lib/taskFlow";
 import type { JobProgress, ProgressEvent, TaskStatus } from "@/types";
 
@@ -60,6 +62,11 @@ export function SubmissionRecognitionProgressPage() {
   const refresh = () => {
     void Promise.all([taskQuery.refetch(), progressQuery.refetch()]);
   };
+  const progressFailure = progressQuery.progress?.error_detail
+    ?? [...(progressQuery.progress?.messages ?? [])].reverse().find((event) => event.level === "error")?.message
+    ?? taskQuery.data?.error
+    ?? progressQuery.error
+    ?? taskQuery.error;
 
   if (!taskId) {
     return (
@@ -75,16 +82,28 @@ export function SubmissionRecognitionProgressPage() {
   }
 
   if (status === "error") {
+    const info = classifyRecoverableError(progressFailure, {
+      locale,
+      phase: progressQuery.progress?.current_step ?? progressQuery.progress?.phase ?? "submission_recognition",
+      jobId: taskQuery.data?.last_failed_job_id,
+      returnTo: `/tasks/${taskId}/submissions/progress`,
+    });
     return (
       <ProgressPageFrame title={t("submissionProgressTitle")}>
-        <RecoveryState
-          title={t("submissionProgressFailedTitle")}
-          description={t("submissionProgressFailedDescription")}
-          primaryLabel={t("submissionProgressChooseAgain")}
-          onPrimary={() => navigate(`/tasks/${taskId}/submissions/upload`)}
-          secondaryLabel={t("submissionProgressRefresh")}
-          onSecondary={refresh}
-          busy={taskQuery.isFetching || progressQuery.isFetching}
+        <RecoverableActionState
+          info={info}
+          locale={locale}
+          className="min-h-[430px]"
+          primaryAction={info.actionKind === "byok" ? undefined : {
+            label: info.actionKind === "refresh" ? info.actionLabel : t("submissionProgressChooseAgain"),
+            onClick: info.actionKind === "refresh" ? refresh : () => navigate(`/tasks/${taskId}/submissions/upload`),
+            busy: taskQuery.isFetching || progressQuery.isFetching,
+          }}
+          secondaryAction={{
+            label: t("submissionProgressRefresh"),
+            onClick: refresh,
+            busy: taskQuery.isFetching || progressQuery.isFetching,
+          }}
         />
       </ProgressPageFrame>
     );
@@ -92,16 +111,23 @@ export function SubmissionRecognitionProgressPage() {
 
   const hasReadableState = Boolean(status || taskQuery.data || progressQuery.data);
   if (!hasReadableState && (taskQuery.isError || progressQuery.isError)) {
+    const info = classifyRecoverableError(progressQuery.error ?? taskQuery.error, {
+      locale,
+      phase: "submission_recognition_status",
+      returnTo: `/tasks/${taskId}/submissions/progress`,
+    });
     return (
       <ProgressPageFrame title={t("submissionProgressTitle")}>
-        <RecoveryState
-          title={t("submissionProgressReadFailedTitle")}
-          description={t("submissionProgressReadFailedDescription")}
-          primaryLabel={t("submissionProgressRefresh")}
-          onPrimary={refresh}
-          secondaryLabel={t("submissionProgressViewTasks")}
-          onSecondary={() => navigate("/history")}
-          busy={taskQuery.isFetching || progressQuery.isFetching}
+        <RecoverableActionState
+          info={info}
+          locale={locale}
+          className="min-h-[430px]"
+          primaryAction={info.actionKind === "byok" ? undefined : {
+            label: t("submissionProgressRefresh"),
+            onClick: refresh,
+            busy: taskQuery.isFetching || progressQuery.isFetching,
+          }}
+          secondaryAction={{ label: t("submissionProgressViewTasks"), href: "/history" }}
         />
       </ProgressPageFrame>
     );

@@ -18,12 +18,19 @@ export interface APIErrorPayload {
 export class APIError extends Error {
   readonly status: number;
   readonly payload?: APIErrorPayload;
+  readonly retryAfterSeconds?: number;
 
-  constructor(status: number, message: string, payload?: APIErrorPayload) {
+  constructor(
+    status: number,
+    message: string,
+    payload?: APIErrorPayload,
+    retryAfterSeconds?: number,
+  ) {
     super(message);
     this.name = "APIError";
     this.status = status;
     this.payload = payload;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -71,7 +78,24 @@ export function normalizeAPIError(error: unknown): APIError {
     return new APIError(0, error.message);
   }
 
+  if (typeof error === "string" && error.trim()) {
+    return new APIError(0, error.trim());
+  }
+
   return new APIError(0, "Unknown API error");
+}
+
+export function getAPIErrorDetail(error: unknown): Record<string, unknown> | null {
+  const detail = normalizeAPIError(error).payload?.detail;
+  return detail && typeof detail === "object" && !Array.isArray(detail)
+    ? detail as Record<string, unknown>
+    : null;
+}
+
+export function getAPIErrorCode(error: unknown): string | null {
+  const detail = getAPIErrorDetail(error);
+  const value = detail?.code ?? normalizeAPIError(error).payload?.code;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 export async function getJSON<T>(path: string, config?: AxiosRequestConfig): Promise<T> {
@@ -178,8 +202,12 @@ function normalizeAxiosError(error: AxiosError): APIError {
   const message = error.response
     ? responseMessage(status, payload, error.response.statusText)
     : networkMessage(error);
+  const retryAfterSeconds = parseRetryAfter(
+    error.response?.headers?.["retry-after"],
+    payload,
+  );
 
-  return new APIError(status, message, payload);
+  return new APIError(status, message, payload, retryAfterSeconds);
 }
 
 function normalizePayload(data: unknown): APIErrorPayload | undefined {
@@ -207,7 +235,38 @@ function responseMessage(status: number, payload: APIErrorPayload | undefined, f
       })
       .join("; ");
   }
+  if (detail && typeof detail === "object") {
+    const record = detail as Record<string, unknown>;
+    const nestedMessage = record.message ?? record.reason ?? record.error;
+    if (typeof nestedMessage === "string" && nestedMessage.trim()) {
+      return nestedMessage.trim();
+    }
+    if (typeof record.code === "string" && record.code.trim()) {
+      return record.code.trim();
+    }
+  }
   return fallback || `Request failed with status ${status}`;
+}
+
+function parseRetryAfter(value: unknown, payload?: APIErrorPayload): number | undefined {
+  const detail = payload?.detail;
+  const detailRecord = detail && typeof detail === "object" && !Array.isArray(detail)
+    ? detail as Record<string, unknown>
+    : null;
+  const candidate = value
+    ?? detailRecord?.retry_after_seconds
+    ?? detailRecord?.retry_after
+    ?? payload?.retry_after_seconds
+    ?? payload?.retry_after;
+  if (typeof candidate === "number" && Number.isFinite(candidate) && candidate >= 0) {
+    return Math.ceil(candidate);
+  }
+  if (typeof candidate !== "string" || !candidate.trim()) return undefined;
+  const seconds = Number(candidate);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+  const timestamp = Date.parse(candidate);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return Math.max(0, Math.ceil((timestamp - Date.now()) / 1000));
 }
 
 function networkMessage(error: AxiosError): string {

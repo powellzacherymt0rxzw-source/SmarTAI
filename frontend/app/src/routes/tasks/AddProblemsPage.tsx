@@ -13,7 +13,6 @@ import {
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { normalizeAPIError } from "@/api/client";
 import {
   useExperts,
   useProblemSourceLibrary,
@@ -22,8 +21,10 @@ import {
   useTask,
 } from "@/api/hooks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
+import { RecoverableActionState, type RecoveryAction } from "@/components/ui/RecoverableActionState";
 import { useI18n } from "@/i18n/I18nProvider";
 import { cn } from "@/lib/cn";
+import { classifyRecoverableError } from "@/lib/taskActionGuards";
 import type {
   PreparationSourceRole,
   ProblemLibraryMaterial,
@@ -55,6 +56,13 @@ type AddProblemsRouteState = {
   };
 };
 
+type PreparationFailure = {
+  error: unknown;
+  phase: "source_preflight" | "question_preparation";
+  sourceId?: string;
+  sourceRole?: PreparationSourceRole;
+};
+
 export function AddProblemsPage() {
   const { taskId } = useParams();
   const location = useLocation();
@@ -68,6 +76,7 @@ export function AddProblemsPage() {
   const [activeRole, setActiveRole] = useState<PreparationSourceRole>(restored?.activeRole ?? "problem");
   const [sources, setSources] = useState<SourceDraft[]>(restored?.sources ?? [createSourceDraft("problem")]);
   const [formError, setFormError] = useState<string | null>(null);
+  const [preparationFailure, setPreparationFailure] = useState<PreparationFailure | null>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [showStartRequirements, setShowStartRequirements] = useState(false);
 
@@ -105,16 +114,19 @@ export function AddProblemsPage() {
   function updateSource(id: string, patch: Partial<SourceDraft>) {
     setSources((current) => current.map((source) => source.id === id ? { ...source, ...patch } : source));
     setFormError(null);
+    setPreparationFailure(null);
   }
 
   function addSource(role: PreparationSourceRole) {
     setSources((current) => [...current, createSourceDraft(role)]);
     setFormError(null);
+    setPreparationFailure(null);
   }
 
   function removeSource(id: string) {
     setSources((current) => current.filter((source) => source.id !== id));
     setFormError(null);
+    setPreparationFailure(null);
   }
 
   function moveRole(direction: -1 | 1) {
@@ -125,6 +137,7 @@ export function AddProblemsPage() {
 
   async function handleStart() {
     setFormError(null);
+    setPreparationFailure(null);
     if (!taskId || !taskQuery.data) {
       setFormError(tx(locale, "任务信息不可用，请刷新后重试。", "Task details are unavailable. Refresh and retry."));
       return;
@@ -134,10 +147,13 @@ export function AddProblemsPage() {
       else setFormError(primaryDisabledReason);
       return;
     }
+    let activeSource: SourceDraft | undefined;
+    let phase: PreparationFailure["phase"] = "source_preflight";
     try {
       const tokens: string[] = [];
       for (let index = 0; index < configuredSources.length; index += 1) {
         const source = configuredSources[index];
+        activeSource = source;
         setBusyLabel(tx(locale, `正在检查资料 ${index + 1}/${configuredSources.length}`, `Checking source ${index + 1}/${configuredSources.length}`));
         const result = await preflight.mutateAsync({
           taskId,
@@ -151,6 +167,8 @@ export function AddProblemsPage() {
         });
         tokens.push(result.source_token);
       }
+      phase = "question_preparation";
+      activeSource = undefined;
       setBusyLabel(tx(locale, "正在启动统一识别", "Starting unified preparation"));
       const response = await startPreparation.mutateAsync({
         taskId,
@@ -165,13 +183,42 @@ export function AddProblemsPage() {
       );
       navigate(`/tasks/${taskId}/problems/progress`);
     } catch (error) {
-      setFormError(normalizeAPIError(error).message);
+      setPreparationFailure({
+        error,
+        phase,
+        sourceId: activeSource?.id,
+        sourceRole: activeSource?.role,
+      });
     } finally {
       setBusyLabel(null);
     }
   }
 
   const roleIndex = SOURCE_ROLES.indexOf(activeRole);
+  const recoveryInfo = preparationFailure
+    ? classifyRecoverableError(preparationFailure.error, {
+      locale,
+      phase: preparationFailure.phase,
+      returnTo: taskReturnPath,
+    })
+    : null;
+  const recoveryPrimary = recoveryInfo && preparationFailure
+    ? getPreparationRecoveryAction({
+      info: recoveryInfo,
+      failure: preparationFailure,
+      routeState,
+      locale,
+      onRetry: () => void handleStart(),
+      onRefresh: () => void Promise.all([taskQuery.refetch(), expertsQuery.refetch()]),
+      onOpenSource: (role, sourceId, clearLibrary) => {
+        setActiveRole(role);
+        if (clearLibrary && sourceId) updateSource(sourceId, { libraryMaterial: null });
+        window.requestAnimationFrame(() => {
+          if (sourceId) document.getElementById(`problem-source-file-${sourceId}`)?.click();
+        });
+      },
+    })
+    : undefined;
   return (
     <div className="w-full max-w-[1300px]">
       <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
@@ -285,6 +332,19 @@ export function AddProblemsPage() {
           </button>
         </section>
         {formError ? <p role="alert" className="mt-3 text-sm text-danger">{formError}</p> : null}
+        {recoveryInfo ? (
+          <RecoverableActionState
+            info={recoveryInfo}
+            locale={locale}
+            compact
+            className="mt-4"
+            primaryAction={recoveryPrimary}
+            secondaryAction={{
+              label: tx(locale, "关闭提示", "Dismiss"),
+              onClick: () => setPreparationFailure(null),
+            }}
+          />
+        ) : null}
       </div>
 
       <StartRequirementsDialog
@@ -379,7 +439,7 @@ function SourceEditor({
             <p className="mt-1 text-xs text-muted-foreground">{accept.replaceAll(".", "").toUpperCase().replaceAll(",", " / ")}</p>
             <label className="mt-3 inline-flex h-9 cursor-pointer items-center rounded-[7px] border bg-card px-4 text-xs font-semibold text-foreground hover:bg-muted">
               {source.file ? tx(locale, "替换文件", "Replace File") : tx(locale, "选择文件", "Choose File")}
-              <input type="file" accept={accept} className="sr-only" disabled={disabled} onChange={(event: ChangeEvent<HTMLInputElement>) => { selectFile(event.target.files?.[0]); event.target.value = ""; }} />
+              <input id={`problem-source-file-${source.id}`} type="file" accept={accept} className="sr-only" disabled={disabled} onChange={(event: ChangeEvent<HTMLInputElement>) => { selectFile(event.target.files?.[0]); event.target.value = ""; }} />
             </label>
           </div>
         ) : (
@@ -564,6 +624,44 @@ function useDebouncedValue(value: string, delay: number) {
     return () => window.clearTimeout(timeout);
   }, [delay, value]);
   return debounced;
+}
+
+function getPreparationRecoveryAction({
+  info,
+  failure,
+  routeState,
+  locale,
+  onRetry,
+  onRefresh,
+  onOpenSource,
+}: {
+  info: ReturnType<typeof classifyRecoverableError>;
+  failure: PreparationFailure;
+  routeState: AddProblemsRouteState;
+  locale: string;
+  onRetry: () => void;
+  onRefresh: () => void;
+  onOpenSource: (role: PreparationSourceRole, sourceId?: string, clearLibrary?: boolean) => void;
+}): RecoveryAction {
+  if (info.actionKind === "byok" && info.actionHref) {
+    return { label: info.actionLabel, href: info.actionHref, state: routeState };
+  }
+  if (info.actionKind === "reupload") {
+    return {
+      label: info.actionLabel,
+      onClick: () => onOpenSource(failure.sourceRole ?? "problem", failure.sourceId),
+    };
+  }
+  if (info.actionKind === "reselect") {
+    return {
+      label: info.actionLabel,
+      onClick: () => onOpenSource(failure.sourceRole ?? "problem", failure.sourceId, true),
+    };
+  }
+  if (info.actionKind === "refresh") {
+    return { label: info.actionLabel, onClick: onRefresh };
+  }
+  return { label: info.actionLabel || tx(locale, "重新尝试", "Try again"), onClick: onRetry };
 }
 
 function tx(locale: string, zh: string, en: string) {

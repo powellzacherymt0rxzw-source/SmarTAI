@@ -15,8 +15,10 @@ import { Link } from "react-router-dom";
 import { getTaskResultArtifactBlob } from "@/api/tasks";
 import { useGenerateTaskResultArtifacts, useTaskResultArtifacts } from "@/api/hooks/tasks";
 import { normalizeAPIError } from "@/api/client";
+import { RecoverableActionState } from "@/components/ui/RecoverableActionState";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
+import { classifyRecoverableError } from "@/lib/taskActionGuards";
 import { formatTaskTime } from "@/lib/taskFlow";
 import type { ResultArtifactFile, ResultArtifactVersion, TaskFinalizationResponse } from "@/types";
 import { toast } from "sonner";
@@ -43,6 +45,7 @@ export function ReportsDownloadsPage({
   const artifactsQuery = useTaskResultArtifacts(taskId);
   const generateMutation = useGenerateTaskResultArtifacts();
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [generateFailure, setGenerateFailure] = useState<unknown>(null);
   const index = artifactsQuery.data;
   const current = index?.versions.find((version) => version.current);
   const historical = index?.versions.filter((version) => !version.current) ?? [];
@@ -50,9 +53,13 @@ export function ReportsDownloadsPage({
   const stale = finalization.final_result_dirty || current?.status === "stale";
 
   const generate = () => {
+    setGenerateFailure(null);
     generateMutation.mutate({ taskId, expectedWorkflowRevision: finalization.workflow_revision }, {
-      onSuccess: (result) => toast.success(result.unchanged ? tx(locale, "当前版本已是最新", "Current version is already up to date") : tx(locale, "本版报告已生成", "Reports generated for this version")),
-      onError: (error) => toast.error(tx(locale, "报告生成失败", "Report generation failed"), { description: normalizeAPIError(error).message }),
+      onSuccess: (result) => {
+        setGenerateFailure(null);
+        toast.success(result.unchanged ? tx(locale, "当前版本已是最新", "Current version is already up to date") : tx(locale, "本版报告已生成", "Reports generated for this version"));
+      },
+      onError: (error) => setGenerateFailure(error),
     });
   };
 
@@ -74,8 +81,32 @@ export function ReportsDownloadsPage({
     return <section className="flex min-h-72 items-center justify-center rounded-[10px] border bg-card"><LoaderCircle aria-hidden="true" className="h-7 w-7 animate-spin text-primary" /></section>;
   }
   if (artifactsQuery.isError || !index || !current) {
-    return <section className="rounded-[10px] border bg-card p-5 text-center"><FileText aria-hidden="true" className="mx-auto h-8 w-8 text-muted-foreground" /><h2 className="mt-3 text-[16px] font-bold">{tx(locale, "报告索引暂时无法读取", "Report index is unavailable")}</h2><p className="mt-1 text-[12px] text-muted-foreground">{artifactsQuery.error ? normalizeAPIError(artifactsQuery.error).message : tx(locale, "当前正式版本不存在。", "The current formal version does not exist.")}</p><button type="button" onClick={() => void artifactsQuery.refetch()} className="mt-4 rounded-[8px] border px-4 py-2 text-[12px] font-semibold hover:bg-muted">{tx(locale, "重试", "Retry")}</button></section>;
+    const info = classifyRecoverableError(
+      artifactsQuery.error ?? "formal_result_version_not_found",
+      { locale, phase: "result_artifact_index", returnTo: `/tasks/${taskId}/results/reports` },
+    );
+    return (
+      <RecoverableActionState
+        info={info}
+        locale={locale}
+        className="min-h-72"
+        primaryAction={info.actionKind === "byok" ? undefined : {
+          label: tx(locale, "重新读取", "Try again"),
+          onClick: () => void artifactsQuery.refetch(),
+          busy: artifactsQuery.isFetching,
+        }}
+        secondaryAction={{ label: tx(locale, "返回结果总览", "Back to overview"), href: `/tasks/${taskId}/results` }}
+      />
+    );
   }
+
+  const generateRecovery = generateFailure
+    ? classifyRecoverableError(generateFailure, {
+      locale,
+      phase: "result_artifact_generation",
+      returnTo: `/tasks/${taskId}/results/reports`,
+    })
+    : null;
 
   return (
     <section className="rounded-[10px] border bg-card">
@@ -101,6 +132,20 @@ export function ReportsDownloadsPage({
         ) : (
           <div className="mt-4 flex items-center gap-2 rounded-[9px] bg-emerald-50 px-4 py-3 text-[11px] text-emerald-800"><CheckCircle2 aria-hidden="true" className="h-4 w-4" /><span className="font-semibold">{tx(locale, `${taskName} · v${current.version} 的文件已锁定`, `${taskName} · v${current.version} files are locked`)}</span><span className="text-emerald-700">{tx(locale, "重复生成会幂等返回，不制造相同副本。", "Repeated generation is idempotent and creates no duplicate.")}</span></div>
         )}
+        {generateRecovery ? (
+          <RecoverableActionState
+            info={generateRecovery}
+            locale={locale}
+            compact
+            className="mt-4"
+            primaryAction={generateRecovery.actionKind === "byok" ? undefined : {
+              label: tx(locale, "重新生成", "Generate again"),
+              onClick: generate,
+              busy: generateMutation.isPending,
+            }}
+            secondaryAction={{ label: tx(locale, "关闭提示", "Dismiss"), onClick: () => setGenerateFailure(null) }}
+          />
+        ) : null}
       </div>
 
       <div className="border-t">

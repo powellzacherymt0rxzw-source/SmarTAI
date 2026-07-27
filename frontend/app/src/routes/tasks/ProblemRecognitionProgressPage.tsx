@@ -10,10 +10,12 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useTask } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { Button } from "@/components/ui/Button";
+import { RecoverableActionState } from "@/components/ui/RecoverableActionState";
 import { useTaskProgress } from "@/hooks/useTaskProgress";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { MessageKey } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
+import { classifyRecoverableError } from "@/lib/taskActionGuards";
 import type { JobProgress, ProgressEvent, TaskStatus } from "@/types";
 
 const QUESTION_WORKSPACE_STATUSES = new Set<TaskStatus>([
@@ -51,6 +53,11 @@ export function ProblemRecognitionProgressPage() {
   const refresh = () => {
     void Promise.all([taskQuery.refetch(), progressQuery.refetch()]);
   };
+  const progressFailure = progressQuery.progress?.error_detail
+    ?? [...(progressQuery.progress?.messages ?? [])].reverse().find((event) => event.level === "error")?.message
+    ?? taskQuery.data?.error
+    ?? progressQuery.error
+    ?? taskQuery.error;
 
   if (!taskId) {
     return (
@@ -66,16 +73,28 @@ export function ProblemRecognitionProgressPage() {
   }
 
   if (status === "error") {
+    const info = classifyRecoverableError(progressFailure, {
+      locale,
+      phase: progressQuery.progress?.current_step ?? progressQuery.progress?.phase ?? "question_preparation",
+      jobId: taskQuery.data?.last_failed_job_id,
+      returnTo: `/tasks/${taskId}/problems/progress`,
+    });
     return (
       <ProgressPageFrame title={t("problemProgressTitle")}>
-        <RecoveryState
-          title={t("problemProgressFailedTitle")}
-          description={t("problemProgressFailedDescription")}
-          primaryLabel={t("problemProgressChooseAgain")}
-          onPrimary={() => navigate(`/tasks/${taskId}/upload/problems`)}
-          secondaryLabel={t("problemProgressRefresh")}
-          onSecondary={refresh}
-          busy={taskQuery.isFetching || progressQuery.isFetching}
+        <RecoverableActionState
+          info={info}
+          locale={locale}
+          className="min-h-[430px]"
+          primaryAction={info.actionKind === "byok" ? undefined : {
+            label: info.actionKind === "refresh" ? info.actionLabel : t("problemProgressChooseAgain"),
+            onClick: info.actionKind === "refresh" ? refresh : () => navigate(`/tasks/${taskId}/upload/problems`),
+            busy: taskQuery.isFetching || progressQuery.isFetching,
+          }}
+          secondaryAction={{
+            label: t("problemProgressRefresh"),
+            onClick: refresh,
+            busy: taskQuery.isFetching || progressQuery.isFetching,
+          }}
         />
       </ProgressPageFrame>
     );
@@ -83,16 +102,23 @@ export function ProblemRecognitionProgressPage() {
 
   const hasReadableState = Boolean(status || taskQuery.data || progressQuery.data);
   if (!hasReadableState && (taskQuery.isError || progressQuery.isError)) {
+    const info = classifyRecoverableError(progressQuery.error ?? taskQuery.error, {
+      locale,
+      phase: "question_preparation_status",
+      returnTo: `/tasks/${taskId}/problems/progress`,
+    });
     return (
       <ProgressPageFrame title={t("problemProgressTitle")}>
-        <RecoveryState
-          title={t("problemProgressReadFailedTitle")}
-          description={t("problemProgressReadFailedDescription")}
-          primaryLabel={t("problemProgressRefresh")}
-          onPrimary={refresh}
-          secondaryLabel={t("problemProgressViewTasks")}
-          onSecondary={() => navigate("/history")}
-          busy={taskQuery.isFetching || progressQuery.isFetching}
+        <RecoverableActionState
+          info={info}
+          locale={locale}
+          className="min-h-[430px]"
+          primaryAction={info.actionKind === "byok" ? undefined : {
+            label: t("problemProgressRefresh"),
+            onClick: refresh,
+            busy: taskQuery.isFetching || progressQuery.isFetching,
+          }}
+          secondaryAction={{ label: t("problemProgressViewTasks"), href: "/history" }}
         />
       </ProgressPageFrame>
     );

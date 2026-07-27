@@ -1,14 +1,15 @@
-import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, LoaderCircle } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { normalizeAPIError } from "@/api/client";
 import { useStartGrading, useTask } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
+import { RecoverableActionState } from "@/components/ui/RecoverableActionState";
 import { useTaskProgress } from "@/hooks/useTaskProgress";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import { gradingProgressText as copy } from "@/lib/gradingProgressCopy";
+import { classifyRecoverableError } from "@/lib/taskActionGuards";
 import { getTaskDestination, getTaskGradingSetupHref, hasTaskReachedStep } from "@/lib/taskFlow";
 import type { JobProgress, TaskStatus } from "@/types";
 
@@ -74,7 +75,14 @@ export function GradingProgressPage() {
   const readFailed = !hasReadableState && (taskQuery.isError || progressQuery.isError);
   const isFinalizing = status === "grading" && progress?.phase === "done";
   const percent = completedView ? 100 : progress ? progressQuery.percent : null;
-  const retryError = retryGrading.error ? normalizeAPIError(retryGrading.error).message : null;
+  const recoveryInfo = status === "error"
+    ? classifyRecoverableError(retryGrading.error ?? latestError, {
+      locale,
+      phase: progress?.current_step ?? progress?.phase ?? "grading",
+      jobId: task?.last_failed_job_id ?? task?.grading_job_id,
+      returnTo: `/tasks/${taskId}/grading/progress`,
+    })
+    : null;
 
   return (
     <div className="w-full max-w-[1300px]">
@@ -102,15 +110,20 @@ export function GradingProgressPage() {
         <PageState title={copy(locale, "reading")} busy />
       ) : (
         <div className="mx-auto mt-[25px] w-full max-w-[940px]">
-          {status === "error" ? (
-            <ErrorProgressCard
+          {status === "error" && recoveryInfo ? (
+            <RecoverableActionState
+              info={recoveryInfo}
               locale={locale}
-              taskId={taskId}
-              error={latestError}
-              retryError={retryError}
-              busy={retryGrading.isPending || taskQuery.isFetching || progressQuery.isFetching}
-              onRetry={() => void handleRetry()}
-              onRefresh={refresh}
+              className="min-h-[300px]"
+              primaryAction={recoveryInfo.actionKind === "byok" ? undefined : {
+                label: recoveryInfo.actionKind === "refresh" ? recoveryInfo.actionLabel : copy(locale, retryGrading.isPending ? "retrying" : "retry"),
+                onClick: recoveryInfo.actionKind === "refresh" ? refresh : () => void handleRetry(),
+                busy: retryGrading.isPending || taskQuery.isFetching || progressQuery.isFetching,
+              }}
+              secondaryAction={{
+                label: copy(locale, "editExperts"),
+                href: getTaskGradingSetupHref(taskId, `/tasks/${taskId}/grading/progress`),
+              }}
             />
           ) : (
             <>
@@ -256,49 +269,6 @@ function QueueTable({ locale, queue }: { locale: Locale; queue: QueueSummary }) 
             <span className="min-w-0 text-muted-foreground">{copy(locale, row.detail)}</span>
           </div>
         ))}
-      </div>
-    </section>
-  );
-}
-
-function ErrorProgressCard({
-  locale,
-  taskId,
-  error,
-  retryError,
-  busy,
-  onRetry,
-  onRefresh,
-}: {
-  locale: Locale;
-  taskId: string;
-  error: string | null;
-  retryError: string | null;
-  busy: boolean;
-  onRetry: () => void;
-  onRefresh: () => void;
-}) {
-  return (
-    <section className="rounded-[10px] border bg-card px-5 py-8 sm:min-h-[300px] sm:px-10 sm:py-10" role="alert">
-      <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-red-100 text-danger dark:bg-red-950/40">
-        <AlertTriangle aria-hidden="true" className="h-5 w-5" />
-      </span>
-      <h2 className="mt-5 text-[22px] font-bold text-foreground">{copy(locale, "failedTitle")}</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{copy(locale, "failedDescription")}</p>
-      {error ? <p className="mt-4 rounded-[8px] bg-red-50 px-4 py-3 text-sm leading-6 text-danger dark:bg-red-950/20">{error}</p> : null}
-      {retryError ? <p className="mt-3 text-sm text-danger">{retryError || copy(locale, "retryError")}</p> : null}
-      <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        <button type="button" disabled={busy} onClick={onRetry} className="inline-flex h-10 items-center justify-center gap-2 rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground disabled:opacity-50">
-          {busy ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
-          {copy(locale, busy ? "retrying" : "retry")}
-        </button>
-        <Link to={getTaskGradingSetupHref(taskId, `/tasks/${taskId}/grading/progress`)} className="inline-flex h-10 items-center justify-center rounded-[8px] border bg-card px-5 text-sm font-semibold hover:bg-muted">
-          {copy(locale, "editExperts")}
-        </Link>
-        <button type="button" disabled={busy} onClick={onRefresh} className="inline-flex h-10 items-center justify-center gap-2 rounded-[8px] border bg-card px-5 text-sm font-semibold hover:bg-muted disabled:opacity-50">
-          <RefreshCw aria-hidden="true" className="h-4 w-4" />
-          {copy(locale, "refresh")}
-        </button>
       </div>
     </section>
   );
