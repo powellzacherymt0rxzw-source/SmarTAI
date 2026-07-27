@@ -609,9 +609,9 @@ export function StudentAnswerReviewPage() {
                 t={t}
               />
             </div>
-            <div className="mt-1.5 flex flex-col gap-1 px-1 text-[11px] leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <div className="mt-1.5 grid gap-0.5 px-1 text-[11px] leading-5 text-muted-foreground">
               <span>{tx(locale, "搜索只筛选题目；当前学生保持不变。输入中文时会在选词完成后再应用筛选。", "Question search only filters questions; the selected student stays unchanged. IME text is applied after composition finishes.")}</span>
-              <span className="inline-flex shrink-0 items-center gap-1.5 font-medium text-foreground/70">
+              <span className="flex items-center gap-1.5 font-medium text-foreground/70">
                 <Keyboard aria-hidden="true" className="h-3.5 w-3.5" />
                 {t("answerReviewKeyboardHint")}
               </span>
@@ -704,7 +704,7 @@ export function StudentAnswerReviewPage() {
               onClick={(event) => { if (!confirmLeave()) event.preventDefault(); }}
               className="inline-flex h-10 items-center justify-center rounded-[8px] border bg-card px-5 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
             >
-              {t("answerReviewBackMatrix")}
+              {t("answerReviewBackOverview")}
             </Link>
             <Link
               to={`/tasks/${encodeURIComponent(taskId)}/grading-setup`}

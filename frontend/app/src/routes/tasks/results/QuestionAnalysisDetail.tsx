@@ -176,9 +176,10 @@ export function QuestionAnalysisDetail({
         ) : null}
       </div>
 
-      <p className="mt-2 text-[10px] text-muted-foreground">
-        {tx(locale, "搜索只筛选题目；输入中文时在选词完成后应用。输入框聚焦时方向键只编辑文本，退出后 ↑/↓ 切换题目。", "Search filters questions only and waits for IME composition. Arrow keys edit text while focused; after leaving, ↑/↓ switch questions.")}
-      </p>
+      <div className="mt-2 grid gap-0.5 text-[10px] leading-4 text-muted-foreground">
+        <p>{tx(locale, "搜索只筛选题目；输入中文时在选词完成后应用。", "Search filters questions only and waits for IME composition.")}</p>
+        <p>{tx(locale, "输入框聚焦时方向键只编辑文本；退出输入框后，↑/↓ 切换题目。", "Arrow keys edit text while the input is focused; after leaving it, ↑/↓ switch questions.")}</p>
+      </div>
 
       <div className="mt-4 grid items-start gap-4 lg:grid-cols-[132px_minmax(0,1fr)]">
         <ResultQuestionSidebar
@@ -205,31 +206,33 @@ export function QuestionAnalysisDetail({
         <MaterialPanel title={tx(locale, "评分标准", "Rubric")} source={fieldSource(question.problem, "criterion", locale)}>
           {question.criterion ? <MarkdownMath className="text-[13px] leading-6 text-foreground">{question.criterion}</MarkdownMath> : <MissingText locale={locale} />}
         </MaterialPanel>
-        <MaterialPanel title={tx(locale, "标答 / 参考答案", "Reference answer")} source={fieldSource(question.problem, "reference_answer", locale)}>
+        <MaterialPanel className="xl:col-span-2" title={tx(locale, "标答 / 参考答案", "Reference answer")} source={fieldSource(question.problem, "reference_answer", locale)}>
           {question.problem?.reference_answer ? <MarkdownMath className="text-[13px] leading-6 text-foreground">{question.problem.reference_answer}</MarkdownMath> : <MissingText locale={locale} />}
         </MaterialPanel>
         {showTestMaterials ? (
-          <MaterialPanel title={tx(locale, "代码 / 测试资料", "Code / test materials")} source={fieldSource(question.problem, "test_cases", locale)}>
+          <MaterialPanel className="xl:col-span-2" title={tx(locale, "代码 / 测试资料", "Code / test materials")} source={fieldSource(question.problem, "test_cases", locale)}>
             <TestMaterialSummary locale={locale} problem={question.problem} />
           </MaterialPanel>
         ) : null}
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-3">
-        <EvidencePanel title={tx(locale, "易错点与常见问题（有据）", "Common issues (evidence-backed)")} subtitle={tx(locale, "按重复评分反馈计数，不由前端生成主题", "Counts repeated grading feedback; no invented topic")}>
-          <SignalList locale={locale} signals={commonFeedback} empty={tx(locale, "没有重复反馈可形成摘要。", "No repeated feedback to summarize.")} />
-        </EvidencePanel>
+      <div className="mt-4">
         <EvidencePanel title={tx(locale, "Rubric 维度表现", "Rubric-dimension performance")} subtitle={tx(locale, "按批改步骤描述聚合", "Aggregated from grading-step descriptions")}>
-          {rubricDimensions.length ? <div className="mt-3 grid gap-2">{rubricDimensions.slice(0, 4).map((dimension) => (
+          {rubricDimensions.length ? <div className="mt-3 grid gap-2 lg:grid-cols-2">{rubricDimensions.map((dimension) => (
             <div key={dimension.label} className="rounded-[7px] bg-muted/60 px-3 py-2">
-              <div className="flex items-center justify-between gap-3 text-[11px]"><strong className="truncate text-foreground">{dimension.label}</strong><span className="shrink-0 font-semibold text-primary">{formatScore(dimension.averageScore)} {tx(locale, "平均分", "mean")}</span></div>
+              <div className="flex items-start justify-between gap-3 text-[11px]"><strong className="min-w-0 break-words leading-4 text-foreground">{dimension.label}</strong><span className="shrink-0 font-semibold text-primary">{formatScore(dimension.averageScore)} {tx(locale, "平均分", "mean")}</span></div>
               <p className="mt-1 text-[10px] text-muted-foreground">{tx(locale, `${dimension.correct}/${dimension.attempts} 次标记为正确`, `${dimension.correct}/${dimension.attempts} marked correct`)}</p>
             </div>
           ))}</div> : <PanelEmpty text={tx(locale, "当前结果没有步骤级 rubric 数据。", "No step-level rubric data is available.")} />}
         </EvidencePanel>
-        <EvidencePanel title={tx(locale, "复核与分歧信号", "Review & disagreement signals")} subtitle={tx(locale, `基于 ${question.count} 份真实作答`, `Based on ${question.count} real responses`)}>
-          <SignalList locale={locale} signals={reviewSignals} empty={tx(locale, "没有正式复核或分歧信号。", "No formal review or disagreement signal.")} />
-        </EvidencePanel>
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <EvidencePanel title={tx(locale, "易错点与常见问题（有据）", "Common issues (evidence-backed)")} subtitle={tx(locale, "按重复评分反馈计数，不由前端生成主题", "Counts repeated grading feedback; no invented topic")}>
+            <SignalList locale={locale} signals={commonFeedback} empty={tx(locale, "没有重复反馈可形成摘要。", "No repeated feedback to summarize.")} />
+          </EvidencePanel>
+          <EvidencePanel title={tx(locale, "复核与分歧信号", "Review & disagreement signals")} subtitle={tx(locale, `基于 ${question.count} 份真实作答`, `Based on ${question.count} real responses`)}>
+            <SignalList locale={locale} signals={reviewSignals} empty={tx(locale, "没有正式复核或分歧信号。", "No formal review or disagreement signal.")} />
+          </EvidencePanel>
+        </div>
       </div>
 
       <div className="mt-4 rounded-[9px] border">
@@ -284,14 +287,14 @@ function DetailMetric({ label, value, tone }: { label: string; value: string; to
   );
 }
 
-function MaterialPanel({ title, source, children }: { title: string; source: string; children: ReactNode }) {
+function MaterialPanel({ className, title, source, children }: { className?: string; title: string; source: string; children: ReactNode }) {
   return (
-    <section className="min-w-0 rounded-[9px] border px-4 py-3.5">
+    <section className={cn("min-w-0 rounded-[9px] border px-4 py-3.5", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-[13px] font-bold text-foreground">{title}</h3>
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{source}</span>
       </div>
-      <div className="mt-3 max-h-44 overflow-auto rounded-[7px] bg-muted/50 px-3 py-2.5">{children}</div>
+      <div className="mt-3 min-w-0 overflow-x-auto rounded-[7px] bg-muted/50 px-3 py-2.5">{children}</div>
     </section>
   );
 }

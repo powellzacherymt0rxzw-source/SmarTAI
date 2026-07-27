@@ -7,11 +7,13 @@ import {
   FilePlus2,
   LoaderCircle,
   Search,
+  Settings,
   Settings2,
+  Sparkles,
   Trash2,
   Upload,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useBeforeUnload, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { normalizeAPIError } from "@/api/client";
 import {
@@ -224,7 +226,7 @@ export function GradingSetupPage() {
       </h1>
       <NewTaskStepper currentStep={5} />
 
-      <section className="mx-auto mt-[35px] w-full max-w-[980px] rounded-[10px] border bg-card px-5 pb-4 pt-5 sm:min-h-[540px] sm:px-8 sm:pb-5 sm:pt-5">
+      <section className="mx-auto mt-[35px] w-full max-w-[1190px] rounded-[12px] border bg-card px-5 pb-5 pt-5 sm:min-h-[620px] sm:px-10 sm:pb-6 sm:pt-6">
         {!taskId ? (
           <CenteredState
             title={gradingSetupText(locale, "taskMissingTitle")}
@@ -255,26 +257,32 @@ export function GradingSetupPage() {
               className={cn("min-h-0 min-w-0 flex-1 border-0 p-0", isReadOnly && "opacity-70")}
             >
               <div className="min-h-0">
-                <ModelSection
-                  locale={locale}
-                  experts={response.available_experts}
-                  setup={setup}
-                  onToggleProvider={toggleProvider}
-                  onRemoveMissingProvider={removeMissingProvider}
-                  onPrimaryChange={(providerId) => updateSetup((current) => ({ ...current, primary_provider_id: providerId }))}
-                  onAggregationChange={(aggregationMethod) => updateSetup((current) => ({ ...current, aggregation_method: aggregationMethod, multi_sample_n: 1 }))}
-                />
+                <h2 className="text-[20px] font-bold leading-7 text-foreground">
+                  {locale === "zh-CN" ? "模型与资料" : "Models & materials"}
+                </h2>
 
-                <div className="my-2 h-px bg-border" />
+                <div className="mt-3">
+                  <ModelSection
+                    locale={locale}
+                    experts={response.available_experts}
+                    setup={setup}
+                    onToggleProvider={toggleProvider}
+                    onRemoveMissingProvider={removeMissingProvider}
+                    onPrimaryChange={(providerId) => updateSetup((current) => ({ ...current, primary_provider_id: providerId }))}
+                    onAggregationChange={(aggregationMethod) => updateSetup((current) => ({ ...current, aggregation_method: aggregationMethod, multi_sample_n: 1 }))}
+                  />
+                </div>
 
-                <KnowledgeSection
-                  locale={locale}
-                  taskId={taskId}
-                  value={setup.knowledge_scope}
-                  onChange={(knowledgeScope) => updateSetup((current) => ({ ...current, knowledge_scope: knowledgeScope }))}
-                />
+                <div className="mt-5">
+                  <KnowledgeSection
+                    locale={locale}
+                    taskId={taskId}
+                    value={setup.knowledge_scope}
+                    onChange={(knowledgeScope) => updateSetup((current) => ({ ...current, knowledge_scope: knowledgeScope }))}
+                  />
+                </div>
 
-                <div className="my-2 h-px bg-border" />
+                <div className="my-3 h-px bg-border sm:-mx-5" />
 
                 <StrategySection
                   locale={locale}
@@ -309,12 +317,15 @@ export function GradingSetupPage() {
               {actionError && actionError !== validationMessage && actionError !== blockingMessage ? <p role="alert" className="mt-2 text-[11px] leading-4 text-danger">{actionError}</p> : null}
             </div>
 
-            <footer className="mt-3 flex shrink-0 flex-col-reverse gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
-              <Link to={backHref} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] border bg-card px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto">
+            <footer className="mt-4 grid shrink-0 gap-3 border-t pt-4 sm:-mx-5 sm:px-2 lg:grid-cols-[auto_minmax(0,1fr)_270px] lg:items-center">
+              <Link to={backHref} className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-[8px] border bg-card px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring lg:w-auto">
                 <ArrowLeft aria-hidden="true" className="h-4 w-4" />
                 {gradingSetupText(locale, "backToPrevious")}
               </Link>
-              <button type="submit" disabled={actionDisabled} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[270px]">
+              <p className="text-center text-[13px] leading-5 text-muted-foreground">
+                {locale === "zh-CN" ? "设置会在进入批改摘要前保存" : "Settings are saved before the grading summary"}
+              </p>
+              <button type="submit" disabled={actionDisabled} className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
                 {saveSetup.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
                 {saveSetup.isPending ? gradingSetupText(locale, "saving") : gradingSetupText(locale, "saveAndContinue")}
                 {!saveSetup.isPending ? <ChevronRight aria-hidden="true" className="h-4 w-4" /> : null}
@@ -362,9 +373,9 @@ function ModelSection({
 
   return (
     <fieldset>
-      <legend className="text-[17px] font-bold leading-6 text-foreground">{gradingSetupText(locale, "modelsTitle")}</legend>
-      <p className="mt-0.5 text-[12px] leading-4 text-muted-foreground">{gradingSetupText(locale, "modelsDescription")}</p>
-      <div className="mt-2 max-h-[96px] overflow-y-auto overscroll-contain rounded-[8px] border">
+      <legend className="text-[14px] font-semibold leading-5 text-foreground">{gradingSetupText(locale, "modelsTitle")}</legend>
+      <p className="sr-only">{gradingSetupText(locale, "modelsDescription")}</p>
+      <div className="mt-2 max-h-[156px] overflow-y-auto overscroll-contain rounded-[8px] border">
         <ul className="divide-y">
           {experts.map((expert) => {
             const selected = selectedSet.has(expert.provider_id);
@@ -372,7 +383,7 @@ function ModelSection({
             const label = expert.display_name?.trim() || expert.model;
             return (
               <li key={expert.provider_id} className={cn(
-                "flex min-h-[46px] items-center gap-3 px-3 py-1.5",
+                "flex min-h-[68px] flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 sm:flex-nowrap",
                 selected && !expert.enabled && "bg-red-50/70 dark:bg-red-950/15",
               )}>
                 <input
@@ -381,20 +392,28 @@ function ModelSection({
                   checked={selected}
                   disabled={disabled}
                   onChange={(event) => onToggleProvider(expert, event.target.checked)}
-                  className="h-4 w-4 shrink-0 rounded border-border accent-primary disabled:opacity-45"
+                  className="h-5 w-5 shrink-0 rounded-[5px] border-border accent-primary disabled:opacity-45"
                 />
+                <Sparkles aria-hidden="true" className={cn("h-6 w-6 shrink-0", selected ? "text-primary" : "text-muted-foreground")} />
                 <label htmlFor={`grading-expert-${expert.provider_id}`} className={cn("min-w-0 flex-1 cursor-pointer", disabled && "cursor-not-allowed opacity-55")}>
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-[13px] font-semibold text-foreground" title={label}>{label}</span>
-                    {expert.is_shared ? <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-primary dark:bg-blue-950/30">{gradingSetupText(locale, "sharedModel")}</span> : null}
+                    <span className="truncate text-[14px] font-semibold leading-5 text-foreground" title={label}>{label}</span>
+                    {expert.is_shared ? <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[12px] font-semibold text-primary dark:bg-blue-950/30">{gradingSetupText(locale, "sharedModel")}</span> : null}
                   </span>
-                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{expert.provider_type} · {expert.model} · {gradingSetupText(locale, expert.enabled ? "enabledConfiguration" : "disabledConfiguration")}</span>
+                  <span className="mt-0.5 block truncate text-[13px] leading-5 text-muted-foreground">{expert.provider_type} · {gradingSetupText(locale, expert.enabled ? "enabledConfiguration" : "disabledConfiguration")}</span>
                 </label>
                 {hasMultiple && selected && expert.enabled ? (
-                  <label className="flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                    <input type="radio" name="primary-grading-model" checked={setup.primary_provider_id === expert.provider_id} onChange={() => onPrimaryChange(expert.provider_id)} className="h-3.5 w-3.5 accent-primary" />
+                  <label className="flex shrink-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
+                    <input type="radio" name="primary-grading-model" checked={setup.primary_provider_id === expert.provider_id} onChange={() => onPrimaryChange(expert.provider_id)} className="h-4 w-4 accent-primary" />
                     {gradingSetupText(locale, "primaryModel")}
                   </label>
+                ) : !hasMultiple && selected && expert.enabled ? (
+                  <div className="flex w-full items-center gap-4 pl-8 sm:w-auto sm:pl-0">
+                    <span className="inline-flex h-8 items-center rounded-full bg-muted px-3 text-[12px] font-semibold text-foreground">
+                      {gradingSetupText(locale, "singleMethod")}
+                    </span>
+                    <span className="hidden whitespace-nowrap text-[13px] text-muted-foreground md:inline">{gradingSetupText(locale, "singleMethodDescription")}</span>
+                  </div>
                 ) : null}
               </li>
             );
@@ -406,22 +425,22 @@ function ModelSection({
                 type="checkbox"
                 checked
                 onChange={() => onRemoveMissingProvider(providerId)}
-                className="h-4 w-4 shrink-0 rounded border-border accent-primary"
+                className="h-5 w-5 shrink-0 rounded-[5px] border-border accent-primary"
               />
               <label htmlFor={`missing-grading-expert-${index}`} className="min-w-0 flex-1 cursor-pointer">
-                <span className="block truncate text-[12px] font-semibold text-danger">{gradingSetupText(locale, "invalidModelTitle")}</span>
-                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground" title={providerId}>{gradingSetupText(locale, "invalidModelDescription")} · {providerId}</span>
+                <span className="block truncate text-[14px] font-semibold text-danger">{gradingSetupText(locale, "invalidModelTitle")}</span>
+                <span className="mt-0.5 block truncate text-[13px] text-muted-foreground" title={providerId}>{gradingSetupText(locale, "invalidModelDescription")} · {providerId}</span>
               </label>
             </li>
           ))}
         </ul>
       </div>
-      <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{gradingSetupText(locale, "providerStatusNote")}</p>
+      <p className="sr-only">{gradingSetupText(locale, "providerStatusNote")}</p>
 
       {hasMultiple ? (
-        <div className="mt-2">
-          <p className="text-[12px] font-semibold text-foreground">{gradingSetupText(locale, "aggregationTitle")}</p>
-          <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+        <div className="mt-3">
+          <p className="text-[14px] font-semibold text-foreground">{gradingSetupText(locale, "aggregationTitle")}</p>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
             <ChoiceButton
               active={setup.aggregation_method === "weighted_average"}
               title={gradingSetupText(locale, "weightedMethod")}
@@ -438,12 +457,7 @@ function ModelSection({
             />
           </div>
         </div>
-      ) : (
-        <div className="mt-1.5 flex items-center justify-between rounded-[7px] border px-3 py-1.5">
-          <span className="text-[12px] font-semibold text-foreground">{gradingSetupText(locale, "singleMethod")}</span>
-          <span className="text-[11px] text-muted-foreground">{gradingSetupText(locale, "singleMethodDescription")}</span>
-        </div>
-      )}
+      ) : null}
     </fieldset>
   );
 }
@@ -523,27 +537,27 @@ function KnowledgeSection({ locale, taskId, value, onChange }: {
     <section aria-labelledby="grading-knowledge-title">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div>
-          <h2 id="grading-knowledge-title" className="text-[17px] font-bold leading-6 text-foreground">
+          <h2 id="grading-knowledge-title" className="text-[18px] font-bold leading-6 text-foreground">
             {locale === "zh-CN" ? "补充任务资料" : "Supplemental task materials"}
           </h2>
-          <p className="mt-0.5 text-[12px] leading-4 text-muted-foreground">
+          <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground">
             {locale === "zh-CN"
-              ? "可选教材、讲义或背景资料作为批改上下文；不会替代已审核的题目、标答和评分标准。"
+              ? "可选教材、讲义或背景资料作为批改上下文，不会替代已审核的题目、标答和评分标准。"
               : "Optionally add textbooks, lecture notes, or context. These do not replace reviewed questions, answers, or rubrics."}
           </p>
         </div>
         <Link
           to="/knowledge-base"
-          className="inline-flex shrink-0 items-center gap-1 self-start text-[12px] font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex shrink-0 items-center gap-1 self-start text-[13px] font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
         >
           {locale === "zh-CN" ? "前往课程资料库" : "Open course library"}
-          <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
+          <ExternalLink aria-hidden="true" className="h-4 w-4" />
         </Link>
       </div>
 
-      <div className="relative mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="relative mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
         <label className="relative min-w-0">
-          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="search"
             value={libraryQueryText}
@@ -553,15 +567,15 @@ function KnowledgeSection({ locale, taskId, value, onChange }: {
               setLibraryQueryText(event.target.value);
               setLibraryOpen(true);
             }}
-            placeholder={locale === "zh-CN" ? "搜索资料库中的教材、讲义或背景资料" : "Search textbooks, lecture notes, or context"}
-            className="h-10 w-full rounded-[8px] border bg-background pl-9 pr-3 text-[12px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
+            placeholder={locale === "zh-CN" ? "搜索教材、讲义或背景资料" : "Search textbooks, lecture notes, or context"}
+            className="h-11 w-full rounded-[8px] border bg-background pl-10 pr-3 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
           />
         </label>
         <button
           type="button"
           disabled={atLimit || isBusy}
           onClick={() => fileInputRef.current?.click()}
-          className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[8px] border bg-card px-3 text-[12px] font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-[8px] border bg-card px-4 text-[14px] font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           title={atLimit ? (locale === "zh-CN" ? "本任务最多选择 3 份资料" : "Up to 3 task documents") : undefined}
         >
           <Upload aria-hidden="true" className="h-4 w-4" />
@@ -579,7 +593,7 @@ function KnowledgeSection({ locale, taskId, value, onChange }: {
         />
 
         {libraryOpen ? (
-          <div className="absolute left-0 right-0 top-11 z-20 max-h-56 overflow-y-auto rounded-[8px] border bg-card p-1.5 shadow-lg sm:right-[104px]">
+          <div className="absolute left-0 right-0 top-12 z-20 max-h-56 overflow-y-auto rounded-[8px] border bg-card p-1.5 shadow-lg sm:right-[124px]">
             {libraryQuery.isLoading ? (
               <div className="flex min-h-20 items-center justify-center"><LoaderCircle aria-hidden="true" className="h-5 w-5 animate-spin text-primary" /></div>
             ) : eligibleMaterials.length > 0 ? (
@@ -587,11 +601,11 @@ function KnowledgeSection({ locale, taskId, value, onChange }: {
                 {eligibleMaterials.map((material) => {
                   const attached = attachedMaterialIds.has(material.material_id);
                   return (
-                    <li key={material.material_id} className="flex min-h-12 items-center gap-3 px-2 py-2">
+                    <li key={material.material_id} className="flex min-h-14 items-center gap-3 px-3 py-2">
                       <BookOpen aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[12px] font-semibold text-foreground">{material.filename}</span>
-                        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                        <span className="block truncate text-[13px] font-semibold text-foreground">{material.filename}</span>
+                        <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
                           {material.course_name || (locale === "zh-CN" ? "未归属课程" : "No course")} · {material.category}
                         </span>
                       </span>
@@ -599,7 +613,7 @@ function KnowledgeSection({ locale, taskId, value, onChange }: {
                         type="button"
                         disabled={attached || atLimit || isBusy}
                         onClick={() => void attachLibraryMaterial(material.material_id)}
-                        className="h-8 shrink-0 rounded-[7px] border bg-card px-3 text-[11px] font-semibold text-primary hover:bg-muted disabled:cursor-not-allowed disabled:text-muted-foreground disabled:opacity-60"
+                        className="h-9 shrink-0 rounded-[7px] border bg-card px-3 text-[13px] font-semibold text-primary hover:bg-muted disabled:cursor-not-allowed disabled:text-muted-foreground disabled:opacity-60"
                       >
                         {attached ? (locale === "zh-CN" ? "已选择" : "Selected") : (locale === "zh-CN" ? "选择" : "Select")}
                       </button>
@@ -609,35 +623,35 @@ function KnowledgeSection({ locale, taskId, value, onChange }: {
               </ul>
             ) : (
               <div className="flex min-h-20 flex-col items-center justify-center px-4 text-center">
-                <p className="text-[12px] font-semibold text-foreground">{locale === "zh-CN" ? "没有匹配的资料" : "No matching materials"}</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">{locale === "zh-CN" ? "可换个关键词，或直接上传一份新资料。" : "Try another query or upload a new file."}</p>
+                <p className="text-[13px] font-semibold text-foreground">{locale === "zh-CN" ? "没有匹配的资料" : "No matching materials"}</p>
+                <p className="mt-1 text-[12px] text-muted-foreground">{locale === "zh-CN" ? "可换个关键词，或直接上传一份新资料。" : "Try another query or upload a new file."}</p>
               </div>
             )}
           </div>
         ) : null}
       </div>
 
-      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] font-medium text-foreground">
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <label className="inline-flex cursor-pointer items-center gap-2 text-[13px] font-medium text-foreground">
           <input type="checkbox" checked={saveToLibrary} onChange={(event) => setSaveToLibrary(event.target.checked)} className="h-4 w-4 rounded border-border accent-primary" />
           {locale === "zh-CN" ? "上传时同时加入课程资料库" : "Also add uploads to course library"}
         </label>
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-[13px] text-muted-foreground">
           {locale === "zh-CN" ? `已选择 ${docs.length}/3 份` : `${docs.length}/3 selected`}
         </span>
       </div>
 
-      <div className="mt-2 overflow-hidden rounded-[8px] border bg-card">
+      <div className={cn("mt-3 overflow-hidden rounded-[8px] border bg-card", !docsQuery.isLoading && docs.length === 0 && "border-dashed")}>
         {docsQuery.isLoading ? (
-          <div className="flex min-h-14 items-center justify-center"><LoaderCircle aria-hidden="true" className="h-5 w-5 animate-spin text-primary" /></div>
+          <div className="flex min-h-[58px] items-center justify-center"><LoaderCircle aria-hidden="true" className="h-5 w-5 animate-spin text-primary" /></div>
         ) : docs.length > 0 ? (
           <ul className="divide-y">
             {docs.map((doc) => (
-              <li key={doc.doc_id} className="flex min-h-14 items-center gap-3 px-3 py-2">
-                <FilePlus2 aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" />
+              <li key={doc.doc_id} className="flex min-h-[58px] items-center gap-3 px-4 py-2">
+                <FilePlus2 aria-hidden="true" className="h-5 w-5 shrink-0 text-primary" />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12px] font-semibold text-foreground">{doc.filename}</span>
-                  <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                  <span className="block truncate text-[13px] font-semibold text-foreground">{doc.filename}</span>
+                  <span className="mt-0.5 block text-[12px] text-muted-foreground">
                     {doc.source_kind === "library"
                       ? (locale === "zh-CN" ? "来自课程资料库" : "From course library")
                       : doc.saved_to_library
@@ -659,13 +673,13 @@ function KnowledgeSection({ locale, taskId, value, onChange }: {
             ))}
           </ul>
         ) : (
-          <div className="flex min-h-14 items-center gap-3 px-3 py-2 text-[12px] text-muted-foreground">
-            <BookOpen aria-hidden="true" className="h-4 w-4 shrink-0" />
-            {locale === "zh-CN" ? "暂未选择补充资料；系统将只使用题目、标答和评分标准。" : "No supplemental materials selected."}
+          <div className="flex min-h-12 items-center gap-4 px-5 py-2 text-[14px] leading-5 text-muted-foreground">
+            <BookOpen aria-hidden="true" className="h-5 w-5 shrink-0" strokeWidth={1.8} />
+            <span className="min-w-0">{locale === "zh-CN" ? "暂未选择补充资料；系统将只使用题目、标答和评分标准。" : "No supplemental materials selected."}</span>
           </div>
         )}
       </div>
-      {knowledgeError ? <p role="alert" className="mt-2 text-[11px] leading-4 text-danger">{knowledgeError}</p> : null}
+      {knowledgeError ? <p role="alert" className="mt-2 text-[13px] leading-5 text-danger">{knowledgeError}</p> : null}
     </section>
   );
 }
@@ -691,40 +705,73 @@ function StrategySection({
     : setup.strictness > 65
       ? "strict"
       : "standard";
+  const toneKey = setup.feedback_tone === "encouraging"
+    ? "toneEncouraging"
+    : setup.feedback_tone === "strict"
+      ? "toneStrict"
+      : "toneNeutral";
+  const lengthKey = setup.feedback_length === "short"
+    ? "lengthShort"
+    : setup.feedback_length === "long"
+      ? "lengthLong"
+      : "lengthMedium";
+  const languageKey = setup.feedback_language === "en" ? "languageEnglish" : "languageChinese";
+  const advancedSummary = locale === "zh-CN"
+    ? `${gradingSetupText(locale, toneKey)}评语 · ${gradingSetupText(locale, lengthKey)}长度 · ${gradingSetupText(locale, languageKey)} · ${setup.multi_sample_n === 1 ? "单次采样" : `${setup.multi_sample_n} 次采样`} · 复核阈值 ${setup.low_confidence_threshold.toFixed(2)}`
+    : `${gradingSetupText(locale, toneKey)} feedback · ${gradingSetupText(locale, lengthKey)} length · ${gradingSetupText(locale, languageKey)} · ${setup.multi_sample_n} sample${setup.multi_sample_n === 1 ? "" : "s"} · review threshold ${setup.low_confidence_threshold.toFixed(2)}`;
 
   return (
     <section aria-labelledby="grading-strategy-title">
-      <h2 id="grading-strategy-title" className="text-[17px] font-bold leading-6 text-foreground">{gradingSetupText(locale, "strategyTitle")}</h2>
-      <p className="mt-0.5 text-[12px] leading-4 text-muted-foreground">{gradingSetupText(locale, "strategyDescription")}</p>
+      <h2 id="grading-strategy-title" className="text-[20px] font-bold leading-7 text-foreground">{gradingSetupText(locale, "strategyTitle")}</h2>
+      <p className="sr-only">{gradingSetupText(locale, "strategyDescription")}</p>
 
-      <div className="mt-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_260px] sm:items-end">
-        <label>
-          <span className="flex items-center justify-between text-[12px] font-semibold text-foreground">
-            <span>{gradingSetupText(locale, "strictness")}</span>
-            <span className="text-primary">{gradingSetupText(locale, strictnessLabel)} · {setup.strictness}</span>
-          </span>
-          <input type="range" min={0} max={100} step={5} value={setup.strictness} onChange={(event) => onChange((current) => ({ ...current, strictness: Number(event.target.value) }))} className="mt-2 h-2 w-full cursor-pointer accent-primary" />
-          <span className="mt-1 flex justify-between text-[11px] text-muted-foreground"><span>{gradingSetupText(locale, "lenient")}</span><span>{gradingSetupText(locale, "standard")}</span><span>{gradingSetupText(locale, "strict")}</span></span>
-        </label>
-        <label className="flex min-h-[54px] cursor-pointer items-center gap-3 rounded-[8px] border px-3 py-2">
-          <input type="checkbox" checked={setup.allow_partial_credit} onChange={(event) => onChange((current) => ({ ...current, allow_partial_credit: event.target.checked }))} className="h-4 w-4 rounded border-border accent-primary" />
+      <label className="mt-3 block">
+        <span className="flex items-center justify-between gap-4 text-[14px] font-semibold leading-5 text-foreground">
+          <span>{gradingSetupText(locale, "strictness")}</span>
+          <span className="shrink-0 text-primary">{gradingSetupText(locale, strictnessLabel)} · {setup.strictness}</span>
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={setup.strictness}
+          onChange={(event) => onChange((current) => ({ ...current, strictness: Number(event.target.value) }))}
+          className="grading-range mt-3 w-full"
+          style={{ "--range-progress": `${setup.strictness}%` } as CSSProperties}
+        />
+        <span className="mt-1.5 flex justify-between text-[13px] leading-5 text-muted-foreground"><span>{gradingSetupText(locale, "lenient")}</span><span>{gradingSetupText(locale, "standard")}</span><span>{gradingSetupText(locale, "strict")}</span></span>
+      </label>
+
+      <div className="mt-3 border-t">
+        <label className="flex min-h-[64px] cursor-pointer items-center gap-3 py-3">
+          <input
+            type="checkbox"
+            checked={setup.allow_partial_credit}
+            onChange={(event) => onChange((current) => ({ ...current, allow_partial_credit: event.target.checked }))}
+            className="peer sr-only"
+          />
+          <span aria-hidden="true" className="relative h-6 w-11 shrink-0 rounded-full bg-slate-300 transition-colors after:absolute after:left-[3px] after:top-[3px] after:h-[18px] after:w-[18px] after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:bg-primary peer-checked:after:translate-x-5 peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-disabled:opacity-50" />
           <span className="min-w-0">
-            <span className="block text-[12px] font-semibold text-foreground">{gradingSetupText(locale, "allowPartialCredit")}</span>
-            <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">{gradingSetupText(locale, "allowPartialCreditDescription")}</span>
+            <span className="block text-[14px] font-semibold leading-5 text-foreground">{gradingSetupText(locale, "allowPartialCredit")}</span>
+            <span className="mt-0.5 block text-[13px] leading-5 text-muted-foreground">{gradingSetupText(locale, "allowPartialCreditDescription")}</span>
           </span>
         </label>
       </div>
 
-      <button type="button" aria-expanded={advancedOpen} aria-controls="grading-advanced-settings" onClick={onAdvancedToggle} className="mt-1.5 flex min-h-9 w-full items-center justify-between gap-3 rounded-[8px] bg-muted/45 px-3 py-1.5 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
-        <span className="min-w-0">
-          <span className="block text-[12px] font-semibold text-foreground">{gradingSetupText(locale, advancedOpen ? "hideAdvanced" : "showAdvanced")}</span>
-          {!advancedOpen ? <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{gradingSetupText(locale, "advancedSummaryThreshold")} {setup.low_confidence_threshold.toFixed(2)} · {setup.multi_sample_n} {gradingSetupText(locale, "advancedSummarySample")}</span> : null}
+      <button type="button" aria-label={gradingSetupText(locale, advancedOpen ? "hideAdvanced" : "showAdvanced")} aria-expanded={advancedOpen} aria-controls="grading-advanced-settings" onClick={onAdvancedToggle} className="mt-2 flex min-h-[72px] w-full items-center justify-between gap-3 rounded-[8px] border bg-card px-5 py-3.5 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:-mx-4 sm:w-[calc(100%+2rem)]">
+        <span className="flex min-w-0 items-center gap-3">
+          <Settings aria-hidden="true" className="h-5 w-5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 md:flex md:items-center md:gap-8">
+            <span className="block shrink-0 text-[14px] font-semibold leading-5 text-foreground">{locale === "zh-CN" ? "高级设置" : "Advanced settings"}</span>
+            {!advancedOpen ? <span className="mt-0.5 block truncate text-[13px] leading-5 text-muted-foreground md:mt-0">{advancedSummary}</span> : null}
+          </span>
         </span>
-        <ChevronDown aria-hidden="true" className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", advancedOpen && "rotate-180")} />
+        <ChevronRight aria-hidden="true" className={cn("h-5 w-5 shrink-0 text-muted-foreground transition-transform", advancedOpen && "rotate-90")} />
       </button>
 
       {advancedOpen ? (
-        <div id="grading-advanced-settings" className="mt-3 grid gap-3 border-l-2 border-primary/20 pl-4 sm:grid-cols-2">
+        <div id="grading-advanced-settings" className="mt-4 grid gap-4 border-l-2 border-primary/20 pl-4 sm:grid-cols-2">
           <SelectField label={gradingSetupText(locale, "feedbackTone")} value={setup.feedback_tone} onChange={(value) => onChange((current) => ({ ...current, feedback_tone: value as GradingFeedbackTone }))}>
             <option value="encouraging">{gradingSetupText(locale, "toneEncouraging")}</option>
             <option value="neutral">{gradingSetupText(locale, "toneNeutral")}</option>
@@ -749,17 +796,17 @@ function StrategySection({
             {SAMPLE_OPTIONS.map((count) => <option key={count} value={count}>{count}{gradingSetupText(locale, "multiSampleSuffix")}</option>)}
           </SelectField>
           <label className="sm:col-span-2">
-            <span className="flex items-center justify-between text-[11px] font-semibold text-foreground"><span>{gradingSetupText(locale, "lowConfidenceThreshold")}</span><span className="text-primary">{setup.low_confidence_threshold.toFixed(2)}</span></span>
-            <input type="range" min={0.3} max={0.8} step={0.05} value={setup.low_confidence_threshold} onChange={(event) => onChange((current) => ({ ...current, low_confidence_threshold: Number(event.target.value) }))} className="mt-2 h-2 w-full cursor-pointer accent-primary" />
-            <span className="mt-1 block text-[11px] text-muted-foreground">{gradingSetupText(locale, "lowConfidenceDescription")}</span>
+            <span className="flex items-center justify-between text-[13px] font-semibold text-foreground"><span>{gradingSetupText(locale, "lowConfidenceThreshold")}</span><span className="text-primary">{setup.low_confidence_threshold.toFixed(2)}</span></span>
+            <input type="range" min={0.3} max={0.8} step={0.05} value={setup.low_confidence_threshold} onChange={(event) => onChange((current) => ({ ...current, low_confidence_threshold: Number(event.target.value) }))} className="grading-range mt-3 w-full" style={{ "--range-progress": `${((setup.low_confidence_threshold - 0.3) / 0.5) * 100}%` } as CSSProperties} />
+            <span className="mt-1.5 block text-[13px] leading-5 text-muted-foreground">{gradingSetupText(locale, "lowConfidenceDescription")}</span>
           </label>
-          <label className="flex cursor-pointer items-start gap-2 text-[11px] font-medium text-foreground sm:col-span-2">
+          <label className="flex cursor-pointer items-start gap-2 text-[13px] font-medium leading-5 text-foreground sm:col-span-2">
             <input type="checkbox" checked={setup.suggest_corrections} onChange={(event) => onChange((current) => ({ ...current, suggest_corrections: event.target.checked }))} className="mt-0.5 h-4 w-4 rounded border-border accent-primary" />
             {gradingSetupText(locale, "suggestCorrections")}
           </label>
           <label className="sm:col-span-2">
-            <span className="flex items-center justify-between text-[11px] font-semibold text-foreground"><span>{gradingSetupText(locale, "teacherNotes")}</span><span className="font-normal text-muted-foreground">{setup.teacher_notes.length}/{MAX_NOTES_LENGTH}{gradingSetupText(locale, "charactersSuffix")}</span></span>
-            <textarea maxLength={MAX_NOTES_LENGTH} value={setup.teacher_notes} onChange={(event) => onChange((current) => ({ ...current, teacher_notes: event.target.value }))} placeholder={gradingSetupText(locale, "teacherNotesPlaceholder")} className="mt-1.5 min-h-[70px] w-full resize-y rounded-[8px] border bg-background px-3 py-2 text-[12px] leading-5 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15" />
+            <span className="flex items-center justify-between text-[13px] font-semibold text-foreground"><span>{gradingSetupText(locale, "teacherNotes")}</span><span className="font-normal text-muted-foreground">{setup.teacher_notes.length}/{MAX_NOTES_LENGTH}{gradingSetupText(locale, "charactersSuffix")}</span></span>
+            <textarea maxLength={MAX_NOTES_LENGTH} value={setup.teacher_notes} onChange={(event) => onChange((current) => ({ ...current, teacher_notes: event.target.value }))} placeholder={gradingSetupText(locale, "teacherNotesPlaceholder")} className="mt-2 min-h-[84px] w-full resize-y rounded-[8px] border bg-background px-3 py-2.5 text-[13px] leading-5 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15" />
           </label>
         </div>
       ) : null}
@@ -776,12 +823,12 @@ function ChoiceButton({ active, title, description, badge, badgeTone = "primary"
   onClick: () => void;
 }) {
   return (
-    <button type="button" aria-pressed={active} onClick={onClick} className={cn("min-h-[52px] rounded-[8px] border bg-card px-3 py-1.5 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-ring", active ? "border-primary ring-1 ring-primary" : "hover:border-slate-300")}>
+    <button type="button" aria-pressed={active} onClick={onClick} className={cn("min-h-[64px] rounded-[8px] border bg-card px-4 py-2.5 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-ring", active ? "border-primary ring-1 ring-primary" : "hover:border-slate-300")}>
       <span className="flex items-center justify-between gap-2">
-        <span className="text-[12px] font-semibold text-foreground">{title}</span>
-        {badge ? <span className={cn("shrink-0 text-[11px] font-semibold", badgeTone === "warning" ? "text-warning" : "text-primary")}>{badge}</span> : null}
+        <span className="text-[14px] font-semibold text-foreground">{title}</span>
+        {badge ? <span className={cn("shrink-0 text-[12px] font-semibold", badgeTone === "warning" ? "text-warning" : "text-primary")}>{badge}</span> : null}
       </span>
-      <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">{description}</span>
+      <span className="mt-1 block text-[13px] leading-5 text-muted-foreground">{description}</span>
     </button>
   );
 }
@@ -796,11 +843,14 @@ function SelectField({ label, value, disabled = false, description, onChange, ch
 }) {
   return (
     <label className="min-w-0">
-      <span className="block text-[11px] font-semibold text-foreground">{label}</span>
-      <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className="mt-1.5 h-9 w-full min-w-0 rounded-[7px] border bg-background px-3 text-[12px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground">
-        {children}
-      </select>
-      {description ? <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">{description}</span> : null}
+      <span className="block text-[13px] font-semibold text-foreground">{label}</span>
+      <span className="relative mt-2 block">
+        <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className="h-10 w-full min-w-0 appearance-none rounded-[8px] border bg-background px-3 pr-10 text-[13px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground">
+          {children}
+        </select>
+        <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      </span>
+      {description ? <span className="mt-1.5 block text-[12px] leading-5 text-muted-foreground">{description}</span> : null}
     </label>
   );
 }

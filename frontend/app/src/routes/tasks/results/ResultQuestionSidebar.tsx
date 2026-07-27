@@ -10,12 +10,14 @@ export function ResultQuestionSidebar({
   activeId,
   onSelect,
   stateForQuestion,
+  behavior = "switch",
 }: {
   locale: Locale;
   questions: QuestionSummary[];
   activeId: string | null;
   onSelect: (id: string) => void;
   stateForQuestion?: (question: QuestionSummary) => ResultQuestionState;
+  behavior?: "switch" | "locate";
 }) {
   return (
     <aside
@@ -25,7 +27,9 @@ export function ResultQuestionSidebar({
       <div className="shrink-0 border-b px-3 py-3">
         <p className="text-xs font-bold text-foreground">{tx(locale, "题目导航", "Questions")}</p>
         <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-          {tx(locale, `共 ${questions.length} 题 · 点击切换`, `${questions.length} questions · select to switch`)}
+          {behavior === "locate"
+            ? tx(locale, `共 ${questions.length} 题 · 点击定位`, `${questions.length} questions · select to locate`)
+            : tx(locale, `共 ${questions.length} 题 · 点击切换`, `${questions.length} questions · select to switch`)}
         </p>
       </div>
       <div className="min-h-0 overflow-y-auto p-2 overscroll-contain">

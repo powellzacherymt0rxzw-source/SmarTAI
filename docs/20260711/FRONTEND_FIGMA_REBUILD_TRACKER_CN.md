@@ -876,6 +876,7 @@
 - [x] S01-BUG-02 “开始识别作答”成功返回 `started / already_running` 后先把任务详情与状态缓存同步为 `parsing_submissions`，再进入 S02；进度页不再被旧的 `problems_ready` 缓存弹回上传页，教师无需再点一次“查看识别进度”。隔离回归特意将服务端状态刷新延迟 800ms，单击后 URL 立即且持续为 `/tasks/:id/submissions/progress`。
 - [x] S05-BUG-01 当前学生全部题目连续渲染；左侧题号栏、上下滚动和题内上一题/下一题同时可用。
 - [x] S05-BUG-02 Safari 学生候选点击修复；从 Kate/Q2 切换到 Bob/Q2 后 URL、目录高亮与正文锚点都保持 Q2。
+- [x] S05-BUG-03 详情页题目搜索下的“筛选/中文输入”与“方向键”提示固定为上下两条独占行，不再在宽屏并排；页底次动作精简为“返回作答总览”，顶部返回文案保持原有上下文。
 - [x] SEARCH-BUG-01 Q03 和 S05 中文输入使用 composition 门禁；“积分”查询无拼音残留，并通过可解释别名命中积分题。
 - [x] QA-BUG-01 视觉对照 `20260727-q03-comparison.png`、`20260727-student-comparison.png` 已联合检查；69 文件 visible-scope/lint/TypeScript 与 Vite production build（`931 modules`）通过，`git diff --check` 通过。
 
@@ -915,6 +916,10 @@
 - [x] A08-ROUTE-01 删除旧 `/tasks/:id/results/:studentId` 兼容 route，只保留 `/results/students/:studentId`；切换学生回页面顶部，不携带旧锚点。
 - [x] A08-STATE-01 正式版本横幅提供“报告与下载”或“返回复核并重新确认”真实动作，不再只有状态说明。
 - [x] A08-QA-01 本地教师 fixture 五入口、A03/A05 目录与筛选、Alice→Kate 回顶、`积分题`→Q1 已通过；控制台 `0 errors / 0 warnings`，未调用 provider。
+- [x] A08-COPY-02 顶部第 8 步由“完成”统一为“结果分析 / Results Analysis”；学生作答详情的筛选说明与键盘说明独占两行，页尾统一为“返回作答总览”。
+- [x] A08-LAYOUT-02 A03 标答全宽自然增高且不再内部纵向滚动；Rubric 维度独占整行并完整换行，易错点与复核分歧在下一行两列展示。
+- [x] A08-CONTINUOUS-02 A05 删除单题/连续双模式，只保留题号目录联动的连续题卡；`←/→` 切学生、`↑/↓` 定位题目，输入框聚焦时不劫持方向键。
+- [x] A08-QA-02 隔离 `T_results_qa` 长标答、5 个长 Rubric 维度、3 题连续学生详情通过浏览器验收；无内容裁切、假空白列或页面级横向溢出，未调用 provider。
 - 详细记录：`docs/20260727/A08_RESULTS_NAVIGATION_AND_DETAIL_UNIFICATION_STAGE_CN.md`。
 
 ### 9.11 R7 Figma 17 可恢复错误与门禁统一（2026-07-27）
