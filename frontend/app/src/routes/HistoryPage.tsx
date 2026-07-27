@@ -150,7 +150,7 @@ export function HistoryPage() {
         />
       </div>
 
-      <div className="mt-6 flex w-[1080px] max-w-full items-center justify-between gap-4 px-1 text-xs text-muted-foreground" aria-live="polite">
+      <div className="mt-6 flex w-full items-center justify-between gap-4 px-1 text-xs text-muted-foreground" aria-live="polite">
         <span>{countText}</span>
         {historyQuery.isFetching && !historyQuery.isLoading ? <span>{t("loading")}</span> : null}
       </div>

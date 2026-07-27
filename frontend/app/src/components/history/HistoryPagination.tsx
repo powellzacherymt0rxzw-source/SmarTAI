@@ -16,7 +16,7 @@ export function HistoryPagination({
   const page = Math.min(query.page, totalPages);
 
   return (
-    <nav className="mt-3 flex w-[1080px] max-w-full flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground" aria-label={t("historyPagePrefix")}>
+    <nav className="mt-3 flex w-full flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground" aria-label={t("historyPagePrefix")}>
       <label className="inline-flex items-center gap-2">
         <span>{t("historyPageSize")}</span>
         <select

@@ -31,7 +31,7 @@ interface HistoryTaskTableProps {
   onClear: () => void;
 }
 
-const COLUMNS = "grid-cols-[minmax(0,1fr)_140px] md:grid-cols-[280px_215px_120px_120px_160px_185px]";
+const COLUMNS = "grid-cols-[minmax(0,1fr)_140px] md:grid-cols-[minmax(280px,1fr)_215px_120px_120px_160px_185px]";
 
 export function HistoryTaskTable({
   tasks,
@@ -49,7 +49,7 @@ export function HistoryTaskTable({
 }: HistoryTaskTableProps) {
   const { t } = useI18n();
   return (
-    <section aria-label={t("historyTableRegion")} className="w-[1080px] max-w-full">
+    <section aria-label={t("historyTableRegion")} className="w-full">
       <div className="overflow-visible pb-2 md:overflow-x-auto">
         <div role="table" aria-label={t("historyTableRegion")} aria-busy={isLoading} className="min-w-0 text-left md:min-w-[1080px]">
           <div role="row" className={cn("grid h-[42px] items-center text-[13px] font-semibold leading-4 text-muted-foreground", COLUMNS)}>

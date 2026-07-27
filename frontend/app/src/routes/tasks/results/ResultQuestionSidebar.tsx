@@ -2,7 +2,7 @@ import type { QuestionSummary } from "@/components/tasks/resultsModel";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 
-export type ResultQuestionState = "ready" | "warning" | "danger" | "muted";
+export type ResultQuestionState = "ready" | "confirmed" | "warning" | "danger" | "muted";
 
 export function ResultQuestionSidebar({
   locale,
@@ -50,6 +50,7 @@ export function ResultQuestionSidebar({
                   "ml-1 h-2 w-2 shrink-0 rounded-full",
                   active && "bg-white",
                   !active && state === "ready" && "bg-emerald-500",
+                  !active && state === "confirmed" && "bg-blue-500",
                   !active && state === "warning" && "bg-amber-500",
                   !active && state === "danger" && "bg-rose-500",
                   !active && state === "muted" && "bg-slate-300",
