@@ -16,9 +16,20 @@ from fastapi.responses import JSONResponse
 from backend.state import get_problem_store, get_student_store
 from backend.llm.registry import get_expert_registry, ExpertRegistry
 from backend.agents.ingest_agent import extract_problems, parse_student_answers
-from backend.tools.file_processing import extract_files_from_archive, decode_text_bytes, extract_text_from_pdf
+from backend.tools.file_processing import extract_files_from_archive, extract_text_from_upload
+from backend.skills.ocr_ingest import LLMVisionOCRSkill, OCRIngestSkill
 
 logger = logging.getLogger(__name__)
+
+
+def _build_ocr_skill(
+    registry: ExpertRegistry,
+    preferred_provider=None,
+) -> OCRIngestSkill | None:
+    vision_provider = registry.pick_vision(preferred_provider)
+    if vision_provider is None:
+        return None
+    return LLMVisionOCRSkill(vision_provider)
 
 
 # ─── Problem preview router ──────────────────────────────────────────────────
@@ -41,10 +52,12 @@ async def handle_problem_upload(
 
     try:
         text_bytes = await file.read()
-        if file.content_type == "application/pdf" or file.filename.lower().endswith(".pdf"):
-            text = await extract_text_from_pdf(text_bytes)
-        else:
-            text = await decode_text_bytes(text_bytes)
+        text = await extract_text_from_upload(
+            text_bytes,
+            file.filename or "problems",
+            ocr_skill=_build_ocr_skill(registry, provider),
+            purpose="problems",
+        )
         logger.info(f"[prob_preview] File decoded, {len(text)} chars")
 
         result = await extract_problems(text, provider, problem_store)
@@ -79,10 +92,15 @@ async def handle_answer_upload(
 
     try:
         file_bytes = await file.read()
-        files_data = await extract_files_from_archive(file_bytes, file.filename)
+        files_data = await extract_files_from_archive(
+            file_bytes,
+            file.filename or "submissions",
+            ocr_skill=_build_ocr_skill(registry, provider),
+            purpose="submissions",
+        )
 
         if not files_data:
-            raise HTTPException(status_code=400, detail="No valid text files found in upload.")
+            raise HTTPException(status_code=400, detail="No valid supported files found in upload.")
 
         logger.info(f"[hw_preview] Extracted {len(files_data)} files from {file.filename}")
 

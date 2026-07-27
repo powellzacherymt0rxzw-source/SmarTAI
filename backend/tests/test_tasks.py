@@ -536,4 +536,3 @@ async def test_sandbox_semaphore_caps_concurrency():
 
     # Restore the default for any subsequent tests in this session
     init_sandbox_semaphore(limit=8)
-

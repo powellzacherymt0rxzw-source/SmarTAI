@@ -53,8 +53,9 @@ from backend.agents.ingest_agent import (
 )
 from backend.agents.grading_agent import grade_batch
 from backend.tools.file_processing import (
-    decode_text_bytes, extract_files_from_archive, extract_text_from_pdf,
+    extract_files_from_archive, extract_text_from_upload,
 )
+from backend.skills.ocr_ingest import LLMVisionOCRSkill, OCRIngestSkill, OCRPurpose
 from backend.tools.knowledge import get_retriever
 from backend.rag.chunker import extract_text as kb_extract_text, chunk_text, MAX_FILE_BYTES as KB_MAX_FILE_BYTES
 from backend.rag.embedder import pick_embedder
@@ -142,6 +143,16 @@ def _get_or_404(task_store: TaskStore, task_id: str) -> Task:
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
     return t
+
+
+def _build_ocr_skill(
+    registry: ExpertRegistry,
+    preferred_provider=None,
+) -> OCRIngestSkill | None:
+    vision_provider = registry.pick_vision(preferred_provider)
+    if vision_provider is None:
+        return None
+    return LLMVisionOCRSkill(vision_provider)
 
 
 # ─── CRUD ────────────────────────────────────────────────────────────────────
@@ -232,13 +243,24 @@ def delete_task(
 
 async def _run_extract(
     task: Task,
-    text: str,
+    file_bytes: bytes,
+    filename: str,
     provider,
+    ocr_skill: OCRIngestSkill | None,
     job_id: str,
     task_store: TaskStore,
 ):
     reporter = get_or_create_reporter(job_id)
     try:
+        await reporter.set_phase("ingesting")
+        text = await extract_text_from_upload(
+            file_bytes,
+            filename,
+            ocr_skill=ocr_skill,
+            purpose="problems",
+            reporter=reporter,
+        )
+        await reporter._emit_message("File text extraction complete; extracting problem structure...")
         await extract_problems(text, provider, task.problem_data, reporter=reporter)
         task_store.update(task.task_id, status="problems_ready", error=None)
         logger.info(f"[task:{task.task_id}] extract done, {len(task.problem_data)} problems")
@@ -287,17 +309,9 @@ async def task_extract_problems(
             "problem_count": len(t.problem_data),
         }
 
-    # Decode text content
-    try:
-        if file.content_type == "application/pdf" or (file.filename or "").lower().endswith(".pdf"):
-            text = await extract_text_from_pdf(bytes_)
-        else:
-            text = await decode_text_bytes(bytes_)
-    except Exception as e:
-        raise HTTPException(400, detail=f"Could not decode file: {e}")
-
     # Start fresh job
     job_id = str(uuid.uuid4())
+    ocr_skill = _build_ocr_skill(registry, provider)
     task_store.update(
         task_id,
         status="extracting_problems",
@@ -307,7 +321,15 @@ async def task_extract_problems(
         problem_data={},  # clear old data
         error=None,
     )
-    asyncio.create_task(_run_extract(t, text, provider, job_id, task_store))
+    asyncio.create_task(_run_extract(
+        t,
+        bytes_,
+        file.filename or "problems",
+        provider,
+        ocr_skill,
+        job_id,
+        task_store,
+    ))
     return {
         "status": "started",
         "job_id": job_id,
@@ -319,13 +341,28 @@ async def task_extract_problems(
 
 async def _run_parse(
     task: Task,
-    files_data,
+    file_bytes: bytes,
+    filename: str,
     provider,
+    ocr_skill: OCRIngestSkill | None,
     job_id: str,
     task_store: TaskStore,
 ):
-    reporter = get_or_create_reporter(job_id, total_students=len(files_data))
+    reporter = get_or_create_reporter(job_id)
     try:
+        await reporter.set_phase("ingesting")
+        files_data = await extract_files_from_archive(
+            file_bytes,
+            filename,
+            ocr_skill=ocr_skill,
+            purpose="submissions",
+            reporter=reporter,
+        )
+        if not files_data:
+            raise ValueError("No valid student files found in upload.")
+        await reporter._emit_message(
+            f"File text extraction complete; parsing {len(files_data)} submission file(s)..."
+        )
         await parse_student_answers(
             files_data=files_data,
             problems_data=task.problem_data,
@@ -393,15 +430,8 @@ async def task_parse_submissions(
             "student_count": len(t.student_data),
         }
 
-    try:
-        files_data = await extract_files_from_archive(bytes_, file.filename or "submissions")
-    except Exception as e:
-        raise HTTPException(400, detail=f"Could not extract archive: {e}")
-
-    if not files_data:
-        raise HTTPException(400, detail="No valid student files found in archive.")
-
     job_id = str(uuid.uuid4())
+    ocr_skill = _build_ocr_skill(registry, provider)
     task_store.update(
         task_id,
         status="parsing_submissions",
@@ -411,12 +441,19 @@ async def task_parse_submissions(
         student_data={},  # clear old data
         error=None,
     )
-    asyncio.create_task(_run_parse(t, files_data, provider, job_id, task_store))
+    asyncio.create_task(_run_parse(
+        t,
+        bytes_,
+        file.filename or "submissions",
+        provider,
+        ocr_skill,
+        job_id,
+        task_store,
+    ))
     return {
         "status": "started",
         "job_id": job_id,
         "task_id": t.task_id,
-        "file_count": len(files_data),
     }
 
 
@@ -429,21 +466,34 @@ async def task_parse_submissions(
 # them up on the next grade pass; already-graded tasks must be re-graded
 # manually (we do NOT auto-rerun LLM calls when a reference is added).
 
-async def _read_text_for_parse(file: UploadFile, bytes_: bytes) -> str:
+async def _read_text_for_parse(
+    filename: str,
+    bytes_: bytes,
+    *,
+    purpose: OCRPurpose,
+    ocr_skill: OCRIngestSkill | None,
+    reporter=None,
+) -> str:
     """Decode a PDF / MD / TXT upload into plain text.
 
     Shared by reference + test-case parsing. Mirrors the logic in
     task_extract_problems so behavior stays consistent across upload paths.
     """
-    if file.content_type == "application/pdf" or (file.filename or "").lower().endswith(".pdf"):
-        return await extract_text_from_pdf(bytes_)
-    return await decode_text_bytes(bytes_)
+    return await extract_text_from_upload(
+        bytes_,
+        filename,
+        ocr_skill=ocr_skill,
+        purpose=purpose,
+        reporter=reporter,
+    )
 
 
 async def _run_parse_reference(
     task: Task,
-    text: str,
+    file_bytes: bytes,
+    filename: str,
     provider,
+    ocr_skill: OCRIngestSkill | None,
     job_id: str,
     task_store: TaskStore,
 ):
@@ -455,6 +505,14 @@ async def _run_parse_reference(
     """
     reporter = get_or_create_reporter(job_id)
     try:
+        await reporter.set_phase("ingesting")
+        text = await _read_text_for_parse(
+            filename,
+            file_bytes,
+            purpose="reference",
+            ocr_skill=ocr_skill,
+            reporter=reporter,
+        )
         mapping = await parse_reference_to_per_question(
             text=text,
             problems_data=task.problem_data,
@@ -534,12 +592,8 @@ async def task_upload_reference(
     if provider is None:
         raise HTTPException(503, detail="No LLM provider configured. Add an API key first.")
 
-    try:
-        text = await _read_text_for_parse(file, bytes_)
-    except Exception as e:
-        raise HTTPException(400, detail=f"Could not decode file: {e}")
-
     job_id = str(uuid.uuid4())
+    ocr_skill = _build_ocr_skill(registry, provider)
     task_store.update(
         task_id,
         reference_file_hash=new_hash,
@@ -547,7 +601,15 @@ async def task_upload_reference(
         reference_parse_job_id=job_id,
         error=None,
     )
-    asyncio.create_task(_run_parse_reference(t, text, provider, job_id, task_store))
+    asyncio.create_task(_run_parse_reference(
+        t,
+        bytes_,
+        file.filename or "reference",
+        provider,
+        ocr_skill,
+        job_id,
+        task_store,
+    ))
     return {
         "status": "started",
         "job_id": job_id,
@@ -559,8 +621,10 @@ async def task_upload_reference(
 
 async def _run_parse_test_cases(
     task: Task,
-    text: str,
+    file_bytes: bytes,
+    filename: str,
     provider,
+    ocr_skill: OCRIngestSkill | None,
     job_id: str,
     task_store: TaskStore,
 ):
@@ -571,6 +635,14 @@ async def _run_parse_test_cases(
     """
     reporter = get_or_create_reporter(job_id)
     try:
+        await reporter.set_phase("ingesting")
+        text = await _read_text_for_parse(
+            filename,
+            file_bytes,
+            purpose="test_cases",
+            ocr_skill=ocr_skill,
+            reporter=reporter,
+        )
         mapping = await parse_test_cases_to_per_question(
             text=text,
             problems_data=task.problem_data,
@@ -643,12 +715,8 @@ async def task_upload_test_cases(
     if provider is None:
         raise HTTPException(503, detail="No LLM provider configured. Add an API key first.")
 
-    try:
-        text = await _read_text_for_parse(file, bytes_)
-    except Exception as e:
-        raise HTTPException(400, detail=f"Could not decode file: {e}")
-
     job_id = str(uuid.uuid4())
+    ocr_skill = _build_ocr_skill(registry, provider)
     task_store.update(
         task_id,
         test_cases_file_hash=new_hash,
@@ -656,7 +724,15 @@ async def task_upload_test_cases(
         test_cases_parse_job_id=job_id,
         error=None,
     )
-    asyncio.create_task(_run_parse_test_cases(t, text, provider, job_id, task_store))
+    asyncio.create_task(_run_parse_test_cases(
+        t,
+        bytes_,
+        file.filename or "test_cases",
+        provider,
+        ocr_skill,
+        job_id,
+        task_store,
+    ))
     return {
         "status": "started",
         "job_id": job_id,
@@ -1230,4 +1306,3 @@ def task_delete_kb(
     if not removed:
         raise HTTPException(404, detail=f"KB doc {doc_id} not found on task {task_id}")
     return {"status": "success", "doc_id": doc_id}
-

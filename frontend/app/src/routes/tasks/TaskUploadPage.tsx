@@ -47,8 +47,10 @@ const STATUS_LABELS: Partial<Record<TaskStatus, string>> = {
 };
 
 const ACTIVE_STATUS = new Set<TaskStatus>(["extracting_problems", "parsing_submissions", "grading"]);
-const PROBLEMS_ACCEPT = ".pdf,.doc,.docx,.txt,.md";
-const SUBMISSIONS_ACCEPT = ".zip,.pdf,.doc,.docx,.txt,.csv,.xlsx";
+const PROBLEMS_ACCEPT =
+  ".txt,.md,.markdown,.csv,.pdf,.jpg,.jpeg,.png,.webp,text/plain,text/markdown,application/pdf,image/jpeg,image/png,image/webp";
+const SUBMISSIONS_ACCEPT =
+  ".zip,.rar,.7z,.tar,.tar.gz,.tgz,.tar.bz2,.tbz2,.txt,.md,.markdown,.csv,.pdf,.jpg,.jpeg,.png,.webp,text/plain,text/markdown,application/pdf,image/jpeg,image/png,image/webp";
 
 export function TaskUploadPage() {
   const { taskId, kind } = useParams();
@@ -302,8 +304,8 @@ export function TaskUploadPage() {
         title={isProblems ? "上传题目" : "上传学生作答"}
         description={
           isProblems
-            ? "上传题目文件，识别完成后校对题干与评分标准，再进入学生作答上传。"
-            : "上传学生作答文件，按学生检查识别结果；确认后即可启动批改。"
+            ? "上传题目文件；图片和扫描 PDF 会先进行视觉 OCR，识别完成后校对题干与评分标准。"
+            : "上传学生作答文件或压缩包；图片和扫描 PDF 会先进行视觉 OCR，确认识别结果后即可批改。"
         }
         action={
           <Button
@@ -456,8 +458,8 @@ function UploadCard({
         <h2 className="mt-3 text-base font-semibold">{isProblems ? "拖入题目文件" : "拖入作答文件或压缩包"}</h2>
         <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
           {isProblems
-            ? "支持上传 PDF、文档或文本格式的题目材料；图片题面与 OCR 识别仍是后续接入项。"
-            : "支持上传按学生整理的文件、压缩包或表格索引；图片与手写 OCR 仍是后续接入项。"}
+            ? "支持 .txt、.md、.csv、.pdf（含扫描件）、.jpg、.png、.webp。图片和扫描件会调用视觉模型，处理时间更长。"
+            : "支持单个答案文件或压缩包，包内可包含 .txt、.md、.csv、.pdf（含扫描件）、.jpg、.png、.webp。"}
         </p>
         <input ref={fileInputRef} type="file" accept={accept} className="hidden" onChange={onFileInput} />
         <Button type="button" className="mt-5" disabled={isUploading} onClick={() => fileInputRef.current?.click()}>
@@ -482,12 +484,12 @@ function UploadCard({
           ? [
               { icon: FileText, title: "题干识别", text: "拆分题目与小问" },
               { icon: ListChecks, title: "评分标准", text: "校对分值与要点" },
-              { icon: Images, title: "图片题面", text: "OCR 后续接入" },
+              { icon: Images, title: "图片题面", text: "视觉 OCR 转写" },
             ]
           : [
               { icon: FileArchive, title: "批量上传", text: "解析学生文件包" },
               { icon: ListChecks, title: "识别校对", text: "逐题确认作答" },
-              { icon: FileText, title: "缺失提示", text: "标记未提交与异常" },
+              { icon: Images, title: "手写图片", text: "OCR 后可订正" },
             ]
         ).map((item) => {
           const Icon = item.icon;

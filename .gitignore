@@ -41,6 +41,15 @@ secrets.toml
 data/test_users.json
 data/test_users.*.json
 
+# Local benchmark datasets are large and must not be committed.
+data/benchmarks/OmniDocBench/
+
+# OmniDocBench is research-only; keep local manual-test images out of Git.
+manual_test_samples/omnidocbench/images/
+
+# Generated OCR benchmark manifests, predictions, caches, and reports.
+artifacts/ocr_benchmark/
+
 # ─── Editor / IDE / OS ──────────────────────────────────────────────────────
 .vscode/
 .idea/
