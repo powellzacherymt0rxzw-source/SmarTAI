@@ -5,6 +5,7 @@ import { useConfirmTaskFinalization, useTask, useTaskFinalization, useTaskResult
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { MatrixQueueWorkspace } from "@/components/tasks/MatrixQueueWorkspace";
 import { MatrixStatusCell, type MatrixStatusTone } from "@/components/tasks/MatrixStatusCell";
+import { getMatrixIdentityLayout, MATRIX_ACTION_COLUMN_WIDTH, MATRIX_QUESTION_COLUMN_WIDTH } from "@/components/tasks/matrixLayout";
 import { buildResultsModel, effectiveCorrectionScore, formatConfidence, formatPercent, type QuestionSummary, type ResultsModel, type StudentSummary } from "@/components/tasks/resultsModel";
 import { collectResultReviewItems, type ReviewItem } from "@/components/tasks/resultsReviewModel";
 import { useI18n } from "@/i18n/I18nProvider";
@@ -304,6 +305,22 @@ function ReviewHeatmap({
 }) {
   const reviewByKey = new Map(reviewItems.map((item) => [reviewCellKey(item.student.id, item.question.id), item]));
   const questionById = new Map(model.questions.map((question) => [question.id, question]));
+  const studentIdLabel = copy(locale, "studentId");
+  const studentNameLabel = copy(locale, "studentName");
+  const identityLayout = getMatrixIdentityLayout({
+    questionCount: questions.length,
+    studentIds: students.map((student) => student.id),
+    studentNames: students.map((student) => student.name !== student.id ? student.name : "—"),
+    studentIdLabel,
+    studentNameLabel,
+  });
+  const tableMinWidth = Math.max(
+    740,
+    identityLayout.studentIdWidth
+      + identityLayout.studentNameWidth
+      + MATRIX_ACTION_COLUMN_WIDTH
+      + questions.length * MATRIX_QUESTION_COLUMN_WIDTH,
+  );
 
   return (
     <section className="h-[330px] min-w-0 overflow-hidden rounded-[10px] border bg-card" aria-labelledby="review-heatmap-title">
@@ -317,18 +334,24 @@ function ReviewHeatmap({
         <div className="h-full overflow-auto overscroll-contain">
           <table
             className="w-full border-collapse text-left text-[13px]"
-            style={{ minWidth: `${Math.max(740, 324 + questions.length * 60)}px` }}
+            style={{ minWidth: `${tableMinWidth}px` }}
           >
             <thead className="sticky top-0 z-20 bg-slate-100/95 text-[12px] font-semibold text-muted-foreground backdrop-blur-sm dark:bg-slate-800/95">
               <tr className="h-[42px] border-b">
-                <th className="sticky left-0 z-30 w-[136px] bg-slate-100/95 px-4 dark:bg-slate-800/95">
-                  {copy(locale, "studentId")}
+                <th
+                  className="sticky left-0 z-30 whitespace-nowrap bg-slate-100/95 px-3 dark:bg-slate-800/95"
+                  style={{ width: identityLayout.studentIdWidth, minWidth: identityLayout.studentIdWidth, maxWidth: identityLayout.studentIdWidth }}
+                >
+                  {studentIdLabel}
                 </th>
-                <th className="sticky left-[136px] z-30 w-[116px] bg-slate-100/95 px-3 dark:bg-slate-800/95">
-                  {copy(locale, "studentName")}
+                <th
+                  className="sticky z-30 whitespace-nowrap bg-slate-100/95 px-3 dark:bg-slate-800/95"
+                  style={{ left: identityLayout.studentIdWidth, width: identityLayout.studentNameWidth, minWidth: identityLayout.studentNameWidth, maxWidth: identityLayout.studentNameWidth }}
+                >
+                  {studentNameLabel}
                 </th>
                 {questions.map((question) => (
-                  <th key={question.id} className="w-[60px] px-1 text-center">
+                  <th key={question.id} className="w-[60px] min-w-[60px] max-w-[60px] px-1 text-center">
                     {question.label}
                   </th>
                 ))}
@@ -347,18 +370,26 @@ function ReviewHeatmap({
                   : null;
                 return (
                   <tr key={student.id} className="h-[52px] bg-card transition-colors hover:bg-muted/25">
-                    <th className="sticky left-0 z-10 w-[136px] max-w-[136px] truncate bg-card px-4 text-[12px] font-semibold text-foreground" title={student.id}>
+                    <th
+                      className="sticky left-0 z-10 whitespace-nowrap bg-card px-3 text-[12px] font-semibold text-foreground"
+                      style={{ width: identityLayout.studentIdWidth, minWidth: identityLayout.studentIdWidth, maxWidth: identityLayout.studentIdWidth }}
+                      title={student.id}
+                    >
                       {student.id}
                     </th>
-                    <td className="sticky left-[136px] z-10 w-[116px] max-w-[116px] truncate bg-card px-3 text-[12px] text-muted-foreground" title={student.name}>
+                    <td
+                      className="sticky z-10 whitespace-nowrap bg-card px-3 text-[12px] text-muted-foreground"
+                      style={{ left: identityLayout.studentIdWidth, width: identityLayout.studentNameWidth, minWidth: identityLayout.studentNameWidth, maxWidth: identityLayout.studentNameWidth }}
+                      title={student.name}
+                    >
                       {student.name !== student.id ? student.name : "—"}
                     </td>
                     {questions.map((question) => {
                       const correction = correctionByQuestion.get(question.id);
                       const key = reviewCellKey(student.id, question.id);
-                      if (!correction || !matchedCellKeys.has(key)) return <td key={question.id} className="h-[52px] w-[60px] px-1" />;
+                      if (!correction || !matchedCellKeys.has(key)) return <td key={question.id} className="h-[52px] w-[60px] min-w-[60px] max-w-[60px] px-1" />;
                       return (
-                        <td key={question.id} className="h-[52px] w-[60px] px-1">
+                        <td key={question.id} className="h-[52px] w-[60px] min-w-[60px] max-w-[60px] px-1">
                           <ReviewCell
                             locale={locale}
                             href={reviewDetailHref(taskId, student.id, question.id, returnTo)}

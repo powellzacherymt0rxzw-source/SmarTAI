@@ -5,6 +5,7 @@ import { useTask } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { MatrixQueueWorkspace } from "@/components/tasks/MatrixQueueWorkspace";
 import { MatrixStatusCell, type MatrixStatusTone } from "@/components/tasks/MatrixStatusCell";
+import { getMatrixIdentityLayout, MATRIX_ACTION_COLUMN_WIDTH, MATRIX_QUESTION_COLUMN_WIDTH } from "@/components/tasks/matrixLayout";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { MessageKey } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
@@ -282,22 +283,46 @@ function SubmissionMatrix({
     );
   }
 
+  const studentIdLabel = t("submissionReviewColumnId");
+  const studentNameLabel = t("submissionReviewColumnName");
+  const identityLayout = getMatrixIdentityLayout({
+    questionCount: questions.length,
+    studentIds: students.map((student) => student.stu_id),
+    studentNames: students.map((student) => student.stu_name || student.stu_id),
+    studentIdLabel,
+    studentNameLabel,
+    reserveIdStatusIcon: students.some((student) => student.identity_status === "needs_review"),
+  });
+  const tableMinWidth = Math.max(
+    740,
+    identityLayout.studentIdWidth
+      + identityLayout.studentNameWidth
+      + MATRIX_ACTION_COLUMN_WIDTH
+      + questions.length * MATRIX_QUESTION_COLUMN_WIDTH,
+  );
+
   return (
     <div className="h-full w-full overflow-auto overscroll-contain">
       <table
         className="w-full border-collapse text-left text-[13px]"
-        style={{ minWidth: `${Math.max(740, 324 + questions.length * 60)}px` }}
+        style={{ minWidth: `${tableMinWidth}px` }}
       >
         <thead className="sticky top-0 z-20 bg-slate-100/95 text-[12px] font-semibold text-muted-foreground backdrop-blur-sm dark:bg-slate-800/95">
           <tr className="h-[42px] border-b">
-            <th className="sticky left-0 z-30 w-[136px] bg-slate-100/95 px-4 dark:bg-slate-800/95">
-              {t("submissionReviewColumnId")}
+            <th
+              className="sticky left-0 z-30 whitespace-nowrap bg-slate-100/95 px-3 dark:bg-slate-800/95"
+              style={{ width: identityLayout.studentIdWidth, minWidth: identityLayout.studentIdWidth, maxWidth: identityLayout.studentIdWidth }}
+            >
+              {studentIdLabel}
             </th>
-            <th className="sticky left-[136px] z-30 w-[116px] bg-slate-100/95 px-3 dark:bg-slate-800/95">
-              {t("submissionReviewColumnName")}
+            <th
+              className="sticky z-30 whitespace-nowrap bg-slate-100/95 px-3 dark:bg-slate-800/95"
+              style={{ left: identityLayout.studentIdWidth, width: identityLayout.studentNameWidth, minWidth: identityLayout.studentNameWidth, maxWidth: identityLayout.studentNameWidth }}
+            >
+              {studentNameLabel}
             </th>
             {questions.map((question) => (
-              <th key={question.id} className="w-[60px] px-1 text-center" title={question.type || question.label}>
+              <th key={question.id} className="w-[60px] min-w-[60px] max-w-[60px] px-1 text-center" title={question.type || question.label}>
                 {question.label}
               </th>
             ))}
@@ -313,23 +338,30 @@ function SubmissionMatrix({
               : studentPath(taskId, student.stu_id);
             return (
               <tr key={student.stu_id} className="h-[52px] bg-card transition-colors hover:bg-muted/25">
-                <td className="sticky left-0 z-10 w-[136px] max-w-[136px] bg-card px-4 font-semibold text-foreground">
+                <td
+                  className="sticky left-0 z-10 whitespace-nowrap bg-card px-3 font-semibold text-foreground"
+                  style={{ width: identityLayout.studentIdWidth, minWidth: identityLayout.studentIdWidth, maxWidth: identityLayout.studentIdWidth }}
+                >
                   <Link
                     to={entryHref}
-                    className="inline-flex max-w-[112px] items-center gap-2 truncate outline-none hover:text-primary focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+                    className="inline-flex items-center gap-2 whitespace-nowrap outline-none hover:text-primary focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
                     title={student.stu_id}
                   >
                     {student.identity_status === "needs_review" ? (
                       <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-label={t("submissionReviewIdentityNeedsReview")} />
                     ) : null}
-                    <span className="truncate">{student.stu_id}</span>
+                    <span>{student.stu_id}</span>
                   </Link>
                 </td>
-                <td className="sticky left-[136px] z-10 w-[116px] max-w-[116px] truncate bg-card px-3 text-muted-foreground" title={student.stu_name || student.stu_id}>
+                <td
+                  className="sticky z-10 whitespace-nowrap bg-card px-3 text-muted-foreground"
+                  style={{ left: identityLayout.studentIdWidth, width: identityLayout.studentNameWidth, minWidth: identityLayout.studentNameWidth, maxWidth: identityLayout.studentNameWidth }}
+                  title={student.stu_name || student.stu_id}
+                >
                   {student.stu_name || student.stu_id}
                 </td>
                 {questions.map((question) => (
-                  <td key={question.id} className="w-[60px] px-1 text-center">
+                  <td key={question.id} className="w-[60px] min-w-[60px] max-w-[60px] px-1 text-center">
                     <AnswerStatusLink
                       answer={answers.get(question.id)}
                       to={studentReviewPath(taskId, student.stu_id, question.id, returnSearch)}
