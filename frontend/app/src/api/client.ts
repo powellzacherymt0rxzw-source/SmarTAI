@@ -136,11 +136,13 @@ export interface UploadOptions {
 
 export async function postMultipart<T>(
   path: string,
-  file: File,
+  file: File | null,
   options: UploadOptions = {},
 ): Promise<T> {
   const formData = new FormData();
-  formData.append("file", file);
+  if (file) {
+    formData.append("file", file);
+  }
   Object.entries(options.fields ?? {}).forEach(([key, value]) => {
     if (value !== null && value !== undefined) {
       formData.append(key, String(value));

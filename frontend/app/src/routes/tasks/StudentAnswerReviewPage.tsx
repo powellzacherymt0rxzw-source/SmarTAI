@@ -4,13 +4,16 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  Check,
   CheckCircle2,
   FileText,
   Keyboard,
   LoaderCircle,
+  Pencil,
   RotateCcw,
   Save,
   Search,
+  X,
 } from "lucide-react";
 import {
   useEffect,
@@ -24,7 +27,7 @@ import {
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { normalizeAPIError } from "@/api/client";
-import { useTask, useUpdateStudentAnswer } from "@/api/hooks/tasks";
+import { useTask, useUpdateStudentAnswer, useUpdateStudentIdentity } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { Button } from "@/components/ui/Button";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
@@ -40,7 +43,7 @@ import {
   type SubmissionQuestion,
 } from "@/lib/submissionReview";
 import { getTaskDestination } from "@/lib/taskFlow";
-import type { StudentSubmission } from "@/types";
+import type { StudentAnswerInfo, StudentSubmission } from "@/types";
 
 type PickerItem = {
   id: string;
@@ -57,7 +60,6 @@ type PickerMatch = {
 
 type AnswerDraft = {
   content: string;
-  flags: string;
 };
 
 const STATUS_KEYS: Record<SubmissionAnswerState, MessageKey> = {
@@ -67,18 +69,25 @@ const STATUS_KEYS: Record<SubmissionAnswerState, MessageKey> = {
   missing: "studentSubmissionStatusMissing",
 };
 
-/** S05: one selected student with all questions in one continuous, editable review. */
+/** Merged S04/S05: one selected student with all questions in one continuous review. */
 export function StudentAnswerReviewPage() {
-  const { taskId, studentId, questionId } = useParams();
+  const { taskId, studentId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { locale, t } = useI18n();
   const taskQuery = useTask(taskId);
   const answerMutation = useUpdateStudentAnswer();
+  const identityMutation = useUpdateStudentIdentity();
   const [drafts, setDrafts] = useState<Record<string, AnswerDraft>>({});
+  const [editingQuestionIds, setEditingQuestionIds] = useState<Set<string>>(new Set());
   const [savingQuestionId, setSavingQuestionId] = useState<string | null>(null);
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
-  const [activeQuestionId, setActiveQuestionId] = useState(questionId ?? "");
+  const requestedQuestionId = searchParams.get("question") ?? "";
+  const [activeQuestionId, setActiveQuestionId] = useState(requestedQuestionId);
+  const [identityOpen, setIdentityOpen] = useState(false);
+  const [identityId, setIdentityId] = useState("");
+  const [identityName, setIdentityName] = useState("");
+  const [identityError, setIdentityError] = useState<string | null>(null);
   const studentFilterParam = searchParams.get("studentFilter") ?? "";
   const questionFilterParam = searchParams.get("questionFilter") ?? "";
   const [studentFilter, setStudentFilter] = useState(studentFilterParam);
@@ -87,7 +96,8 @@ export function StudentAnswerReviewPage() {
   const questionFilterComposingRef = useRef(false);
   const initializedStudentRef = useRef<string | null>(null);
   const positionedRouteRef = useRef<string | null>(null);
-  const selectedQuestionRef = useRef(questionId ?? "");
+  const selectedQuestionRef = useRef(requestedQuestionId);
+  const resetScrollForStudentRef = useRef<string | null>(null);
 
   const students = useMemo(
     () => Object.values(taskQuery.data?.student_data ?? {}).sort(compareStudents),
@@ -140,8 +150,16 @@ export function StudentAnswerReviewPage() {
   }, [questionFilterParam]);
 
   useEffect(() => {
-    if (questionId) selectedQuestionRef.current = questionId;
-  }, [questionId]);
+    if (requestedQuestionId) selectedQuestionRef.current = requestedQuestionId;
+  }, [requestedQuestionId]);
+
+  useEffect(() => {
+    setIdentityOpen(false);
+    setIdentityId(student?.stu_id ?? "");
+    setIdentityName(student?.stu_name ?? "");
+    setIdentityError(null);
+    setEditingQuestionIds(new Set());
+  }, [student?.stu_id, student?.stu_name]);
 
   useEffect(() => {
     if (!student) return;
@@ -152,7 +170,7 @@ export function StudentAnswerReviewPage() {
         questions.forEach((question) => {
           if (next[question.id]) return;
           const answer = answers.get(question.id);
-          next[question.id] = { content: answer?.content ?? "", flags: (answer?.flag ?? []).join("\n") };
+          next[question.id] = { content: answer?.content ?? "" };
           changed = true;
         });
         return changed ? next : current;
@@ -162,7 +180,7 @@ export function StudentAnswerReviewPage() {
     initializedStudentRef.current = student.stu_id;
     setDrafts(Object.fromEntries(questions.map((question) => {
       const answer = answers.get(question.id);
-      return [question.id, { content: answer?.content ?? "", flags: (answer?.flag ?? []).join("\n") }];
+      return [question.id, { content: answer?.content ?? "" }];
     })));
     setSaveErrors({});
   }, [answers, questions, student]);
@@ -171,7 +189,7 @@ export function StudentAnswerReviewPage() {
     const answer = answers.get(question.id);
     const draft = drafts[question.id];
     if (!draft) return [];
-    return draft.content !== (answer?.content ?? "") || draft.flags !== (answer?.flag ?? []).join("\n")
+    return draft.content !== (answer?.content ?? "")
       ? [question.id]
       : [];
   })), [answers, drafts, questions]);
@@ -179,15 +197,18 @@ export function StudentAnswerReviewPage() {
 
   useEffect(() => {
     if (!filteredQuestions.length) return;
-    const requested = filteredQuestions.find((question) => question.id === questionId) ?? filteredQuestions[0];
-    const routeKey = `${studentId ?? ""}:${questionId ?? ""}:${questionFilterParam}`;
+    const requested = filteredQuestions.find((question) => question.id === requestedQuestionId) ?? filteredQuestions[0];
+    const routeKey = `${studentId ?? ""}:${requestedQuestionId}:${questionFilterParam}`;
     if (positionedRouteRef.current === routeKey) return;
     let secondFrame = 0;
     const firstFrame = window.requestAnimationFrame(() => {
       secondFrame = window.requestAnimationFrame(() => {
         positionedRouteRef.current = routeKey;
         setActiveQuestionId(requested.id);
-        if (questionId && requested.id === questionId) scrollQuestionIntoView(requested.id, "auto");
+        if (resetScrollForStudentRef.current === studentId) {
+          resetScrollForStudentRef.current = null;
+          window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+        } else if (requestedQuestionId && requested.id === requestedQuestionId) scrollQuestionIntoView(requested.id, "auto");
         else window.scrollTo({ top: 0, left: 0, behavior: "auto" });
       });
     });
@@ -195,7 +216,7 @@ export function StudentAnswerReviewPage() {
       window.cancelAnimationFrame(firstFrame);
       if (secondFrame) window.cancelAnimationFrame(secondFrame);
     };
-  }, [filteredQuestions, questionFilterParam, questionId, studentId]);
+  }, [filteredQuestions, questionFilterParam, requestedQuestionId, studentId]);
 
   useEffect(() => {
     if (!filteredQuestions.length) return;
@@ -203,10 +224,17 @@ export function StudentAnswerReviewPage() {
     const updateActiveQuestion = () => {
       frame = 0;
       let active = filteredQuestions[0]?.id ?? "";
-      for (const question of filteredQuestions) {
-        const element = document.getElementById(questionAnchorId(question.id));
-        if (!element || element.getBoundingClientRect().top > 112) break;
-        active = question.id;
+      const scrollRoot = document.scrollingElement ?? document.documentElement;
+      const reachedDocumentEnd = scrollRoot.scrollHeight > window.innerHeight + 1
+        && window.scrollY + window.innerHeight >= scrollRoot.scrollHeight - 2;
+      if (reachedDocumentEnd) {
+        active = filteredQuestions[filteredQuestions.length - 1]?.id ?? active;
+      } else {
+        for (const question of filteredQuestions) {
+          const element = document.getElementById(questionAnchorId(question.id));
+          if (!element || element.getBoundingClientRect().top > 112) break;
+          active = question.id;
+        }
       }
       if (active) setActiveQuestionId(active);
     };
@@ -275,11 +303,15 @@ export function StudentAnswerReviewPage() {
     const selectedQuestionStillVisible = filteredQuestions.some((question) => question.id === selectedQuestionRef.current);
     const anchorQuestionId = selectedQuestionStillVisible
       ? selectedQuestionRef.current
-      : activeQuestion?.id || questionId;
+      : activeQuestion?.id || requestedQuestionId;
     if (!target || !taskId || !anchorQuestionId || !confirmLeave()) return;
+    const nextSearch = new URLSearchParams(searchParams);
+    nextSearch.set("question", anchorQuestionId);
+    nextSearch.delete("from");
+    resetScrollForStudentRef.current = target.stu_id;
     navigate({
-      pathname: reviewPath(taskId, target.stu_id, anchorQuestionId),
-      search: searchParams.toString() ? `?${searchParams.toString()}` : "",
+      pathname: studentPath(taskId, target.stu_id),
+      search: `?${nextSearch.toString()}`,
     });
   }
 
@@ -292,7 +324,7 @@ export function StudentAnswerReviewPage() {
   function updateDraft(qId: string, patch: Partial<AnswerDraft>) {
     setDrafts((current) => ({
       ...current,
-      [qId]: { ...(current[qId] ?? { content: "", flags: "" }), ...patch },
+      [qId]: { ...(current[qId] ?? { content: "" }), ...patch },
     }));
     setSaveErrors((current) => {
       if (!current[qId]) return current;
@@ -319,7 +351,11 @@ export function StudentAnswerReviewPage() {
         qId: question.id,
         expectedWorkflowRevision: taskQuery.data.workflow_revision,
         content: draft.content,
-        flag: parseFlags(draft.flags),
+      });
+      setEditingQuestionIds((current) => {
+        const nextIds = new Set(current);
+        nextIds.delete(question.id);
+        return nextIds;
       });
       toast.success(t("answerReviewSaved"));
       if (moveNext) {
@@ -334,7 +370,66 @@ export function StudentAnswerReviewPage() {
     }
   }
 
-  const backHref = buildBackHref(taskId, studentId, activeQuestion?.id ?? questionId, searchParams);
+  function startEditing(question: SubmissionQuestion) {
+    const answer = answers.get(question.id);
+    setDrafts((current) => ({
+      ...current,
+      [question.id]: { content: answer?.content ?? "" },
+    }));
+    setEditingQuestionIds((current) => new Set(current).add(question.id));
+  }
+
+  function cancelEditing(question: SubmissionQuestion) {
+    const answer = answers.get(question.id);
+    setDrafts((current) => ({
+      ...current,
+      [question.id]: { content: answer?.content ?? "" },
+    }));
+    setEditingQuestionIds((current) => {
+      const nextIds = new Set(current);
+      nextIds.delete(question.id);
+      return nextIds;
+    });
+    setSaveErrors((current) => {
+      if (!current[question.id]) return current;
+      const nextErrors = { ...current };
+      delete nextErrors[question.id];
+      return nextErrors;
+    });
+  }
+
+  async function saveIdentity() {
+    if (!taskId || !student || !taskQuery.data) return;
+    const nextId = identityId.trim();
+    const nextName = identityName.trim();
+    if (!nextId || !nextName) {
+      setIdentityError(t("studentSubmissionIdentityRequired"));
+      return;
+    }
+    setIdentityError(null);
+    try {
+      const result = await identityMutation.mutateAsync({
+        taskId,
+        currentStudentId: student.stu_id,
+        expectedWorkflowRevision: taskQuery.data.workflow_revision,
+        studentId: nextId,
+        studentName: nextName,
+      });
+      setIdentityOpen(false);
+      toast.success(t("studentSubmissionIdentitySaved"));
+      if (result.student.stu_id !== student.stu_id) {
+        resetScrollForStudentRef.current = result.student.stu_id;
+        navigate({
+          pathname: studentPath(taskId, result.student.stu_id),
+          search: searchParams.toString() ? `?${searchParams.toString()}` : "",
+        }, { replace: true });
+      }
+    } catch (error) {
+      setIdentityError(identityErrorMessage(error, t));
+    }
+  }
+
+  const backHref = buildBackHref(taskId, searchParams);
 
   return (
     <div className="w-full max-w-[1300px]">
@@ -348,7 +443,7 @@ export function StudentAnswerReviewPage() {
           className="inline-flex shrink-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
         >
           <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-          {t(searchParams.get("from") === "student" ? "answerReviewBackStudent" : "answerReviewBackMatrix")}
+          {t("answerReviewBackMatrix")}
         </Link>
       </div>
       <NewTaskStepper currentStep={4} />
@@ -368,12 +463,44 @@ export function StudentAnswerReviewPage() {
         />
       ) : (
         <section className="mt-[22px] min-w-0" aria-label={`${student.stu_id} · ${t("studentSubmissionAllAnswersTitle")}`}>
+          <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-5">
+            <ReviewMetric
+              label={t("studentSubmissionMetricIdentity")}
+              value={t(student.identity_status === "needs_review" ? "studentSubmissionIdentityReview" : "studentSubmissionIdentityMatched")}
+              detail={student.identity_match_method ? t(identityMethodKey(student.identity_match_method)) : "—"}
+              tone={student.identity_status === "needs_review" ? "warning" : "accent"}
+            />
+            <ReviewMetric
+              label={t("studentSubmissionMetricCoverage")}
+              value={formatPercent(questions.filter((question) => Boolean(answers.get(question.id)?.content?.trim())).length, questions.length)}
+              detail={`${questions.filter((question) => Boolean(answers.get(question.id)?.content?.trim())).length}/${questions.length}`}
+            />
+            <ReviewMetric
+              label={t("studentSubmissionMetricReview")}
+              value={String(questions.filter((question) => getAnswerState(answers.get(question.id)) !== "recognized").length)}
+              detail={t("studentSubmissionMetricQuestions")}
+              tone={questions.some((question) => getAnswerState(answers.get(question.id)) !== "recognized") ? "danger" : "accent"}
+            />
+            <ReviewMetric
+              label={t("studentSubmissionMetricSource")}
+              value={student.source_filename ? "1" : "—"}
+              detail={student.source_filename ? t("studentSubmissionMetricFile") : t("studentSubmissionMetricUnknown")}
+              tone="neutral"
+            />
+          </dl>
+
+          <div className="mt-5">
           <StudentNavigation
             student={student}
             previous={studentNeighbors.previous}
             next={studentNeighbors.next}
             onPrevious={() => goToStudent(studentNeighbors.previous)}
             onNext={() => goToStudent(studentNeighbors.next)}
+            identityOpen={identityOpen}
+            onToggleIdentity={() => {
+              setIdentityOpen((open) => !open);
+              setIdentityError(null);
+            }}
             t={t}
           >
             <SmartPicker
@@ -389,6 +516,45 @@ export function StudentAnswerReviewPage() {
               t={t}
             />
           </StudentNavigation>
+          </div>
+
+          {identityOpen ? (
+            <form
+              className="mt-3 rounded-[10px] border bg-card p-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveIdentity();
+              }}
+            >
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-5">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">{t("studentSubmissionIdentityTitle")}</h3>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{t("studentSubmissionIdentityDescription")}</p>
+                </div>
+                {student.source_filename ? (
+                  <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={student.source_filename}>
+                    <FileText aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                    <span className="max-w-[280px] truncate">{student.source_filename}</span>
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                <label className="grid gap-1.5 text-xs font-medium text-foreground">
+                  {t("studentSubmissionStudentId")}
+                  <input value={identityId} maxLength={160} onChange={(event) => setIdentityId(event.target.value)} className="h-10 rounded-[7px] border bg-card px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
+                </label>
+                <label className="grid gap-1.5 text-xs font-medium text-foreground">
+                  {t("studentSubmissionStudentName")}
+                  <input value={identityName} maxLength={160} onChange={(event) => setIdentityName(event.target.value)} className="h-10 rounded-[7px] border bg-card px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
+                </label>
+                <Button type="submit" className="h-10 px-5" disabled={identityMutation.isPending}>
+                  {identityMutation.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Check aria-hidden="true" className="h-4 w-4" />}
+                  {t(identityMutation.isPending ? "studentSubmissionIdentitySaving" : "studentSubmissionIdentitySave")}
+                </Button>
+              </div>
+              {identityError ? <p className="mt-2 text-xs font-medium text-danger" role="alert">{identityError}</p> : null}
+            </form>
+          ) : null}
 
           <div className="mt-3 rounded-[10px] border bg-card p-2">
             <SmartPicker
@@ -403,9 +569,13 @@ export function StudentAnswerReviewPage() {
               onSelect={(id) => scrollToQuestion(id)}
               t={t}
             />
-            <p className="px-2 pt-2 text-[11px] leading-5 text-muted-foreground">
-              {tx(locale, "搜索只筛选题目；当前学生保持不变。输入中文时会在选词完成后再应用筛选。", "Question search only filters questions; the selected student stays unchanged. IME text is applied after composition finishes.")}
-            </p>
+            <div className="flex flex-col gap-1 px-2 pt-2 text-[11px] leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <span>{tx(locale, "搜索只筛选题目；当前学生保持不变。输入中文时会在选词完成后再应用筛选。", "Question search only filters questions; the selected student stays unchanged. IME text is applied after composition finishes.")}</span>
+              <span className="inline-flex shrink-0 items-center gap-1.5 font-medium text-foreground/70">
+                <Keyboard aria-hidden="true" className="h-3.5 w-3.5" />
+                {t("answerReviewKeyboardHint")}
+              </span>
+            </div>
           </div>
 
           {filteredQuestions.length ? (
@@ -448,15 +618,18 @@ export function StudentAnswerReviewPage() {
                     key={question.id}
                     question={question}
                     answer={answers.get(question.id)}
-                    draft={drafts[question.id] ?? { content: "", flags: "" }}
+                    draft={drafts[question.id] ?? { content: "" }}
                     sourceFilename={student.source_filename}
                     previous={filteredQuestions[index - 1] ?? null}
                     next={filteredQuestions[index + 1] ?? null}
                     dirty={dirtyQuestionIds.has(question.id)}
                     saving={savingQuestionId === question.id}
                     saveError={saveErrors[question.id]}
+                    editing={editingQuestionIds.has(question.id)}
                     onDraftChange={(patch) => updateDraft(question.id, patch)}
                     onSave={(moveNext) => void saveAnswer(question, moveNext)}
+                    onEdit={() => startEditing(question)}
+                    onCancel={() => cancelEditing(question)}
                     onNavigate={scrollToQuestion}
                     locale={locale}
                     t={t}
@@ -488,17 +661,19 @@ export function StudentAnswerReviewPage() {
   );
 }
 
-function StudentNavigation({ student, previous, next, onPrevious, onNext, children, t }: {
+function StudentNavigation({ student, previous, next, onPrevious, onNext, identityOpen, onToggleIdentity, children, t }: {
   student: StudentSubmission;
   previous: StudentSubmission | null;
   next: StudentSubmission | null;
   onPrevious: () => void;
   onNext: () => void;
+  identityOpen: boolean;
+  onToggleIdentity: () => void;
   children: ReactNode;
   t: (key: MessageKey) => string;
 }) {
   return (
-    <nav aria-label={t("answerReviewStudentNavigation")} className="grid min-h-[58px] gap-2 rounded-[10px] border bg-card p-2 sm:grid-cols-2 xl:grid-cols-[170px_225px_minmax(300px,1fr)_170px_150px] xl:items-center">
+    <nav aria-label={t("answerReviewStudentNavigation")} className="grid min-h-[58px] gap-2 rounded-[10px] border bg-card p-2 sm:grid-cols-2 xl:grid-cols-[150px_205px_minmax(300px,1fr)_150px_145px] xl:items-center">
       <Button type="button" variant="ghost" className="h-10 justify-start px-3" disabled={!previous} onClick={onPrevious}>
         <ArrowLeft aria-hidden="true" className="h-4 w-4" />
         <span className="min-w-0 truncate">{previous?.stu_name || t("answerReviewPreviousStudent")}</span>
@@ -514,10 +689,10 @@ function StudentNavigation({ student, previous, next, onPrevious, onNext, childr
         <span className="min-w-0 truncate">{next?.stu_name || t("answerReviewNextStudent")}</span>
         <ArrowRight aria-hidden="true" className="h-4 w-4" />
       </Button>
-      <span className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[7px] bg-slate-50 px-3 text-[11px] text-muted-foreground dark:bg-slate-900/45">
-        <Keyboard aria-hidden="true" className="h-3.5 w-3.5" />
-        {t("answerReviewStudentShortcut")}
-      </span>
+      <Button type="button" variant="secondary" className="h-10 px-3" onClick={onToggleIdentity}>
+        {identityOpen ? <X aria-hidden="true" className="h-4 w-4" /> : <Pencil aria-hidden="true" className="h-4 w-4" />}
+        {t(identityOpen ? "studentSubmissionCloseIdentity" : "studentSubmissionEditIdentity")}
+      </Button>
     </nav>
   );
 }
@@ -627,9 +802,9 @@ function SmartPicker({ label, placeholder, query, matches, currentId, onDraftCha
   );
 }
 
-function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, next, dirty, saving, saveError, onDraftChange, onSave, onNavigate, locale, t }: {
+function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, next, dirty, saving, saveError, editing, onDraftChange, onSave, onEdit, onCancel, onNavigate, locale, t }: {
   question: SubmissionQuestion;
-  answer: ReturnType<typeof answerMap> extends Map<string, infer T> ? T | undefined : never;
+  answer?: StudentAnswerInfo;
   draft: AnswerDraft;
   sourceFilename?: string | null;
   previous: SubmissionQuestion | null;
@@ -637,8 +812,11 @@ function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, n
   dirty: boolean;
   saving: boolean;
   saveError?: string;
+  editing: boolean;
   onDraftChange: (patch: Partial<AnswerDraft>) => void;
   onSave: (moveNext: boolean) => void;
+  onEdit: () => void;
+  onCancel: () => void;
   onNavigate: (id: string) => void;
   locale: Locale;
   t: (key: MessageKey) => string;
@@ -651,9 +829,9 @@ function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, n
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-[20px] font-bold text-foreground">{tx(locale, `第 ${question.label} 题`, `Question ${question.label}`)}</h2>
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground dark:bg-slate-800">{question.type || t("studentSubmissionUnknownType")}</span>
-            <AnswerStateBadge state={state} t={t} />
+            <AnswerStateBadge state={state} answer={answer} locale={locale} t={t} />
           </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">{tx(locale, "题目、识别作答与提示在同一卡片内连续校对。", "Review the question, recognized answer, and flags together in this card.")}</p>
+          <p className="mt-1 text-[11px] text-muted-foreground">{tx(locale, "题目与学生作答在同一卡片内连续校对；题目只读。", "Review the read-only question and student answer together in this card.")}</p>
         </div>
         <div className="flex shrink-0 gap-2">
           <Button type="button" variant="secondary" className="h-9 px-3" disabled={!previous} onClick={() => previous && onNavigate(previous.id)}>
@@ -677,72 +855,104 @@ function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, n
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-foreground">{t("answerReviewRecognizedTextTitle")}</h3>
-              <p className="mt-1 text-[11px] text-muted-foreground">{t("answerReviewRecognizedTextDescription")}</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {tx(locale, editing ? "正在编辑原始 LaTeX；保存后恢复渲染。" : "浏览状态渲染 LaTeX；需要修正时再编辑原始文本。", editing ? "Editing raw LaTeX; rendering returns after save." : "LaTeX is rendered while browsing; edit the source only when needed.")}
+              </p>
             </div>
-            {sourceFilename ? <span className="inline-flex max-w-[360px] items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={sourceFilename}><FileText aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />{sourceFilename}</span> : null}
-          </div>
-          <textarea
-            value={draft.content}
-            onChange={(event) => onDraftChange({ content: event.target.value })}
-            placeholder={t("answerReviewContentPlaceholder")}
-            className="mt-3 min-h-[112px] w-full resize-y rounded-[8px] border bg-slate-50 px-4 py-3 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:bg-card focus:ring-2 focus:ring-primary/15 dark:bg-slate-900/45"
-          />
-        </section>
-
-        <section className="mt-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">{t("answerReviewRecognitionTitle")}</h3>
-              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{t("answerReviewRecognitionDescription")}</p>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {sourceFilename ? <span className="inline-flex max-w-[300px] items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={sourceFilename}><FileText aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />{sourceFilename}</span> : null}
+              {!editing ? (
+                <Button type="button" variant="secondary" className="h-8 px-3" onClick={onEdit}>
+                  <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+                  {tx(locale, "修改", "Edit")}
+                </Button>
+              ) : null}
             </div>
-            {draft.flags ? (
-              <button type="button" onClick={() => onDraftChange({ flags: "" })} className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-primary hover:underline">
-                <RotateCcw aria-hidden="true" className="h-3 w-3" />{t("answerReviewClearFlags")}
-              </button>
-            ) : null}
           </div>
-          <textarea
-            value={draft.flags}
-            onChange={(event) => onDraftChange({ flags: event.target.value })}
-            placeholder={t("answerReviewFlagsPlaceholder")}
-            className="mt-3 min-h-[72px] w-full resize-y rounded-[8px] border bg-slate-50 px-3 py-2.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:bg-card focus:ring-2 focus:ring-primary/15 dark:bg-slate-900/45"
-          />
+          {editing ? (
+            <>
+              <textarea
+                value={draft.content}
+                onChange={(event) => onDraftChange({ content: event.target.value })}
+                placeholder={t("answerReviewContentPlaceholder")}
+                className="mt-3 min-h-[132px] w-full resize-y rounded-[8px] border bg-slate-50 px-4 py-3 font-mono text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:bg-card focus:ring-2 focus:ring-primary/15 dark:bg-slate-900/45"
+              />
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="secondary" className="h-9 px-4" disabled={saving} onClick={onCancel}>
+                  <X aria-hidden="true" className="h-4 w-4" />
+                  {tx(locale, "取消", "Cancel")}
+                </Button>
+                <Button type="button" variant="secondary" className="h-9 px-4" disabled={saving || !dirty} onClick={() => onSave(false)}>
+                  {saving ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Save aria-hidden="true" className="h-4 w-4" />}
+                  {t(saving ? "answerReviewSaving" : "answerReviewSave")}
+                </Button>
+                <Button type="button" className="h-9 px-4" disabled={saving || !dirty} onClick={() => onSave(Boolean(next))}>
+                  <CheckCircle2 aria-hidden="true" className="h-4 w-4" />
+                  {next ? t("answerReviewSaveNext") : t("answerReviewSave")}
+                  {next ? <ArrowDown aria-hidden="true" className="h-4 w-4" /> : null}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="mt-3 min-h-[96px] rounded-[8px] bg-slate-50 px-4 py-3 text-sm leading-6 dark:bg-slate-900/45">
+              {answer?.content?.trim() ? (
+                <MarkdownMath className="text-foreground">{answer.content}</MarkdownMath>
+              ) : (
+                <p className="text-muted-foreground">{t(state === "missing" ? "studentSubmissionMissingAnswer" : "studentSubmissionBlankAnswer")}</p>
+              )}
+            </div>
+          )}
         </section>
 
         {saveError ? <p className="mt-3 rounded-[8px] border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-700" role="alert">{saveError}</p> : null}
       </div>
-
-      <footer className="flex flex-col gap-3 border-t bg-slate-50/65 px-5 py-3 dark:bg-slate-900/25 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
-          <Keyboard aria-hidden="true" className="h-4 w-4 shrink-0" />
-          <span>{t("answerReviewKeyboardHint")}</span>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button type="button" variant="secondary" className="h-9 px-4" disabled={saving || !dirty} onClick={() => onSave(false)}>
-            {saving ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Save aria-hidden="true" className="h-4 w-4" />}
-            {t(saving ? "answerReviewSaving" : "answerReviewSave")}
-          </Button>
-          <Button type="button" className="h-9 px-4" disabled={saving || !dirty} onClick={() => onSave(Boolean(next))}>
-            <CheckCircle2 aria-hidden="true" className="h-4 w-4" />
-            {next ? t("answerReviewSaveNext") : t("answerReviewSave")}
-            {next ? <ArrowDown aria-hidden="true" className="h-4 w-4" /> : null}
-          </Button>
-        </div>
-      </footer>
     </article>
   );
 }
 
-function AnswerStateBadge({ state, t }: { state: SubmissionAnswerState; t: (key: MessageKey) => string }) {
+function AnswerStateBadge({ state, answer, locale, t }: {
+  state: SubmissionAnswerState;
+  answer?: StudentAnswerInfo;
+  locale: Locale;
+  t: (key: MessageKey) => string;
+}) {
+  const flagText = (answer?.flag ?? []).join(" · ");
+  const lowConfidence = /低置信|low[ -]?confidence|confidence/i.test(flagText);
   return (
     <span className={cn(
       "inline-flex h-7 shrink-0 items-center justify-center rounded-full px-3 text-[11px] font-semibold",
       state === "recognized" && "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-200",
       state === "flagged" && "bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-200",
       (state === "empty" || state === "missing") && "bg-red-100 text-red-600 dark:bg-red-950/60 dark:text-red-200",
-    )}>
-      {t(STATUS_KEYS[state])}
+    )} title={flagText || undefined}>
+      {state === "flagged" && lowConfidence ? tx(locale, "低置信", "Low confidence") : t(STATUS_KEYS[state])}
     </span>
+  );
+}
+
+function ReviewMetric({ label, value, detail, tone = "primary" }: {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "primary" | "accent" | "warning" | "danger" | "neutral";
+}) {
+  return (
+    <div className="min-h-[90px] rounded-[10px] border bg-card px-4 py-3.5 sm:px-5">
+      <dt className="text-[12px] font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-2 flex min-w-0 items-baseline gap-2">
+        <span className={cn(
+          "min-w-0 truncate text-[22px] font-bold leading-7 tracking-[-0.02em]",
+          tone === "primary" && "text-primary",
+          tone === "accent" && "text-teal-600 dark:text-teal-300",
+          tone === "warning" && "text-amber-600 dark:text-amber-300",
+          tone === "danger" && "text-red-500 dark:text-red-300",
+          tone === "neutral" && "text-foreground",
+        )} title={value}>
+          {value}
+        </span>
+        <span className="shrink-0 text-[11px] text-muted-foreground">{detail}</span>
+      </dd>
+    </div>
   );
 }
 
@@ -820,16 +1030,8 @@ function neighbors<T>(values: T[], currentId: string | undefined, getId: (value:
   };
 }
 
-function buildBackHref(taskId: string | undefined, studentId: string | undefined, questionId: string | undefined, searchParams: URLSearchParams) {
+function buildBackHref(taskId: string | undefined, searchParams: URLSearchParams) {
   if (!taskId) return "/history";
-  if (searchParams.get("from") === "student" && studentId) {
-    const params = new URLSearchParams();
-    if (questionId) params.set("question", questionId);
-    const overviewFilter = searchParams.get("overviewFilter");
-    if (overviewFilter) params.set("filter", overviewFilter);
-    const query = params.toString();
-    return `${studentPath(taskId, studentId)}${query ? `?${query}` : ""}`;
-  }
   const returnParams = searchParams.get("returnParams");
   return `/tasks/${encodeURIComponent(taskId)}/submissions${returnParams ? `?${returnParams}` : ""}`;
 }
@@ -841,10 +1043,6 @@ function answerErrorMessage(error: unknown, t: (key: MessageKey) => string) {
   if (code === "task_workflow_changed") return t("answerReviewStale");
   if (code === "task_workflow_busy" || normalized.status === 409) return t("answerReviewUnavailable");
   return t("answerReviewSaveError");
-}
-
-function parseFlags(value: string) {
-  return value.split(/\r?\n/).map((flag) => flag.trim()).filter(Boolean);
 }
 
 function isKeyboardNavigationBlocked(target: EventTarget | null) {
@@ -871,12 +1069,30 @@ function normalizeComparable(value: string) {
   return normalize(value).replace(/第|题|\s/g, "").replace(/^q/i, "");
 }
 
-function reviewPath(taskId: string, studentId: string, questionId: string) {
-  return `${studentPath(taskId, studentId)}/questions/${encodeURIComponent(questionId)}`;
-}
-
 function studentPath(taskId: string, studentId: string) {
   return `/tasks/${encodeURIComponent(taskId)}/students/${encodeURIComponent(studentId)}`;
+}
+
+function formatPercent(numerator: number, denominator: number) {
+  if (!denominator) return "—";
+  return `${Math.round((numerator / denominator) * 100)}%`;
+}
+
+function identityMethodKey(method: NonNullable<StudentSubmission["identity_match_method"]>): MessageKey {
+  if (method === "roster") return "studentSubmissionIdentityMethodRoster";
+  if (method === "manual_review") return "studentSubmissionIdentityMethodManual";
+  return "studentSubmissionIdentityMethodFilename";
+}
+
+function identityErrorMessage(error: unknown, t: (key: MessageKey) => string) {
+  const normalized = normalizeAPIError(error);
+  const detail = normalized.payload?.detail;
+  const code = detail && typeof detail === "object" && "code" in detail ? String((detail as { code: unknown }).code) : "";
+  if (code === "student_identity_conflict") return t("studentSubmissionIdentityConflict");
+  if (code === "task_workflow_changed") return t("studentSubmissionIdentityStale");
+  if (code === "student_identity_edit_unavailable") return t("studentSubmissionIdentityUnavailable");
+  if (code === "student_identity_required") return t("studentSubmissionIdentityRequired");
+  return t("studentSubmissionIdentityError");
 }
 
 function compareStudents(a: StudentSubmission, b: StudentSubmission) {

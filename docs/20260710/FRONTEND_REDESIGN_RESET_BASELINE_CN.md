@@ -26,6 +26,8 @@
 
 > **2026-07-24 S03-S05 阶段更新：作答识别后的兼容长工作区已由三个独立页面完整替换：S03 `/tasks/:id/submissions` 只做学生 × 题目矩阵、筛选/排序和分流；S04 `/tasks/:id/students/:sid` 只做单学生身份与全部题目长视图；S05 `/tasks/:id/students/:sid/questions/:qid` 只做单学生 × 单题识别文本/flag 校正。S05 使用 Figma 15 的内容层级并按用户纠正拆开学生与题目导航，支持两维独立 exact/related 匹配、左右/上下键、来源筛选恢复和真实 revision/CAS 保存；缺失格只能为真实 task question 创建，INFO 日志不记录学生、题目或答案。目标回归 `7 passed, 2 warnings`、71 文件 visible-scope/lint/TypeScript、Vite `475 modules` build、`1440×900`/`390×844` 浏览器证据通过，未调用真实模型；当前为“实现与浏览器验收完成，等待用户视觉确认”。详细记录见 `docs/20260724/S05_STUDENT_ANSWER_REVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
 
+> **2026-07-27 S03-S05/C01 最新覆盖：用户确认学生作答校对只保留一个 URL 以降低代码与状态负担。canonical route 现为 `/tasks/:id/students/:sid?question=:qid`；旧 `/questions/:qid` route 和独立学生总览组件均删除，其指标、身份修正与连续题号栏/题目卡合并到同一页面。“识别状态与提示”输入区删除，只在题号旁显示紧凑真实状态。C01 同时收回教材/讲义等任务资料的搜索、选择、上传、移除和加入资料库能力，独立 `/materials` route/page 删除。最新工程与后端合同见第 24 节和 `docs/20260727/Q03_S01_S05_WORKFLOW_CORRECTION_STAGE_CN.md`；上述 2026-07-24 三页拆分仅作为历史记录。**
+
 > **2026-07-24 R01 阶段工程记录：`/tasks/:id/review` 已从遗留正式结果容器中拆出，按 Figma 14 只保留真实结果指标、学生 × 题目复核热力图、4 条优先队列和精确详情入口。桌面标题、四张 `250×90` 指标卡、`1300×48` 智能筛选行、`820×308` 矩阵与 `438×308` 队列达到 0–1px 对照；移动整页 `scrollWidth=390`，矩阵只在自身内部横向滚动。低置信、专家分歧、复核原因、得分与教师批注均来自真实结果 API；确定性智能筛选零 provider 调用。后端没有正式复核状态，故页面将 Figma 的“确认复核完成”改为真实可用的“开始优先复核”，“已批注”不冒充“已复核”。lint/typecheck、Vite `482 modules` build、双尺寸 PNG 和精确 route 回落通过；当前为“实现与浏览器验收完成，等待用户视觉确认”。详细记录见 `docs/20260724/R01_REVIEW_OVERVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
 
 > **2026-07-24 R02 阶段工程记录：`/tasks/:id/review/:sid/:qid` 已由专门复核页替换遗留学生结果回落；按 Figma 15 保留全宽作答、AI/教师双列和评分标准层级，并按用户纠正将学生/题目导航拆成两行。两维筛选分别保存在 URL，明确 exact/related，支持左右切学生、上下切题目以及 `:qid=all` 全部题目长视图。新增 owner + graded/result gate + workflow revision/CAS + 幂等的逐格教师覆盖层，`teacher_score/teacher_comment` 不覆盖 AI 原始记录；统一统计消费教师最终分。合并回归 `25 passed, 1 skipped`，visible-scope/lint/TypeScript、Vite `484 modules` build、双尺寸 PNG 与真实保存回流通过。逐格复核仍为进程内存，任务级 finalized、结果版本和 stale/分析生成状态未建立；当前为“实现与浏览器验收完成，等待用户视觉确认”。详细记录见 `docs/20260724/R02_REVIEW_DETAIL_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。**
@@ -239,7 +241,7 @@ Figma 的 17 帧是最低页面粒度。根据本轮反馈，两个最复杂区�
 | 08 Bulk Material Import | `1:536` | Q-08 `/tasks/:id/questions/import` | 术语统一为“批量导入资料”。 |
 | 09 Knowledge Base | `1:600` | G-04 `/knowledge-base` | 独立课程资料库页。 |
 | 10 Submission Upload | `1:679` | S-01 `/tasks/:id/submissions/upload` | 独立作答上传页；另补 Figma 未覆盖的 S-02 识别进度页。 |
-| 11 Submission Review | `1:740` | S-03 至 S-05 | 当前 frame 只复原矩阵总览；另拆学生总览和单份作答校对。 |
+| 11 Submission Review | `1:740` | S-03、S-04 | 当前 frame 复原矩阵总览；学生侧只保留一个连续校对页面，以 query 定位题目。 |
 | 12 Pre-Grading Confirmation | `1:855` | C-02 `/tasks/:id/grading/preflight` | 只读最终确认；真正可编辑配置放 C-01。 |
 | 13 Grading Progress | `1:929` | C-03 `/tasks/:id/grading/progress` | 独立批改进度页。 |
 | 14 Results Overview | `1:1009` | R-01 `/tasks/:id/review` | 教师确认前的结果指标、热力图和复核队列。 |
@@ -322,7 +324,6 @@ Figma 的 17 帧是最低页面粒度。根据本轮反馈，两个最复杂区�
 | G-05 | 账户设置 | `/settings/account` | 管理账户与语言偏好 | 返回来源页面 |
 | G-06 | 模型与 BYOK | `/settings/byok` | 管理专家、模型密钥与可用状态 | 返回被阻断步骤 |
 | T-00 | 任务 canonical 入口 | `/tasks/:id`（兼容 `/tasks/:id/setup`） | 按真实状态恢复到唯一的新阶段页面 | 当前任务阶段 |
-| T-01 | 本任务资料 | `/tasks/:id/materials` | 上传、查看和删除仅供当前任务检索的资料 | 批改配置或来源页面 |
 | Q-01 | 添加题目文件 | `/tasks/:id/upload/problems` | 选择来源并开始识别 | 题目识别进度 |
 | Q-02 | 题目识别进度 | `/tasks/:id/problems/progress` | 看清事实进度、当前步骤和错误恢复 | 题目准备总览 |
 | Q-03 | 题目准备总览 | `/tasks/:id/questions` | 看覆盖率和待处理题，选择下一项 | 精确题目子页面 |
@@ -332,12 +333,11 @@ Figma 的 17 帧是最低页面粒度。根据本轮反馈，两个最复杂区�
 | Q-07 | 测试样例与脚本 | `/tasks/:id/questions/:qid/tests` | 管理编程题样例、输出、脚本和超时 | 下一题或总览 |
 | Q-08 | 批量导入资料 | `/tasks/:id/questions/import` | 从上传/知识库批量补资料 | 导入进度或总览 |
 | Q-09 | AI 补全缺失资料 | `/tasks/:id/questions/ai-complete` | 选择范围并确认 AI 补全 | 生成进度或总览 |
-| C-01 | 批改配置 | `/tasks/:id/grading-setup` | 配专家组合、资料范围和评分策略 | 添加学生作答 |
+| C-01 | 批改配置与补充资料 | `/tasks/:id/grading-setup` | 配专家/策略，并在同页搜索、选择或上传教材讲义等任务资料 | 添加学生作答 |
 | S-01 | 添加学生作答 | `/tasks/:id/submissions/upload` | 上传作答并开始识别 | 作答识别进度 |
 | S-02 | 作答识别进度 | `/tasks/:id/submissions/progress` | 看清事实进度、当前步骤和错误恢复 | 作答校对总览 |
 | S-03 | 作答校对总览 | `/tasks/:id/submissions` | 查看学生 x 题目矩阵并定位异常 | 学生或单份作答 |
-| S-04 | 学生作答总览 | `/tasks/:id/students/:sid` | 查看一个学生的所有题目状态 | 单份作答详情 |
-| S-05 | 单份作答校对 | `/tasks/:id/students/:sid/questions/:qid` | 校对一个学生的一道题 | 上/下一学生或题目 |
+| S-04 | 学生作答连续校对 | `/tasks/:id/students/:sid?question=:qid` | 查看并校对一个学生的全部题目；query 只负责题目定位 | 上/下一学生或题目 |
 | C-02 | 批改前确认 | `/tasks/:id/grading/preflight` | 只做最终检查与风险确认 | 批改进度 |
 | C-03 | 批改进度 | `/tasks/:id/grading/progress` | 查看实时批改状态 | 结果总览 |
 | R-01 | 待复核结果总览 | `/tasks/:id/review` | 看热力图和复核队列 | 精确复核详情 |
@@ -363,10 +363,10 @@ Figma 的 17 帧是最低页面粒度。根据本轮反馈，两个最复杂区�
 - [~] `/tasks/:id` 是 canonical 兼容入口；旧 `/tasks/:id/setup` 只做同一 resolver 的兼容跳转，不再渲染遗留 `TaskSetupPage`，也不得成为任何新链接的目标。
 - [~] `error` 不得被默认分支吞回 `/setup`；应根据最近失败 job/已有任务事实回到对应的新阶段恢复页，并在无法精确判断时采用最早安全可恢复阶段。
 - [~] Q01 的返回动作进入 `/history`，让教师回到完整任务档案，而不是返回已退役页面。
-- [~] 遗留 Setup 唯一真实且仍需保留的能力——当前任务 KB 资料上传、列表、删除——迁入独立 `/tasks/:id/materials`，由 C01 的任务资料范围区域进入并可返回 C01。
+- [~] 遗留 Setup 唯一真实且仍需保留的能力——当前任务 KB 资料上传、列表、删除——已直接并入 C01；课程资料库搜索/选择也在同页完成，不再保留独立 `/tasks/:id/materials`。
 - [~] 不迁移遗留页未接保存的“补充规则”文本框、仅存浏览器的“个人知识库选择”或重复 BYOK 摘要。教师注意事项以 C01 已落地的任务级版本化字段为唯一真相源；BYOK 继续由顶栏摘要与 `/settings/byok` 承担。
 
-状态：代码接线与关键浏览器流程已于 2026-07-20 完成。工作台、历史任务、`/tasks/:id` 和旧 `/setup` 均验证草稿进入 Q01；C01 与独立任务资料页往返通过，干净标签页无控制台 error/warning。前端可见范围审计（66 文件）、TypeScript、Vite production build（465 modules）及 `git diff --check` 通过；13 个 destination 分支和 3 个 error gate 分支的确定性检查通过。桌面证据为 `draft-entry-to-q01-correction-20260720.png` 与 `task-materials-entry-correction-20260720.png`（1280×720）；未调用模型、未上传或删除用户文件，等待用户确认。
+状态：2026-07-27 最新覆盖把任务资料能力收回 C01 同页，删除了独立 route 和旧页面。工作台、历史任务、`/tasks/:id` 与旧 `/setup` 仍统一恢复到 canonical 新流程；C01 同页布局与任务 KB 合同已重新验收，等待用户确认。
 
 ### 5.1 路由拆分不是让用户迷路
 
@@ -665,7 +665,7 @@ Figma 的 17 帧是最低页面粒度。根据本轮反馈，两个最复杂区�
 ### 11.2 默认替换
 
 - 当前 `AppShell` 的固定左侧栏布局。
-- 当前 `TaskSetupPage` 的“资料配置 + 本地个人知识库 + 重复 BYOK + 无保存补充规则”混合长页；其可见 route 必须由状态感知兼容入口替换，真实任务 KB 操作迁往 `/tasks/:id/materials`。
+- 当前 `TaskSetupPage` 的“资料配置 + 本地个人知识库 + 重复 BYOK + 无保存补充规则”混合长页；其可见 route 必须由状态感知兼容入口替换，真实任务 KB 操作直接并入 C01。
 - 当前 `TaskUploadPage.tsx` 的多阶段单页组合。
 - 将题目总览与题目详情放在同一页面的实现。
 - 将作答矩阵与所有学生答案放在同一页面的实现。
@@ -1072,3 +1072,27 @@ Q04–Q07”的旧决定。详细后端唯一实施契约见
 
 - 本轮不新增后端 API：Q03 读取现有题目包和风险字段；作答校对继续逐题 CAS 保存；上传作答继续先 PUT 任务级设置、再调用现有 `parse_submissions`。
 - 后端下一轮仍按第 22.5 节和 `docs/20260726/Q01_Q03_UNIFIED_QUESTION_PREPARATION_BACKEND_PLAN_CN.md` 实施结构化题目包、字段级版本、持久化和沙箱，不因本轮纯前端纠偏另建冲突合同。
+
+---
+
+## 24. 2026-07-27 学生校对单一 URL 与 C01 同页资料最新覆盖
+
+本节覆盖第 5 节的独立 T-01、S-04/S-05 两套 URL，以及第 23.2 节“切换学生保持当前题目锚点”的旧细节。
+
+### 24.1 学生作答只保留一套连续校对页
+
+- 唯一 URL 为 `/tasks/:id/students/:sid?question=:qid`；`question` 只负责初始定位和可分享状态。
+- `/tasks/:id/students/:sid/questions/:qid` route 和旧学生总览组件直接删除，不做兼容重定向，避免永久维护第二套页面、查询和视觉状态。
+- 矩阵学号、单元格、“查看”和首个待处理入口全部进入同一 URL。入口可携带题目 query；没有 query 时默认 Q1。
+- 页面合并单学生覆盖指标、身份修正、来源、学生智能选择与 Q03 风格的左题号栏、连续题目卡、上下题定位和键盘导航。
+- 切换学生后到页面绝对顶部，明确显示当前学生；题目搜索和左栏只改变或定位题目，不改变学生。
+- 题目与学生作答在浏览态渲染 LaTeX；题目在此阶段只读，学生作答点击修改后显示原始源码，保存后恢复渲染。
+- 删除“识别状态与提示”输入区。状态只在题号旁以一个紧凑标签显示：绿色“已识别”、橙色“需复核/低置信”、红色“作答空/未识别”；正常状态不再增加“未发现异常”文案。
+
+### 24.2 C01 同页补充任务资料
+
+- 批改设置只在主层展示模型、当前补充资料、严格度和是否允许部分分；评语语气、长度、采样、阈值和批注等低频项进入高级设置。
+- “补充任务资料”明确指教材、讲义和其他检索增强资料，不重复 Q01 已确认的题目、标答和评分标准。
+- 教师可在 C01 中搜索个人课程资料库，逐条选择并在下方一行一份显示；也可本地上传，并选择是否同时加入课程资料库。保留“前往课程资料库”链接。
+- 独立 `/tasks/:id/materials` route 和页面删除；底层任务 KB 保留为同页能力，不删除领域功能。
+- `POST /tasks/:id/kb` 必须且只能接收 `file` 或 `library_material_id` 之一；支持 owner 隔离、SHA 幂等、来源元数据、可选保存到课程资料库和 workflow revision/CAS。`DELETE /tasks/:id/kb/:docId` 同样使用 revision，解除精确资料引用而不影响其他任务。

@@ -96,10 +96,17 @@ export function QuestionPreparationDetailPage() {
     const updateActiveQuestion = () => {
       frame = 0;
       let active = filtered[0]?.q_id ?? "";
-      for (const problem of filtered) {
-        const element = document.getElementById(questionAnchorId(problem.q_id));
-        if (!element || element.getBoundingClientRect().top > 112) break;
-        active = problem.q_id;
+      const scrollRoot = document.scrollingElement ?? document.documentElement;
+      const reachedDocumentEnd = scrollRoot.scrollHeight > window.innerHeight + 1
+        && window.scrollY + window.innerHeight >= scrollRoot.scrollHeight - 2;
+      if (reachedDocumentEnd) {
+        active = filtered[filtered.length - 1]?.q_id ?? active;
+      } else {
+        for (const problem of filtered) {
+          const element = document.getElementById(questionAnchorId(problem.q_id));
+          if (!element || element.getBoundingClientRect().top > 112) break;
+          active = problem.q_id;
+        }
       }
       if (active) setActiveQuestionId(active);
     };

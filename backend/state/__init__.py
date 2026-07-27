@@ -1543,6 +1543,22 @@ class CourseMaterialStore:
             material.last_used_at = time.time()
             return material
 
+    def unmark_used(
+        self,
+        material_id: str,
+        owner_id: str,
+        task_id: str,
+    ) -> Optional[CourseMaterial]:
+        """Detach one task reference without affecting other selected materials."""
+
+        with self._lock:
+            material = self._materials.get(material_id)
+            if material is None or material.owner_id != owner_id:
+                return None
+            material.task_ids = [item for item in material.task_ids if item != task_id]
+            material.updated_at = time.time()
+            return material
+
     def unmark_task_references(self, owner_id: str, task_id: str) -> int:
         """Detach a deleted task from every owner-scoped material reference."""
 

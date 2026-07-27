@@ -1,8 +1,27 @@
-import { ArrowLeft, ChevronDown, ChevronRight, LoaderCircle, Settings2 } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  FilePlus2,
+  LoaderCircle,
+  Search,
+  Settings2,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useBeforeUnload, useBlocker, useNavigate, useParams } from "react-router-dom";
 import { normalizeAPIError } from "@/api/client";
-import { useGradingSetup, useSaveGradingSetup } from "@/api/hooks";
+import {
+  useCourseMaterials,
+  useDeleteKBDoc,
+  useGradingSetup,
+  useKBDocs,
+  useSaveGradingSetup,
+  useUploadKBDoc,
+} from "@/api/hooks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useI18n } from "@/i18n/I18nProvider";
@@ -17,7 +36,6 @@ import type {
   GradingKnowledgeScope,
   GradingSetup,
   GradingSetupExpert,
-  GradingSetupKnowledge,
 } from "@/types";
 
 const SAMPLE_OPTIONS = [1, 2, 3, 4, 5] as const;
@@ -247,7 +265,7 @@ export function GradingSetupPage({
               disabled={isReadOnly || saveSetup.isPending}
               className={cn("min-h-0 min-w-0 flex-1 border-0 p-0", isReadOnly && "opacity-70")}
             >
-              <div className={cn("min-h-0", !embedded && "lg:max-h-[560px] lg:overflow-y-auto lg:pr-2")}>
+              <div className="min-h-0">
                 <ModelSection
                   locale={locale}
                   experts={response.available_experts}
@@ -263,7 +281,6 @@ export function GradingSetupPage({
                 <KnowledgeSection
                   locale={locale}
                   taskId={taskId}
-                  knowledge={response.knowledge}
                   value={setup.knowledge_scope}
                   onChange={(knowledgeScope) => updateSetup((current) => ({ ...current, knowledge_scope: knowledgeScope }))}
                 />
@@ -383,7 +400,6 @@ function ModelSection({
             return (
               <li key={expert.provider_id} className={cn(
                 "flex min-h-[46px] items-center gap-3 px-3 py-1.5",
-                selected && expert.enabled && "bg-blue-50/45 dark:bg-blue-950/10",
                 selected && !expert.enabled && "bg-red-50/70 dark:bg-red-950/15",
               )}>
                 <input
@@ -450,7 +466,7 @@ function ModelSection({
           </div>
         </div>
       ) : (
-        <div className="mt-1.5 flex items-center justify-between rounded-[7px] bg-muted/45 px-3 py-1.5">
+        <div className="mt-1.5 flex items-center justify-between rounded-[7px] border px-3 py-1.5">
           <span className="text-[12px] font-semibold text-foreground">{gradingSetupText(locale, "singleMethod")}</span>
           <span className="text-[11px] text-muted-foreground">{gradingSetupText(locale, "singleMethodDescription")}</span>
         </div>
@@ -459,49 +475,225 @@ function ModelSection({
   );
 }
 
-function KnowledgeSection({ locale, taskId, knowledge, value, onChange }: {
+function KnowledgeSection({ locale, taskId, value, onChange }: {
   locale: Locale;
   taskId: string;
-  knowledge: GradingSetupKnowledge;
   value: GradingKnowledgeScope;
   onChange: (scope: GradingKnowledgeScope) => void;
 }) {
+  const docsQuery = useKBDocs(taskId);
+  const uploadDocument = useUploadKBDoc();
+  const deleteDocument = useDeleteKBDoc();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [libraryQueryText, setLibraryQueryText] = useState("");
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [saveToLibrary, setSaveToLibrary] = useState(false);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
+  const libraryQuery = useCourseMaterials({
+    q: libraryQueryText,
+    page: 1,
+    page_size: 8,
+  });
+  const docs = docsQuery.data?.docs ?? [];
+  const attachedMaterialIds = new Set(
+    docs.flatMap((doc) => doc.library_material_id ? [doc.library_material_id] : []),
+  );
+  const eligibleMaterials = (libraryQuery.data?.items ?? []).filter(
+    (material) => material.category === "textbook"
+      || material.category === "lecture"
+      || material.category === "other",
+  );
+  const isBusy = uploadDocument.isPending || deleteDocument.isPending;
+  const atLimit = docs.length >= 3;
+
+  useEffect(() => {
+    if (!docsQuery.isSuccess) return;
+    const expectedScope: GradingKnowledgeScope = docs.length > 0 ? "all_task_docs" : "none";
+    if (value !== expectedScope) onChange(expectedScope);
+  }, [docs.length, docsQuery.isSuccess, value]);
+
+  async function attachLibraryMaterial(materialId: string) {
+    setKnowledgeError(null);
+    try {
+      await uploadDocument.mutateAsync({ taskId, libraryMaterialId: materialId });
+      onChange("all_task_docs");
+      setLibraryOpen(false);
+      setLibraryQueryText("");
+    } catch (error) {
+      setKnowledgeError(normalizeAPIError(error).message);
+    }
+  }
+
+  async function uploadLocalMaterial(file: File) {
+    setKnowledgeError(null);
+    try {
+      await uploadDocument.mutateAsync({ taskId, file, saveToLibrary });
+      onChange("all_task_docs");
+    } catch (error) {
+      setKnowledgeError(normalizeAPIError(error).message);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function removeDocument(docId: string) {
+    setKnowledgeError(null);
+    try {
+      await deleteDocument.mutateAsync({ taskId, docId });
+      if (docs.length <= 1) onChange("none");
+    } catch (error) {
+      setKnowledgeError(normalizeAPIError(error).message);
+    }
+  }
+
   return (
-    <fieldset>
-      <legend className="text-[17px] font-bold leading-6 text-foreground">{gradingSetupText(locale, "knowledgeTitle")}</legend>
-      <div className="mt-0.5 flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <p className="text-[12px] leading-4 text-muted-foreground">{gradingSetupText(locale, "knowledgeDescription")}</p>
+    <section aria-labelledby="grading-knowledge-title">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div>
+          <h2 id="grading-knowledge-title" className="text-[17px] font-bold leading-6 text-foreground">
+            {locale === "zh-CN" ? "补充任务资料" : "Supplemental task materials"}
+          </h2>
+          <p className="mt-0.5 text-[12px] leading-4 text-muted-foreground">
+            {locale === "zh-CN"
+              ? "可选教材、讲义或背景资料作为批改上下文；不会替代已审核的题目、标答和评分标准。"
+              : "Optionally add textbooks, lecture notes, or context. These do not replace reviewed questions, answers, or rubrics."}
+          </p>
+        </div>
         <Link
-          to={`/tasks/${taskId}/materials`}
-          className="inline-flex shrink-0 items-center gap-0.5 self-start text-[12px] font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+          to="/knowledge-base"
+          className="inline-flex shrink-0 items-center gap-1 self-start text-[12px] font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
         >
-          {locale === "zh-CN" ? "管理任务资料" : "Manage task documents"}
-          <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
+          {locale === "zh-CN" ? "前往课程资料库" : "Open course library"}
+          <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
         </Link>
       </div>
-      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-        <RadioCard
-          name="grading-knowledge-scope"
-          checked={value === "none"}
-          title={gradingSetupText(locale, "knowledgeNone")}
-          description={gradingSetupText(locale, "knowledgeNoneDescription")}
-          onChange={() => onChange("none")}
+
+      <div className="relative mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <label className="relative min-w-0">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="search"
+            value={libraryQueryText}
+            onFocus={() => setLibraryOpen(true)}
+            onBlur={() => window.setTimeout(() => setLibraryOpen(false), 150)}
+            onChange={(event) => {
+              setLibraryQueryText(event.target.value);
+              setLibraryOpen(true);
+            }}
+            placeholder={locale === "zh-CN" ? "搜索资料库中的教材、讲义或背景资料" : "Search textbooks, lecture notes, or context"}
+            className="h-10 w-full rounded-[8px] border bg-background pl-9 pr-3 text-[12px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
+          />
+        </label>
+        <button
+          type="button"
+          disabled={atLimit || isBusy}
+          onClick={() => fileInputRef.current?.click()}
+          className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[8px] border bg-card px-3 text-[12px] font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          title={atLimit ? (locale === "zh-CN" ? "本任务最多选择 3 份资料" : "Up to 3 task documents") : undefined}
+        >
+          <Upload aria-hidden="true" className="h-4 w-4" />
+          {locale === "zh-CN" ? "上传资料" : "Upload"}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.txt,.md,.markdown,.rst"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void uploadLocalMaterial(file);
+          }}
         />
-        <RadioCard
-          name="grading-knowledge-scope"
-          checked={value === "all_task_docs"}
-          disabled={!knowledge.scope_options.includes("all_task_docs")}
-          title={gradingSetupText(locale, "knowledgeAll")}
-          description={`${gradingSetupText(locale, "knowledgeAllPrefix")}${knowledge.task_doc_count}${gradingSetupText(locale, "knowledgeAllSuffix")}`}
-          onChange={() => onChange("all_task_docs")}
-        />
+
+        {libraryOpen ? (
+          <div className="absolute left-0 right-0 top-11 z-20 max-h-56 overflow-y-auto rounded-[8px] border bg-card p-1.5 shadow-lg sm:right-[104px]">
+            {libraryQuery.isLoading ? (
+              <div className="flex min-h-20 items-center justify-center"><LoaderCircle aria-hidden="true" className="h-5 w-5 animate-spin text-primary" /></div>
+            ) : eligibleMaterials.length > 0 ? (
+              <ul className="divide-y">
+                {eligibleMaterials.map((material) => {
+                  const attached = attachedMaterialIds.has(material.material_id);
+                  return (
+                    <li key={material.material_id} className="flex min-h-12 items-center gap-3 px-2 py-2">
+                      <BookOpen aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[12px] font-semibold text-foreground">{material.filename}</span>
+                        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                          {material.course_name || (locale === "zh-CN" ? "未归属课程" : "No course")} · {material.category}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        disabled={attached || atLimit || isBusy}
+                        onClick={() => void attachLibraryMaterial(material.material_id)}
+                        className="h-8 shrink-0 rounded-[7px] border bg-card px-3 text-[11px] font-semibold text-primary hover:bg-muted disabled:cursor-not-allowed disabled:text-muted-foreground disabled:opacity-60"
+                      >
+                        {attached ? (locale === "zh-CN" ? "已选择" : "Selected") : (locale === "zh-CN" ? "选择" : "Select")}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <div className="flex min-h-20 flex-col items-center justify-center px-4 text-center">
+                <p className="text-[12px] font-semibold text-foreground">{locale === "zh-CN" ? "没有匹配的资料" : "No matching materials"}</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">{locale === "zh-CN" ? "可换个关键词，或直接上传一份新资料。" : "Try another query or upload a new file."}</p>
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
-      {value === "all_task_docs" && knowledge.task_doc_count === 0 ? (
-        <p className="mt-2 rounded-[7px] border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-4 text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
-          {gradingSetupText(locale, "knowledgeEmptyWarning")}
-        </p>
-      ) : null}
-    </fieldset>
+
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] font-medium text-foreground">
+          <input type="checkbox" checked={saveToLibrary} onChange={(event) => setSaveToLibrary(event.target.checked)} className="h-4 w-4 rounded border-border accent-primary" />
+          {locale === "zh-CN" ? "上传时同时加入课程资料库" : "Also add uploads to course library"}
+        </label>
+        <span className="text-[11px] text-muted-foreground">
+          {locale === "zh-CN" ? `已选择 ${docs.length}/3 份` : `${docs.length}/3 selected`}
+        </span>
+      </div>
+
+      <div className="mt-2 overflow-hidden rounded-[8px] border bg-card">
+        {docsQuery.isLoading ? (
+          <div className="flex min-h-14 items-center justify-center"><LoaderCircle aria-hidden="true" className="h-5 w-5 animate-spin text-primary" /></div>
+        ) : docs.length > 0 ? (
+          <ul className="divide-y">
+            {docs.map((doc) => (
+              <li key={doc.doc_id} className="flex min-h-14 items-center gap-3 px-3 py-2">
+                <FilePlus2 aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12px] font-semibold text-foreground">{doc.filename}</span>
+                  <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                    {doc.source_kind === "library"
+                      ? (locale === "zh-CN" ? "来自课程资料库" : "From course library")
+                      : doc.saved_to_library
+                        ? (locale === "zh-CN" ? "本任务使用 · 已加入资料库" : "Task upload · saved to library")
+                        : (locale === "zh-CN" ? "仅用于本任务" : "This task only")}
+                    {` · ${doc.chunk_count} ${locale === "zh-CN" ? "个片段" : "chunks"}`}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => void removeDocument(doc.doc_id)}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] text-muted-foreground outline-none hover:bg-muted hover:text-danger focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                  aria-label={locale === "zh-CN" ? `移除 ${doc.filename}` : `Remove ${doc.filename}`}
+                >
+                  <Trash2 aria-hidden="true" className="h-4 w-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="flex min-h-14 items-center gap-3 px-3 py-2 text-[12px] text-muted-foreground">
+            <BookOpen aria-hidden="true" className="h-4 w-4 shrink-0" />
+            {locale === "zh-CN" ? "暂未选择补充资料；系统将只使用题目、标答和评分标准。" : "No supplemental materials selected."}
+          </div>
+        )}
+      </div>
+      {knowledgeError ? <p role="alert" className="mt-2 text-[11px] leading-4 text-danger">{knowledgeError}</p> : null}
+    </section>
   );
 }
 
@@ -532,7 +724,7 @@ function StrategySection({
       <h2 id="grading-strategy-title" className="text-[17px] font-bold leading-6 text-foreground">{gradingSetupText(locale, "strategyTitle")}</h2>
       <p className="mt-0.5 text-[12px] leading-4 text-muted-foreground">{gradingSetupText(locale, "strategyDescription")}</p>
 
-      <div className="mt-2 grid gap-3 sm:grid-cols-[1fr_210px_170px] sm:items-end">
+      <div className="mt-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_260px] sm:items-end">
         <label>
           <span className="flex items-center justify-between text-[12px] font-semibold text-foreground">
             <span>{gradingSetupText(locale, "strictness")}</span>
@@ -548,11 +740,6 @@ function StrategySection({
             <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">{gradingSetupText(locale, "allowPartialCreditDescription")}</span>
           </span>
         </label>
-        <SelectField label={gradingSetupText(locale, "feedbackTone")} value={setup.feedback_tone} onChange={(value) => onChange((current) => ({ ...current, feedback_tone: value as GradingFeedbackTone }))}>
-          <option value="encouraging">{gradingSetupText(locale, "toneEncouraging")}</option>
-          <option value="neutral">{gradingSetupText(locale, "toneNeutral")}</option>
-          <option value="strict">{gradingSetupText(locale, "toneStrict")}</option>
-        </SelectField>
       </div>
 
       <button type="button" aria-expanded={advancedOpen} aria-controls="grading-advanced-settings" onClick={onAdvancedToggle} className="mt-1.5 flex min-h-9 w-full items-center justify-between gap-3 rounded-[8px] bg-muted/45 px-3 py-1.5 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
@@ -565,6 +752,11 @@ function StrategySection({
 
       {advancedOpen ? (
         <div id="grading-advanced-settings" className="mt-3 grid gap-3 border-l-2 border-primary/20 pl-4 sm:grid-cols-2">
+          <SelectField label={gradingSetupText(locale, "feedbackTone")} value={setup.feedback_tone} onChange={(value) => onChange((current) => ({ ...current, feedback_tone: value as GradingFeedbackTone }))}>
+            <option value="encouraging">{gradingSetupText(locale, "toneEncouraging")}</option>
+            <option value="neutral">{gradingSetupText(locale, "toneNeutral")}</option>
+            <option value="strict">{gradingSetupText(locale, "toneStrict")}</option>
+          </SelectField>
           <SelectField label={gradingSetupText(locale, "feedbackLength")} value={setup.feedback_length} onChange={(value) => onChange((current) => ({ ...current, feedback_length: value as GradingFeedbackLength }))}>
             <option value="short">{gradingSetupText(locale, "lengthShort")}</option>
             <option value="medium">{gradingSetupText(locale, "lengthMedium")}</option>
@@ -618,22 +810,6 @@ function ChoiceButton({ active, title, description, badge, badgeTone = "primary"
       </span>
       <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">{description}</span>
     </button>
-  );
-}
-
-function RadioCard({ name, checked, disabled = false, title, description, onChange }: {
-  name: string;
-  checked: boolean;
-  disabled?: boolean;
-  title: string;
-  description: string;
-  onChange: () => void;
-}) {
-  return (
-    <label className={cn("flex min-h-[58px] cursor-pointer items-start gap-3 rounded-[8px] border bg-card px-3 py-2.5 transition", checked ? "border-primary ring-1 ring-primary" : "hover:border-slate-300", disabled && "cursor-not-allowed opacity-50")}>
-      <input type="radio" name={name} checked={checked} disabled={disabled} onChange={onChange} className="mt-0.5 h-4 w-4 shrink-0 accent-primary" />
-      <span className="min-w-0"><span className="block text-[12px] font-semibold text-foreground">{title}</span><span className="mt-1 block text-[11px] leading-4 text-muted-foreground">{description}</span></span>
-    </label>
   );
 }
 

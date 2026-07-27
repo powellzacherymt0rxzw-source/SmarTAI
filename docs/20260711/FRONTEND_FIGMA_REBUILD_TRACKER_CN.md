@@ -6,9 +6,9 @@
 >
 > 视觉与页面结构以 `docs/20260710/figma/` 的 17 张导出图为基准；功能、状态和边界必须同时对照 2026-07-03 计划、2026-07-04 完整设计记录及其附录原话、2026-07-10 最新纠偏基线和 2026-07-11 用户补充。
 >
-> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 原阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02、A-00、K00/K01、G05、G06 与 G00 记录位于 `docs/20260724/`；2026-07-26 当前任务编辑/BYOK 纠正记录见 `docs/20260726/G07_TASK_METADATA_AND_BYOK_CORRECTION_STAGE_CN.md`。Q01–Q03 最新后端唯一实施契约见 `docs/20260726/Q01_Q03_UNIFIED_QUESTION_PREPARATION_BACKEND_PLAN_CN.md`，本轮工程记录见 `docs/20260726/Q01_Q03_UNIFIED_PREPARATION_IMPLEMENTATION_STAGE_CN.md`。
+> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 原阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02、A-00、K00/K01、G05、G06 与 G00 记录位于 `docs/20260724/`；2026-07-26 当前任务编辑/BYOK 纠正记录见 `docs/20260726/G07_TASK_METADATA_AND_BYOK_CORRECTION_STAGE_CN.md`。Q01–Q03 最新后端唯一实施契约见 `docs/20260726/Q01_Q03_UNIFIED_QUESTION_PREPARATION_BACKEND_PLAN_CN.md`，本轮工程记录见 `docs/20260726/Q01_Q03_UNIFIED_PREPARATION_IMPLEMENTATION_STAGE_CN.md`。2026-07-27 单一学生校对 URL、Q03 定位纠正和 C01 同页任务资料记录见 `docs/20260727/Q03_S01_S05_WORKFLOW_CORRECTION_STAGE_CN.md`。
 >
-> 当前阶段：Q01 四资料位与一次识别编排、Q03 风险优先矩阵、Q04–Q07 连续题目资料审核，以及八步可回链流程已完成工程、定向回归和真实浏览器验收，等待用户视觉确认。旧 Q08/Q09 主入口已从新流程移除；下一阶段后端按统一契约补结构化题目包、字段级 CAS、持久化和 OJ 沙箱，不再扩展旧补缺页面。
+> 当前阶段：学生作答审核已收敛为 `/tasks/:id/students/:sid?question=:qid` 一种 URL 和一套连续校对页，旧单题 route/UI 已删除；C01 已把教材、讲义等补充任务资料的搜索、选择、上传和移除收回同页，独立 `/materials` 页面已删除。相关前后端合同、定向回归和真实浏览器验收已完成，等待用户视觉确认。
 
 ---
 
@@ -115,6 +115,8 @@
 | D-16 | Q03 是风险导航矩阵，不是缺失资料补录中心 | 已确认 | 正常项不显示缺失；只突出低置信、AI/原文件冲突、解析异常等需关注信号；删除批量导入与 AI 补缺主入口。 |
 | D-17 | 题目审核以“每题知识包”为认知单位 | 已确认 | 只有一个连续长页：左侧可滚动题号目录，右侧逐题显示全部适用资料；取消“全部/单题”和资料维度切换。前后题按钮只滚动定位，底部一次确认全部。 |
 | D-18 | LaTeX 浏览态渲染，编辑态才显示源码 | 已确认 | 题干、标答和评分标准统一执行，保存后立即恢复渲染态。 |
+| D-19 | 学生作答审核只保留一个 URL 和一套连续页面 | 已确认 | canonical route 为 `/tasks/:id/students/:sid?question=:qid`；矩阵单元格只用 query 定位题目，删除 `/questions/:qid` route 和旧总览页。 |
+| D-20 | C01 在批改设置同页管理补充任务资料 | 已确认 | 可搜索课程资料库中的教材/讲义、逐条选择或移除，也可本地上传并选择是否加入资料库；删除独立 `/tasks/:id/materials` 页面。 |
 
 ### 2.1 最新要求与 Figma 的覆盖/冲突表
 
@@ -519,6 +521,8 @@
 - 工程证据：相关回归 `66 passed`；后端全量 `180 passed, 1 skipped, 16 warnings`；前端可见范围审计 `65` 个文件、TypeScript、Vite `466 modules` production build 与 `git diff --check` 通过；两轮终审修复后无已知 P0/P1/P2。
 - 浏览器证据：`c01-grading-setup-1440x900.png` 与 `c01-grading-setup-390x844.png`；桌面 `innerWidth=scrollWidth=1440` 且 `scrollHeight=900`，移动 `innerWidth=scrollWidth=390`。未配置直达作答被拦截，双模型默认 weighted、保存进入作答、返回恢复及改回单模型均通过；未调用真实模型。
 - 当前状态：代码、合同、工程与浏览器验收完成，等待用户视觉确认，故保持 `[~]`。下一阶段为 S01；C02 保持只读确认页，不成为第二套配置表单。
+- 2026-07-27 覆盖：补充任务资料已改为 C01 同页真实工作区，不再跳到独立 `/tasks/:id/materials`。教师可搜索自己课程资料库中的教材、讲义和其他资料，逐条加入/移除；也可本地上传并选择是否同时加入课程资料库。主界面只保留模型、任务资料、严格度和允许部分分，评语语气等低频项统一折叠到高级设置。
+- 后端统一合同：`POST /tasks/:id/kb` 必须且只能提交 `file` 或 `library_material_id` 之一，支持 SHA 幂等、owner 隔离、来源元数据、可选保存到资料库和 workflow revision/CAS；`DELETE /tasks/:id/kb/:docId` 同样携带 revision。独立任务资料前端页和 route 已删除。
 
 ### 6.6 跨阶段 canonical task entry 纠偏（2026-07-20）
 
@@ -527,7 +531,7 @@
 - [~] T-FLOW-01 工作台、历史任务、`/tasks/:id` 和其他“继续任务”入口已统一使用同一状态感知 resolver；`draft` 的 canonical destination 固定为 Q01，新建任务与恢复草稿不再分叉。工作台和历史任务中的 `test1` 均已实际点击验证进入 `/upload/problems`；等待用户确认。
 - [~] T-FLOW-02 `/tasks/:id/setup` 现只保留为旧书签兼容入口，并与 `/tasks/:id` 一样按真实任务状态跳到当前新阶段；`error` 根据最近失败 job 与已有文件/计数事实恢复，不再返回遗留长页。13 个 destination 分支和 3 个 error gate 分支的确定性检查通过；未为验收制造真实失败任务。
 - [~] T-FLOW-03 Q01 的返回动作已改为返回历史任务，不再生成指向 `/setup` 的新链接；遗留 `TaskSetupPage` 文件和可见渲染均已删除。旧 `/setup` 地址实际打开后直接进入新版 Q01，且干净标签页无控制台 error/warning；等待用户确认。
-- [~] T-FLOW-04 遗留页唯一需要保留的真实能力——当前任务 KB 资料上传、列表和删除——已迁移到独立 `/tasks/:id/materials`，并由 C01“任务资料范围”提供明确入口。遗留页未接保存的“补充规则”文本框、仅浏览器本地的“个人知识库选择”和重复 BYOK 摘要未迁移；教师注意事项只以 C01 已版本化保存的真实字段为准。C01 → 任务资料 → C01 往返已实际验证，未上传或删除用户文件。
+- [~] T-FLOW-04 当前任务 KB 资料上传、课程资料库搜索/选择、列表和删除已直接并入 C01，不再建立独立 `/tasks/:id/materials` route。遗留页未接保存的“补充规则”文本框、仅浏览器本地的“个人知识库选择”和重复 BYOK 摘要未迁移；教师注意事项只以 C01 已版本化保存的真实字段为准。
 - [~] T-FLOW-QA 工程检查于 2026-07-20 15:25 UTC+8 完成：前端可见范围审计扫描 66 个文件、TypeScript、Vite production build（465 modules）和 `git diff --check` 均通过。浏览器证据为 `draft-entry-to-q01-correction-20260720.png` 与 `task-materials-entry-correction-20260720.png`（1280×720）；任务资料页 `innerWidth=document/body scrollWidth=1280`、`scrollHeight=720`，无页面级横向溢出且首屏完整。移动端未为本次跨阶段热修重复截图，继续沿用组件既有响应式约束并留待用户按需检查。
 
 ---
@@ -536,9 +540,8 @@
 
 - [~] S01 上传作答使用同一 canonical route 的“选择文件 → 识别设置”两个短阶段。工程纠偏：2026-07-27；三种身份匹配和覆盖合同保留，任务级设置以内嵌 Figma 风格表单保存后立即开始识别，不再把 C01 作为顶层步骤，也不在上传页放第二套 provider 控件。等待用户视觉确认。
 - [~] S02 作答识别进度独立页。工程与浏览器验收完成：2026-07-23；Figma 05 的 `800×430` 单焦点进度卡、真实文件/身份/答案计数、后台恢复、脱敏事件、错误门禁、1440×900/390×844 PNG 和相关回归均已完成，等待用户视觉确认。
-- [~] S03 作答校对总览只显示学生 x 题目矩阵、筛选和分流。工程与浏览器验收完成：2026-07-23；Figma 11 的标题/流程/指标/筛选/矩阵骨架、真实四态单元格、解释性本地筛选、canonical 路由和 1440×900/390×844 PNG 均已完成，等待用户视觉确认。
-- [~] S04 学生作答总览独立页。工程与浏览器验收完成：2026-07-23；单学生四指标、上一位/下一位与直选、题目定位、解释性筛选、全部题目长视图、真实身份 CAS、1440×900/390×844 PNG 均已完成，等待用户视觉确认。
-- [~] S05 作答连续校对支持学生/题目双维独立筛选。工程与浏览器验收更新：2026-07-27；当前学生全部题目连续渲染，左侧题号目录独立滚动并与正文同步；Safari 学生候选点击和中文 IME 已修复，切换学生保持当前题目锚点，真实答案 CAS 不变。等待用户视觉确认。
+- [~] S03 作答校对总览只显示学生 x 题目矩阵、筛选和分流。工程与浏览器验收完成：2026-07-27；所有学号、单元格和“查看”入口统一进入同一个学生连续校对 route，并用 query 精确定位题目，不再分流到两套页面。
+- [~] S04/S05 已合并为一套学生作答连续校对页。canonical route 为 `/tasks/:id/students/:sid?question=:qid`；单学生指标、身份修正、学生直选、题目搜索、左侧独立滚动题号栏、全部题目连续渲染、LaTeX 浏览/源码编辑、键盘导航和真实答案 CAS 均保留。旧 `/questions/:qid` route 与旧总览组件已删除，等待用户视觉确认。
 - [~] C01 批改配置合同保留，默认简单、高级折叠；主流程于 2026-07-27 合并到 S01 第二阶段。独立 route 仅作兼容/直达编辑，任务级无密钥配置、真实批改消费链和共享池安全边界不变；等待用户视觉确认。
 - [~] C02 批改前确认只读汇总，不成为第二个配置页。工程与浏览器验收完成：2026-07-24；Figma 12 精确几何、真实任务/设置摘要、可回跳风险、幂等启动、S03 入口及双尺寸 PNG 已完成，等待用户视觉确认。
 - [~] C03 批改进度独立页。工程与浏览器验收完成：2026-07-24；Figma 13 精确几何、事实题次/ETA/队列、后台恢复、错误重试、graded→review 迁移及双尺寸 PNG 已完成，等待用户视觉确认。
@@ -575,7 +578,7 @@
 - 页面职责：canonical route 为 `/tasks/:id/submissions`；只展示事实指标、学生 × 题目矩阵、筛选/排序和进入学生详情的精确入口，不编辑整份作答、不重复 C01、不启动批改。旧 `/upload/submissions` 只做状态感知兼容跳转。
 - 真实状态：单元格只使用后端实际数据区分已识别、识别标记、空白和缺失；没有可靠置信度字段，因此“低置信”只映射到已有 flag 并在页面解释，不伪造数值。
 - 智能筛选：学号/姓名、Q 题号、题型/题干关键词、待复核/缺失/身份异常和三种排序均使用确定性本地规则，显示解释和清空动作，不消耗 provider 额度。输入 `Q4 缺失` 的真实浏览器检查只返回两名对应学生。
-- 路由闭环：S01 `already_done`、S02 完成、工作台、历史任务和 canonical task entry 的 `submissions_ready` 全部统一到 S03。S05 完成后，矩阵单元格已改为直达 `/students/:sid/questions/:qid` 并保留矩阵筛选；学号和“查看”仍进入 S04 全题总览。
+- 路由闭环：S01 `already_done`、S02 完成、工作台、历史任务和 canonical task entry 的 `submissions_ready` 全部统一到 S03。矩阵单元格、学号、“查看”和首个待处理入口全部进入 `/students/:sid?question=:qid`；query 只负责初始定位，不再维护另一套单题页面。
 - 工程证据：visible-scope audit 扫描 `69` 个可见文件、lint、TypeScript、Vite production build（`470 modules`）与 `git diff --check` 通过。
 - 浏览器证据：`S03_submission_review_overview_1440x900.png`、`S03_submission_review_overview_390x844.png`；匿名固定 fixture 覆盖正常、flag、空白、缺失和身份待复核，控制台 `0 errors / 0 warnings`，未调用真实模型或改写用户任务。
 - 当前状态：代码、工程与浏览器验收完成，等待用户视觉确认，故保持 `[~]`。后续 S04 已完成身份修正和单学生全题总览，S05 已完成独立学生 × 题目聚焦编辑。
@@ -584,24 +587,24 @@
 
 - 详细决定与验收矩阵：`docs/20260723/S04_STUDENT_SUBMISSION_OVERVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 - Figma 组合约束：S04 没有独立 frame，严格复用 Figma 11 的标题/流程、`90px` 大号指标、平面导航、独占搜索行与低卡片密度；身份修正默认收起并与答案列表分离，没有恢复遗留长工作区或提前塞入 S05 编辑器。
-- 页面职责：canonical route 为 `/tasks/:id/students/:studentId`；只负责一个学生的身份、作答覆盖、真实异常、来源和全部题目内容。上一位/下一位与学生直选、题目定位会保留另一个维度的查询上下文。
+- 页面职责（2026-07-27 覆盖）：canonical route 为 `/tasks/:id/students/:studentId?question=:questionId`；负责一个学生的身份、覆盖指标、来源和全部题目连续校对。上一位/下一位与学生直选会回到页面顶部，题目 query、左栏和正文滚动保持同步。
 - 身份合同：owner + `submissions_ready` + busy gate + NFKC/casefold 重复学号检查 + expected revision/CAS；更换 key 保留答案/flag/来源和顺序，成功标记 `matched / manual_review`，INFO 日志不记录学号姓名。批改后修改明确拒绝，避免孤立 grade result。
 - 智能筛选：当前学生固定，支持题号/题型/题干/作答内容及已识别/flag/空白/缺失；“低置信”只映射真实 flag。输入“积分题”实测只保留 Q4，零 provider 调用。
 - route 边界：visible-scope audit 只精确放行受教师会话保护的 task review route，不开放学生 portal；`/student` 仍是未开放页，其他 student route 继续失败。
 - 工程证据：身份合同与相关活跃工作流回归 `12 passed, 2 warnings`；visible-scope audit 扫描 `70` 个可见文件、lint、TypeScript、Vite production build（`471 modules`）与 `git diff --check` 通过。
 - 浏览器证据：`S04_student_submission_overview_1440x900.png`、`S04_student_submission_overview_390x844.png`；身份改名后 URL replace、状态变为已匹配且 5 个答案保留，桌面/移动均无页面级横向溢出，干净页面控制台 `0 errors / 0 warnings`。
-- 当前状态：代码、合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。后续 S05 已实现单学生 × 单题聚焦编辑、双维智能选择和方向键切换。
+- 当前状态：已与原 S05 合并为唯一学生校对页面；旧独立总览组件已删除。代码、合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。
 
 ### 7.5 S-05 单份作答校对阶段工程记录（2026-07-24）
 
 - 详细决定与验收矩阵：`docs/20260724/S05_STUDENT_ANSWER_REVIEW_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 - Figma 约束：使用 Figma 15（文件 `64TupCQCKXkiT5uxeQY0iH`，节点 `1:1188`）的标题/流程、平面导航、全宽作答、双列上下文和底部来源层级；因 S05 位于批改前，不伪造其中的得分、AI 理由、页码或置信度。
-- 页面职责：canonical route 为 `/tasks/:id/students/:sid/questions/:qid`；只编辑当前格的识别 content/flag。学生导航置顶，题目导航在内容顶部和底部，S03/S04 入口与返回都保留来源筛选。
+- 页面职责（历史记录，2026-07-27 已覆盖）：原 `/tasks/:id/students/:sid/questions/:qid` route 已删除，不做重定向，也不再维护单题 UI。其左侧题号栏、题目搜索、键盘导航、LaTeX 浏览态和答案编辑能力均并入 S04 canonical route。
 - 智能与键盘：学生/题目分别保存 filter；完全/相关匹配明确区分；“积分题”实测 Q4 exact、Q1 related。左右切学生、上下切题目；输入/文本域/select/contenteditable/dialog 聚焦时不拦截。
 - 保存合同：owner/busy gate、expected revision、TaskStore CAS；缺失格只能为真实 task question 创建，元数据来自服务端；INFO 日志不记录学生、题目或答案内容。
 - 工程证据：S05 与活跃工作流目标回归 `7 passed, 2 warnings`；visible-scope audit 扫描 `71` 个文件、lint、TypeScript、Vite production build（`475 modules`）与 `git diff --check` 通过。
 - 浏览器证据：`S05_student_answer_review_1440x900.png`、`S05_student_answer_review_390x844.png`；桌面 `scrollWidth=1440`、页面高 `1014`，移动 `scrollWidth=390`；双维筛选、输入框键盘保护、方向键切换和真实保存通过，控制台 `0 errors / 0 warnings`，未调用真实模型。
-- 当前状态：代码、合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。下一阶段为 C02，只读汇总，不重复配置；继续前先执行用户要求的额度门禁。
+- 当前状态：能力已合并、旧 route 和组件已删除；后续只验收 S04/S05 合并后的唯一页面，不再把本节作为独立页面阶段。
 
 ### 7.6 C-02 批改前确认阶段工程记录（2026-07-24）
 

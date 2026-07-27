@@ -72,6 +72,9 @@ export function SubmissionReviewOverviewPage() {
 
   const firstAttentionStudent = selection.students.find((student) => studentNeedsAttention(student, selection.questions))
     ?? selection.students[0];
+  const firstAttentionQuestion = firstAttentionStudent
+    ? firstReviewQuestion(firstAttentionStudent, selection.questions)
+    : null;
 
   return (
     <div className="w-full max-w-[1300px]">
@@ -201,9 +204,9 @@ export function SubmissionReviewOverviewPage() {
                 {t("submissionReviewShowingQuestionsSuffix")}
               </p>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                {firstAttentionStudent ? (
+                {firstAttentionStudent && firstAttentionQuestion ? (
                   <Link
-                    to={studentPath(taskId, firstAttentionStudent.stu_id)}
+                    to={studentReviewPath(taskId, firstAttentionStudent.stu_id, firstAttentionQuestion.id, searchParams.toString())}
                     className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto"
                   >
                     {t("submissionReviewOpenStudent")}
@@ -273,11 +276,15 @@ function SubmissionMatrix({
         <tbody className="divide-y">
           {students.map((student) => {
             const answers = answerMap(student);
+            const entryQuestion = firstReviewQuestion(student, questions);
+            const entryHref = entryQuestion
+              ? studentReviewPath(taskId, student.stu_id, entryQuestion.id, returnSearch)
+              : studentPath(taskId, student.stu_id);
             return (
               <tr key={student.stu_id} className="h-[52px] bg-card transition-colors hover:bg-muted/25">
                 <td className="sticky left-0 z-10 bg-card px-5 font-semibold text-foreground">
                   <Link
-                    to={studentPath(taskId, student.stu_id)}
+                    to={entryHref}
                     className="inline-flex max-w-[130px] items-center gap-2 truncate outline-none hover:text-primary focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
                     title={student.stu_id}
                   >
@@ -294,14 +301,14 @@ function SubmissionMatrix({
                   <td key={question.id} className="px-3 text-center">
                     <AnswerStatusLink
                       answer={answers.get(question.id)}
-                      to={answerReviewPath(taskId, student.stu_id, question.id, returnSearch)}
+                      to={studentReviewPath(taskId, student.stu_id, question.id, returnSearch)}
                       t={t}
                     />
                   </td>
                 ))}
                 <td className="px-5 text-right">
                   <Link
-                    to={studentPath(taskId, student.stu_id)}
+                    to={entryHref}
                     className="text-xs font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {t("submissionReviewOpen")}
@@ -430,8 +437,15 @@ function studentPath(taskId: string, studentId: string) {
   return `/tasks/${encodeURIComponent(taskId)}/students/${encodeURIComponent(studentId)}`;
 }
 
-function answerReviewPath(taskId: string, studentId: string, questionId: string, returnSearch: string) {
-  const params = new URLSearchParams({ from: "matrix" });
+function studentReviewPath(taskId: string, studentId: string, questionId: string, returnSearch: string) {
+  const params = new URLSearchParams({ question: questionId });
   if (returnSearch) params.set("returnParams", returnSearch);
-  return `${studentPath(taskId, studentId)}/questions/${encodeURIComponent(questionId)}?${params.toString()}`;
+  return `${studentPath(taskId, studentId)}?${params.toString()}`;
+}
+
+function firstReviewQuestion(student: StudentSubmission, questions: SubmissionQuestion[]) {
+  const answers = answerMap(student);
+  return questions.find((question) => getAnswerState(answers.get(question.id)) !== "recognized")
+    ?? questions[0]
+    ?? null;
 }

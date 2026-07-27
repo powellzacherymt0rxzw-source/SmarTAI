@@ -5362,16 +5362,31 @@ def list_teacher_comments(
 @router.post("/{task_id}/kb")
 async def task_upload_kb(
     task_id: str,
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(default=None),
+    library_material_id: Optional[str] = Form(default=None),
+    save_to_library: bool = Form(default=False),
+    expected_workflow_revision: Optional[int] = Form(default=None),
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
     registry: ExpertRegistry = Depends(get_expert_registry),
+    material_store: CourseMaterialStore = Depends(get_course_material_store),
 ):
-    """Chunk + embed a reference document and add it to this task's KB index."""
+    """Attach one upload or owner-scoped library document to the task KB."""
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
     _require_task_llm_principal(t, current)
     base_workflow_revision = t.workflow_revision
+    material_id = (library_material_id or "").strip() or None
+    if (file is None) == (material_id is None):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "kb_source_required", "message": "Provide exactly one of file or library_material_id."},
+        )
+    if expected_workflow_revision is not None and expected_workflow_revision != base_workflow_revision:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "task_workflow_changed"},
+        )
 
     owner_registry = registry.for_owner(current.id)
     if owner_registry.count() == 0:
@@ -5394,28 +5409,64 @@ async def task_upload_kb(
             detail="Task-scoped KB retriever is not active on this deployment.",
         )
 
-    body = await file.read()
-    if len(body) > KB_MAX_FILE_BYTES:
-        raise HTTPException(
-            413,
-            detail=f"KB file too large ({len(body)} bytes > {KB_MAX_FILE_BYTES}).",
-        )
-
-    sha256 = hashlib.sha256(body).hexdigest()
+    saved_material: Optional[CourseMaterial] = None
+    saved_material_created = False
+    if file is not None:
+        body = await file.read()
+        if len(body) > KB_MAX_FILE_BYTES:
+            raise HTTPException(
+                413,
+                detail=f"KB file too large ({len(body)} bytes > {KB_MAX_FILE_BYTES}).",
+            )
+        filename = file.filename or "kb.txt"
+        content_type = file.content_type or "application/octet-stream"
+        sha256 = hashlib.sha256(body).hexdigest()
+        text = await kb_extract_text(filename, body)
+        source_kind = "upload"
+        if save_to_library:
+            if t.course_id is not None:
+                _validate_course_id(t.course_id, t.owner_id)
+            proposed = CourseMaterial(
+                material_id=f"material_{uuid.uuid4().hex[:12]}",
+                owner_id=t.owner_id,
+                course_id=t.course_id,
+                filename=filename,
+                category="other",
+                content_type=content_type,
+                size_bytes=len(body),
+                sha256=sha256,
+                text=text,
+                resident_bytes=len(text.encode("utf-8")),
+            )
+            try:
+                saved_material, saved_material_created = material_store.create_or_get(proposed)
+            except ResourceQuotaError as exc:
+                raise HTTPException(exc.status_code, detail={"code": exc.code}) from exc
+            material_id = saved_material.material_id
+    else:
+        material = material_store.get_for_owner(material_id or "", t.owner_id)
+        if material is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Course material not found")
+        filename = material.filename
+        sha256 = material.sha256
+        text = material.text
+        source_kind = "library"
 
     # Idempotency: same file already indexed for this task
     existing = retriever.find_doc_by_hash(task_id, sha256)
     if existing is not None:
+        if material_id is not None:
+            material_store.mark_used(material_id, t.owner_id, t.task_id)
         return {
             "status": "already_done",
             "task_id": t.task_id,
-            "doc_id": existing.doc_id,
-            "filename": existing.filename,
-            "chunk_count": existing.chunk_count,
+            **existing.public(),
+            "workflow_revision": t.workflow_revision,
+            "saved_material_id": saved_material.material_id if saved_material is not None else None,
+            "saved_material_created": saved_material_created,
         }
 
     # Extract → chunk
-    text = await kb_extract_text(file.filename or "kb.txt", body)
     chunks = chunk_text(text)
     if not chunks:
         raise HTTPException(400, detail="Document produced no usable chunks.")
@@ -5427,10 +5478,13 @@ async def task_upload_kb(
         entry = await retriever.add_document(
             task_id=task_id,
             doc_id=doc_id,
-            filename=file.filename or "kb.txt",
+            filename=filename,
             sha256=sha256,
             chunks=chunks,
             embedder=embedder,
+            source_kind=source_kind,
+            library_material_id=material_id,
+            saved_to_library=material_id is not None,
         )
     except ValueError as exc:
         # Limit exceeded / dim mismatch / embedder switch — caller-facing 4xx
@@ -5469,17 +5523,20 @@ async def task_upload_kb(
             status.HTTP_409_CONFLICT,
             detail={"code": "task_workflow_changed"},
         )
+    if material_id is not None:
+        material_store.mark_used(material_id, t.owner_id, t.task_id)
     logger.info(
-        f"[task:{task_id}] KB upload doc_id={doc_id} filename={file.filename!r} "
+        f"[task:{task_id}] KB attach doc_id={doc_id} source_kind={source_kind} "
         f"chunks={len(chunks)} embedder={embedder.name}"
     )
     return {
         "status": "started",  # synchronous in MVP, kept for symmetry with other endpoints
         "task_id": t.task_id,
-        "doc_id": doc_id,
-        "filename": entry.filename,
-        "chunk_count": entry.chunk_count,
+        **entry.public(),
         "embedder": embedder.name,
+        "workflow_revision": committed_task.workflow_revision,
+        "saved_material_id": saved_material.material_id if saved_material is not None else None,
+        "saved_material_created": saved_material_created,
     }
 
 
@@ -5503,23 +5560,45 @@ def task_list_kb(
 def task_delete_kb(
     task_id: str,
     doc_id: str,
+    expected_workflow_revision: Optional[int] = Query(default=None, ge=0),
     current: User = Depends(require_teacher),
     task_store: TaskStore = Depends(get_task_store),
+    material_store: CourseMaterialStore = Depends(get_course_material_store),
 ):
     """Remove a single KB document from this task's index."""
     t = _get_or_404(task_store, task_id)
     _check_owner(t, current)
+    if expected_workflow_revision is not None and expected_workflow_revision != t.workflow_revision:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "task_workflow_changed"})
     retriever = get_retriever()
-    removed = False
-    if isinstance(retriever, InMemoryTaskRetriever):
-        removed = retriever.remove_doc(task_id, doc_id)
+    retriever_entry = retriever.get_doc(task_id, doc_id) if isinstance(retriever, InMemoryTaskRetriever) else None
+    mirrored_entry = (t.kb_docs or {}).get(doc_id)
+    if retriever_entry is None and mirrored_entry is None:
+        raise HTTPException(404, detail=f"KB doc {doc_id} not found on task {task_id}")
 
-    if doc_id in (t.kb_docs or {}):
+    committed_task = t
+    if mirrored_entry is not None:
         new_kb_docs = dict(t.kb_docs)
         new_kb_docs.pop(doc_id, None)
-        task_store.update_workflow(task_id, kb_docs=new_kb_docs)
-        removed = True
+        committed_task = task_store.update_workflow_cas(
+            task_id,
+            expected_revision=t.workflow_revision,
+            kb_docs=new_kb_docs,
+        )
+        if committed_task is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "task_workflow_changed"})
+    if isinstance(retriever, InMemoryTaskRetriever):
+        retriever.remove_doc(task_id, doc_id)
 
-    if not removed:
-        raise HTTPException(404, detail=f"KB doc {doc_id} not found on task {task_id}")
-    return {"status": "success", "doc_id": doc_id}
+    entry_public = retriever_entry.public() if retriever_entry is not None else mirrored_entry or {}
+    material_id = entry_public.get("library_material_id")
+    remaining_docs = committed_task.kb_docs or {}
+    if material_id and not any(
+        item.get("library_material_id") == material_id for item in remaining_docs.values()
+    ):
+        material_store.unmark_used(material_id, t.owner_id, t.task_id)
+    return {
+        "status": "success",
+        "doc_id": doc_id,
+        "workflow_revision": committed_task.workflow_revision,
+    }

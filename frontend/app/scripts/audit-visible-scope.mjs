@@ -151,14 +151,15 @@ function isAllowedVisibleText(relativePath, line, rule) {
     (
       relativePath === "src/routes/tasks/AddProblemsPage.tsx"
       || relativePath === "src/routes/tasks/QuestionMaterialImportPage.tsx"
+      || relativePath === "src/routes/tasks/GradingSetupPage.tsx"
       || relativePath.startsWith("src/api/problemSources")
       || relativePath.startsWith("src/api/hooks/problemSources")
       || relativePath === "src/types/problemSources.ts"
       || (relativePath === "src/i18n/messages.ts" && /^\s*addProblems/.test(line))
     )
   ) {
-    // Q-01 and Q-08 may select real owner-scoped course-library material for
-    // the current task. They do not expose course CRUD, enrollment, or publishing.
+    // Q-01, Q-08, and grading setup may select real owner-scoped course-library
+    // material for the current task. They do not expose enrollment or publishing.
     return true;
   }
 
@@ -346,7 +347,6 @@ function auditRouter(content) {
       // RequireTeacherSession, not a student portal or student workspace.
       const isTeacherTaskReviewRoute = [
         "tasks/:taskId/students/:studentId",
-        "tasks/:taskId/students/:studentId/questions/:questionId",
         "tasks/:taskId/results/students",
         "tasks/:taskId/results/students/:studentId",
       ].includes(routePath);

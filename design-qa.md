@@ -67,4 +67,16 @@
 - Interaction regression: Q2 deep-link aligns both the card and sticky rail at `86px`; selecting a different student keeps Q2; Chinese “积分” is committed without pinyin residue and filters by an explainable alias; persisted task state keeps completed workflow links reachable.
 - No new P0/P1/P2 visual or interaction mismatch was found in this regression scope. Native Safari IME composition was addressed in code and the final-value/filter behavior was verified in the bound local browser; device-level 200% zoom and VoiceOver remain user checks.
 
+## 2026-07-27 canonical student review and C01 inline materials
+
+- Student review now has one implementation and one URL: `/tasks/:id/students/:sid?question=:qid`. The former `/questions/:qid` route and separate overview component were deleted rather than hidden behind a redirect.
+- The merged page keeps the spacious metrics and source context from the student overview while adopting the independently scrolling question rail, continuous cards, search, previous/next positioning, and keyboard behavior already proven in Q03.
+- Browse mode renders both question and student-answer LaTeX. The question is read-only in this stage; only an explicitly edited student answer exposes source text, then returns to rendered mode after save.
+- The former “识别状态与提示” textarea and normal “未发现异常” copy are absent. Exactly one compact badge beside each question communicates `已识别`, `需复核/低置信`, or `作答空/未识别`.
+- Switching students resets the document to absolute top so the current identity is visible. Reaching the document end forces the last card active, fixing the Safari case where Q3 was visible while Q2 remained highlighted.
+- C01 now keeps supplementary materials inline: a restrained single surface shows library search, local upload, the save-to-library choice, selected count, one material per row, remove action, and the course-library link. The obsolete independent materials page was removed.
+- Visual evidence: `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/20260727-grading-setup-inline-materials.png`. C01 has no dedicated Figma frame, so the comparison uses the locked density/hierarchy constraints from Figma 08, 12, and 17 rather than inventing a new visual language.
+- Console evidence for the C01 browser state: 0 errors / 0 warnings. Temporary task and fake local provider created only for layout verification were deleted before commit.
+- Engineering evidence: visible-scope audit and TypeScript passed; Vite production build passed; task-KB/RAG regression `16 passed`; combined C01/course-material/S04/S05/Q02-Q03 regression `41 passed`.
+
 final result: passed

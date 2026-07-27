@@ -31,9 +31,6 @@ const FinalResultsWorkspacePage = React.lazy(() =>
 const TaskEntryRedirect = React.lazy(() =>
   import("@/routes/tasks/TaskEntryRedirect").then((module) => ({ default: module.TaskEntryRedirect })),
 );
-const TaskMaterialsPage = React.lazy(() =>
-  import("@/routes/tasks/TaskMaterialsPage").then((module) => ({ default: module.TaskMaterialsPage })),
-);
 const AddProblemsPage = React.lazy(() =>
   import("@/routes/tasks/AddProblemsPage").then((module) => ({ default: module.AddProblemsPage })),
 );
@@ -45,9 +42,6 @@ const SubmissionRecognitionProgressPage = React.lazy(() =>
 );
 const SubmissionReviewOverviewPage = React.lazy(() =>
   import("@/routes/tasks/SubmissionReviewOverviewPage").then((module) => ({ default: module.SubmissionReviewOverviewPage })),
-);
-const StudentSubmissionOverviewPage = React.lazy(() =>
-  import("@/routes/tasks/StudentSubmissionOverviewPage").then((module) => ({ default: module.StudentSubmissionOverviewPage })),
 );
 const StudentAnswerReviewPage = React.lazy(() =>
   import("@/routes/tasks/StudentAnswerReviewPage").then((module) => ({ default: module.StudentAnswerReviewPage })),
@@ -126,13 +120,11 @@ const router = createBrowserRouter([
       { path: "tasks/:taskId/edit", element: routeElement(<NewTaskPage />) },
       { path: "tasks/:taskId", element: routeElement(<TaskEntryRedirect />) },
       { path: "tasks/:taskId/setup", element: routeElement(<TaskEntryRedirect />) },
-      { path: "tasks/:taskId/materials", element: routeElement(<TaskMaterialsPage />) },
       { path: "tasks/:taskId/upload/problems", element: routeElement(<AddProblemsPage />) },
       { path: "tasks/:taskId/submissions/upload", element: routeElement(<AddSubmissionsPage />) },
       { path: "tasks/:taskId/submissions/progress", element: routeElement(<SubmissionRecognitionProgressPage />) },
       { path: "tasks/:taskId/submissions", element: routeElement(<SubmissionReviewOverviewPage />) },
-      { path: "tasks/:taskId/students/:studentId", element: routeElement(<StudentSubmissionOverviewPage />) },
-      { path: "tasks/:taskId/students/:studentId/questions/:questionId", element: routeElement(<StudentAnswerReviewPage />) },
+      { path: "tasks/:taskId/students/:studentId", element: routeElement(<StudentAnswerReviewPage />) },
       { path: "tasks/:taskId/upload/submissions", element: routeElement(<TaskEntryRedirect />) },
       { path: "tasks/:taskId/upload/:kind", element: routeElement(<TaskEntryRedirect />) },
       { path: "tasks/:taskId/problems/progress", element: routeElement(<ProblemRecognitionProgressPage />) },
