@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, List, Search, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   effectiveCorrectionScore,
@@ -20,6 +20,7 @@ import {
   type ReviewSearchItem,
   type ReviewSearchMatch,
 } from "@/lib/reviewDetail";
+import { ResultQuestionSidebar, type ResultQuestionState } from "@/routes/tasks/results/ResultQuestionSidebar";
 import type { Correction } from "@/types";
 
 /** A05: read-only formal-result detail with independent student and question dimensions. */
@@ -44,13 +45,15 @@ export function StudentAnalysisDetail({ locale, taskId, studentId, model }: { lo
   const nextQuestion = questionIndex >= 0 && questionIndex < questionMatches.length - 1 ? questionMatches[questionIndex + 1]?.item : null;
   const studentsRoot = `/tasks/${encodeURIComponent(taskId)}/results/students`;
   const listHref = returnQuery ? `${studentsRoot}?${returnQuery}` : studentsRoot;
+  const [activeQuestionId, setActiveQuestionId] = useState(selectedQuestionId === "all" ? visibleQuestions[0]?.id ?? null : selectedQuestionId);
 
-  const buildHref = useCallback((nextStudentId: string, nextQuestionId: string) => {
+  const buildHref = useCallback((nextStudentId: string, nextQuestionId: string, includeQuestionHash = true) => {
     const next = new URLSearchParams(searchParams);
     if (nextQuestionId === "all") next.delete("question");
     else next.set("question", nextQuestionId);
     const serialized = next.toString();
-    return `${studentsRoot}/${encodeURIComponent(nextStudentId)}${serialized ? `?${serialized}` : ""}${nextQuestionId === "all" ? "" : `#question-${encodeURIComponent(nextQuestionId)}`}`;
+    const hash = includeQuestionHash && nextQuestionId !== "all" ? `#question-${encodeURIComponent(nextQuestionId)}` : "";
+    return `${studentsRoot}/${encodeURIComponent(nextStudentId)}${serialized ? `?${serialized}` : ""}${hash}`;
   }, [searchParams, studentsRoot]);
 
   const setFilter = (key: "student_q" | "question_q", value: string) => {
@@ -61,16 +64,52 @@ export function StudentAnalysisDetail({ locale, taskId, studentId, model }: { lo
   };
 
   const goTo = useCallback((nextStudentId: string, nextQuestionId: string) => navigate(buildHref(nextStudentId, nextQuestionId)), [buildHref, navigate]);
+  const goToStudent = useCallback((nextStudentId: string) => navigate(buildHref(nextStudentId, selectedQuestionId, false)), [buildHref, navigate, selectedQuestionId]);
+
+  const scrollToQuestion = useCallback((nextQuestionId: string) => {
+    setActiveQuestionId(nextQuestionId);
+    document.getElementById(`question-${nextQuestionId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  useEffect(() => {
+    if (!allQuestions) {
+      setActiveQuestionId(selectedQuestionId);
+      return;
+    }
+    if (!visibleQuestions.some((item) => item.id === activeQuestionId)) {
+      setActiveQuestionId(visibleQuestions[0]?.id ?? null);
+    }
+  }, [activeQuestionId, allQuestions, selectedQuestionId, visibleQuestions]);
+
+  useEffect(() => {
+    if (!allQuestions || !visibleQuestions.length) return undefined;
+    const syncActiveQuestion = () => {
+      const atDocumentEnd = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 8;
+      if (atDocumentEnd) {
+        setActiveQuestionId(visibleQuestions[visibleQuestions.length - 1].id);
+        return;
+      }
+      let activeId = visibleQuestions[0].id;
+      for (const item of visibleQuestions) {
+        const element = document.getElementById(`question-${item.id}`);
+        if (element && element.getBoundingClientRect().top <= 112) activeId = item.id;
+      }
+      setActiveQuestionId(activeId);
+    };
+    syncActiveQuestion();
+    window.addEventListener("scroll", syncActiveQuestion, { passive: true });
+    return () => window.removeEventListener("scroll", syncActiveQuestion);
+  }, [allQuestions, visibleQuestions]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) return;
       if (event.key === "ArrowLeft" && previousStudent) {
         event.preventDefault();
-        goTo(previousStudent.id, selectedQuestionId);
+        goToStudent(previousStudent.id);
       } else if (event.key === "ArrowRight" && nextStudent) {
         event.preventDefault();
-        goTo(nextStudent.id, selectedQuestionId);
+        goToStudent(nextStudent.id);
       } else if (!allQuestions && event.key === "ArrowUp" && previousQuestion) {
         event.preventDefault();
         goTo(studentId, previousQuestion.id);
@@ -81,7 +120,7 @@ export function StudentAnalysisDetail({ locale, taskId, studentId, model }: { lo
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [allQuestions, goTo, nextQuestion, nextStudent, previousQuestion, previousStudent, selectedQuestionId, studentId]);
+  }, [allQuestions, goTo, goToStudent, nextQuestion, nextStudent, previousQuestion, previousStudent, selectedQuestionId, studentId]);
 
   if (!student) {
     return <DetailState locale={locale} title={tx(locale, `当前正式结果中没有学生 ${studentId}。`, `Student ${studentId} is not present in this formal result.`)} href={listHref} />;
@@ -102,7 +141,7 @@ export function StudentAnalysisDetail({ locale, taskId, studentId, model }: { lo
           <h2 className="mt-2 text-[22px] font-bold tracking-[-0.01em] text-foreground">{student.name}</h2>
           <p className="mt-1 text-[12px] text-muted-foreground">{student.id} · {allQuestions ? tx(locale, "全部题目长视图", "All-questions view") : question?.label}</p>
         </div>
-        <StudentStepButtons locale={locale} previous={previousStudent} next={nextStudent} onSelect={(id) => goTo(id, selectedQuestionId)} />
+        <StudentStepButtons locale={locale} previous={previousStudent} next={nextStudent} onSelect={goToStudent} />
       </div>
 
       <DimensionBar
@@ -116,25 +155,19 @@ export function StudentAnalysisDetail({ locale, taskId, studentId, model }: { lo
         previous={previousStudent}
         next={nextStudent}
         onQuery={(value) => setFilter("student_q", value)}
-        onSelect={(id) => goTo(id, selectedQuestionId)}
+        onSelect={goToStudent}
       />
-      <DimensionBar
-        className="mt-2.5"
+      <QuestionFilterBar
         locale={locale}
-        dimension="question"
         value={questionQuery}
-        current={question ? questionSearchItems([question])[0] : null}
         matches={questionMatches}
-        allItems={questionSearchItems(model.questions)}
-        previous={previousQuestion}
-        next={nextQuestion}
-        allMode={allQuestions}
         onQuery={(value) => setFilter("question_q", value)}
         onSelect={(id) => goTo(student.id, id)}
-        onAll={() => goTo(student.id, "all")}
+        onShowAll={() => goTo(student.id, "all")}
+        showingAll={allQuestions}
       />
 
-      <p className="mt-2 text-[10px] text-muted-foreground">{tx(locale, "快捷键：←/→ 切换学生，单题模式下 ↑/↓ 切换题目；两行筛选互不修改另一维。", "Shortcuts: ←/→ switch students; ↑/↓ switch questions in focused mode. Each filter leaves the other dimension unchanged.")}</p>
+      <p className="mt-2 text-[10px] text-muted-foreground">{tx(locale, "学生与题目筛选互不影响。输入框聚焦时方向键只编辑文本；退出后 ←/→ 切换学生，单题模式下 ↑/↓ 切换题目。", "Student and question filters stay independent. Arrow keys edit text while focused; after leaving, ←/→ switch students and ↑/↓ switch questions in focused mode.")}</p>
 
       <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-6">
         <DetailMetric label={tx(locale, "总分", "Total score")} value={`${formatScore(student.totalScore)} / ${formatScore(student.totalMax)}`} tone="primary" />
@@ -145,11 +178,76 @@ export function StudentAnalysisDetail({ locale, taskId, studentId, model }: { lo
         <DetailMetric label={tx(locale, "仍待确认", "Pending confirmation")} value={String(pendingReviewCount)} tone="danger" />
       </div>
 
-      {allQuestions ? (
-        <AllQuestionsView locale={locale} taskId={taskId} student={student} questions={visibleQuestions} validCorrectionCount={validCorrectionCount} studentReturn={studentReturn} onFocus={(id) => goTo(student.id, id)} />
-      ) : question ? (
-        <FocusedQuestionView locale={locale} taskId={taskId} student={student} question={question} studentReturn={studentReturn} previous={previousQuestion} next={nextQuestion} onSelect={(id) => goTo(student.id, id)} />
-      ) : null}
+      <div className="mt-5 grid items-start gap-4 lg:grid-cols-[132px_minmax(0,1fr)]">
+        <ResultQuestionSidebar
+          locale={locale}
+          questions={visibleQuestions}
+          activeId={activeQuestionId}
+          onSelect={allQuestions ? scrollToQuestion : (id) => goTo(student.id, id)}
+          stateForQuestion={(item) => questionStateForStudent(student, item.id)}
+        />
+        <div className="min-w-0">
+          {allQuestions ? (
+            <AllQuestionsView locale={locale} taskId={taskId} student={student} questions={visibleQuestions} validCorrectionCount={validCorrectionCount} studentReturn={studentReturn} onFocus={(id) => goTo(student.id, id)} />
+          ) : question ? (
+            <FocusedQuestionView locale={locale} taskId={taskId} student={student} question={question} studentReturn={studentReturn} previous={previousQuestion} next={nextQuestion} onSelect={(id) => goTo(student.id, id)} />
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function QuestionFilterBar({ locale, value, matches, showingAll, onQuery, onSelect, onShowAll }: {
+  locale: Locale;
+  value: string;
+  matches: ReviewSearchMatch[];
+  showingAll: boolean;
+  onQuery: (value: string) => void;
+  onSelect: (id: string) => void;
+  onShowAll: () => void;
+}) {
+  const [draftValue, setDraftValue] = useState(value);
+  const [open, setOpen] = useState(false);
+  const composingRef = useRef(false);
+
+  useEffect(() => {
+    if (!composingRef.current) setDraftValue(value);
+  }, [value]);
+
+  return (
+    <section className="relative mt-2.5 rounded-[9px] border bg-background p-2.5" aria-label={tx(locale, "题目筛选", "Question filter")}>
+      <div className="flex gap-2">
+        <label className="relative min-w-0 flex-1">
+          <span className="sr-only">{tx(locale, "搜索题目", "Search questions")}</span>
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={draftValue}
+            inputMode="search"
+            onFocus={() => setOpen(true)}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={(event) => {
+              composingRef.current = false;
+              const nextValue = event.currentTarget.value;
+              setDraftValue(nextValue);
+              window.setTimeout(() => onQuery(nextValue), 0);
+            }}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              setDraftValue(nextValue);
+              if (!composingRef.current) onQuery(nextValue);
+              setOpen(true);
+            }}
+            onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+            placeholder={tx(locale, "输入题号、题型、题干，或“积分题”", "Number, type, stem, or “integration”")}
+            className="h-10 w-full rounded-[8px] border bg-card pl-10 pr-10 text-xs text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+          />
+          {draftValue ? <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraftValue(""); onQuery(""); setOpen(false); }} aria-label={tx(locale, "清空题目筛选", "Clear question filter")} className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><X aria-hidden="true" className="h-3.5 w-3.5" /></button> : null}
+          {open && draftValue.trim() && draftValue === value ? <SearchResults locale={locale} matches={matches} onSelect={(id) => { onSelect(id); setOpen(false); }} /> : null}
+        </label>
+        {!showingAll ? <button type="button" onClick={onShowAll} className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-[8px] border bg-card px-3 text-xs font-semibold text-foreground hover:bg-muted"><List aria-hidden="true" className="h-4 w-4" />{tx(locale, "全部题目", "All questions")}</button> : null}
+      </div>
+      <p className="mt-2 px-1 text-[10px] leading-4 text-muted-foreground">{tx(locale, "搜索只筛选题目，当前学生保持不变；输入中文时在选词完成后应用。", "Search filters questions only and keeps the current student; IME text is applied after composition.")}</p>
     </section>
   );
 }
@@ -170,16 +268,43 @@ function DimensionBar({ className, locale, dimension, value, current, matches, a
   onAll?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [draftValue, setDraftValue] = useState(value);
+  const composingRef = useRef(false);
   const isStudent = dimension === "student";
+
+  useEffect(() => {
+    if (!composingRef.current) setDraftValue(value);
+  }, [value]);
+
   return (
     <section className={cn("relative grid gap-2 rounded-[9px] border bg-background px-3 py-2 md:grid-cols-[96px_150px_minmax(170px,1fr)_180px_96px] md:items-center", className)} aria-label={isStudent ? tx(locale, "学生导航", "Student navigation") : tx(locale, "题目导航", "Question navigation")}>
       <NavButton disabled={!previous || allMode} onClick={() => previous && onSelect(previous.id)} icon={isStudent ? ArrowLeft : ArrowUp} label={isStudent ? tx(locale, "上一位", "Previous") : tx(locale, "上一题", "Previous Q")} shortcut={isStudent ? "←" : "↑"} />
       <div className="min-w-0 px-2 text-center"><p className="truncate text-[12px] font-bold text-foreground">{allMode ? tx(locale, "全部题目", "All questions") : current?.primary ?? "—"}</p><p className="truncate text-[10px] text-muted-foreground">{allMode ? tx(locale, "学生保持不变", "Student stays fixed") : current?.secondary}</p></div>
       <div className="relative">
         <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input value={value} onFocus={() => setOpen(true)} onChange={(event) => { onQuery(event.target.value); setOpen(true); }} onBlur={() => window.setTimeout(() => setOpen(false), 120)} placeholder={isStudent ? tx(locale, "输入姓名、学号或“低置信”", "Name, ID, or low confidence") : tx(locale, "输入题号、题型、题干或“积分题”", "Number, type, stem, or integration")} className="h-8 w-full rounded-[7px] border bg-card pl-9 pr-8 text-[11px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
-        {value ? <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { onQuery(""); setOpen(false); }} aria-label={tx(locale, "清空当前维度筛选", "Clear this dimension filter")} className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><X aria-hidden="true" className="h-3.5 w-3.5" /></button> : null}
-        {open && value.trim() ? <SearchResults locale={locale} matches={matches} onSelect={(id) => { onSelect(id); setOpen(false); }} /> : null}
+        <input
+          value={draftValue}
+          inputMode="search"
+          onFocus={() => setOpen(true)}
+          onCompositionStart={() => { composingRef.current = true; }}
+          onCompositionEnd={(event) => {
+            composingRef.current = false;
+            const nextValue = event.currentTarget.value;
+            setDraftValue(nextValue);
+            window.setTimeout(() => onQuery(nextValue), 0);
+          }}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            setDraftValue(nextValue);
+            if (!composingRef.current) onQuery(nextValue);
+            setOpen(true);
+          }}
+          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+          placeholder={isStudent ? tx(locale, "输入姓名、学号或“低置信”", "Name, ID, or low confidence") : tx(locale, "输入题号、题型、题干或“积分题”", "Number, type, stem, or integration")}
+          className="h-8 w-full rounded-[7px] border bg-card pl-9 pr-8 text-[11px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+        />
+        {draftValue ? <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraftValue(""); onQuery(""); setOpen(false); }} aria-label={tx(locale, "清空当前维度筛选", "Clear this dimension filter")} className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><X aria-hidden="true" className="h-3.5 w-3.5" /></button> : null}
+        {open && draftValue.trim() && draftValue === value ? <SearchResults locale={locale} matches={matches} onSelect={(id) => { onSelect(id); setOpen(false); }} /> : null}
       </div>
       <select value={allMode ? "all" : current?.id ?? ""} onChange={(event) => event.target.value === "all" ? onAll?.() : onSelect(event.target.value)} aria-label={isStudent ? tx(locale, "直接选择学生", "Select student directly") : tx(locale, "直接选择题目", "Select question directly")} className="h-8 w-full rounded-[7px] border bg-card px-2 text-[11px] font-semibold text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15">
         {!isStudent ? <option value="all">{tx(locale, "全部题目长视图", "All-questions view")}</option> : null}
@@ -196,7 +321,7 @@ function SearchResults({ locale, matches, onSelect }: { locale: Locale; matches:
 
 function AllQuestionsView({ locale, taskId, student, questions, validCorrectionCount, studentReturn, onFocus }: { locale: Locale; taskId: string; student: StudentSummary; questions: QuestionSummary[]; validCorrectionCount: number; studentReturn: string; onFocus: (id: string) => void }) {
   return (
-    <section className="mt-5" aria-labelledby="student-all-questions-title">
+    <section aria-labelledby="student-all-questions-title">
       <div className="flex flex-wrap items-end justify-between gap-3"><div><h3 id="student-all-questions-title" className="text-[16px] font-bold text-foreground">{tx(locale, "全部题目", "All questions")}</h3><p className="mt-1 text-[11px] text-muted-foreground">{tx(locale, "长滚动视图保留每道题的答案与最终结果；可筛选后只看匹配题。", "The long view keeps each answer and final result; filter to narrow the questions.")}</p></div><span className="text-[11px] text-muted-foreground">{tx(locale, `${questions.length} 道筛选结果 · ${validCorrectionCount} 道可计算得分率`, `${questions.length} filtered · ${validCorrectionCount} with comparable rates`)}</span></div>
       {questions.length ? <div className="mt-3 grid gap-3">{questions.map((question) => <QuestionResultCard key={question.id} locale={locale} taskId={taskId} student={student} question={question} studentReturn={studentReturn} compact onFocus={() => onFocus(question.id)} />)}</div> : <PanelEmpty locale={locale} text={tx(locale, "当前题目筛选没有结果；清空题目筛选即可恢复。", "No questions match this filter; clear the question filter to restore all.")} />}
     </section>
@@ -205,7 +330,7 @@ function AllQuestionsView({ locale, taskId, student, questions, validCorrectionC
 
 function FocusedQuestionView({ locale, taskId, student, question, studentReturn, previous, next, onSelect }: { locale: Locale; taskId: string; student: StudentSummary; question: QuestionSummary; studentReturn: string; previous: ReviewSearchItem | null; next: ReviewSearchItem | null; onSelect: (id: string) => void }) {
   return (
-    <section className="mt-5" aria-labelledby="student-focused-question-title">
+    <section aria-labelledby="student-focused-question-title">
       <div className="flex flex-wrap items-end justify-between gap-3"><div><h3 id="student-focused-question-title" className="text-[16px] font-bold text-foreground">{tx(locale, "单题聚焦", "Focused question")}</h3><p className="mt-1 text-[11px] text-muted-foreground">{tx(locale, "学生保持不变；题目筛选、选择和上下键只改变题目维度。", "The student stays fixed; question search, selection, and ↑/↓ change only the question dimension.")}</p></div><QuestionStepButtons locale={locale} previous={previous} next={next} onSelect={onSelect} /></div>
       <div className="mt-3"><QuestionResultCard locale={locale} taskId={taskId} student={student} question={question} studentReturn={studentReturn} /></div>
       <div className="mt-3 flex justify-end"><QuestionStepButtons locale={locale} previous={previous} next={next} onSelect={onSelect} /></div>
@@ -285,6 +410,13 @@ function questionDetailHref(taskId: string, studentId: string, questionId: strin
 function correctionNeedsFormalReview(correction: Correction): boolean {
   const confidence = normalizeConfidence(correction.confidence);
   return (confidence !== null && confidence < 0.65) || correction.requires_human_review || correction.review_reasons?.some((reason) => reason === "high_indecisiveness" || reason === "score_spread_high") || correction.synthesis_method === "all_failed" || correction.synthesis_method === "quota_exhausted" || correctionHasDisagreement(correction);
+}
+
+function questionStateForStudent(student: StudentSummary, questionId: string): ResultQuestionState {
+  const correction = student.corrections.find((item) => item.q_id === questionId);
+  if (!correction) return "muted";
+  if (correction.review_status === "confirmed") return "ready";
+  return correctionNeedsFormalReview(correction) ? "warning" : "ready";
 }
 
 function correctionHasDisagreement(correction: Correction): boolean {

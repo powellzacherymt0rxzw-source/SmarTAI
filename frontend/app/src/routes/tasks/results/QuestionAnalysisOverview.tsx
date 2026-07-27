@@ -1,5 +1,5 @@
 import { ArrowRight, Search, X } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   clampPercent,
@@ -66,6 +66,8 @@ export function QuestionAnalysisOverview({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q") ?? "";
+  const [draftQuery, setDraftQuery] = useState(query);
+  const composingRef = useRef(false);
   const typeFilter = searchParams.get("type") ?? "all";
   const scoreFilter = normalizeScoreFilter(searchParams.get("score"));
   const confidenceFilter = normalizeConfidenceFilter(searchParams.get("confidence"));
@@ -106,6 +108,10 @@ export function QuestionAnalysisOverview({
     setSearchParams(next, { replace: true });
   };
 
+  useEffect(() => {
+    if (!composingRef.current) setDraftQuery(query);
+  }, [query]);
+
   const removeSemanticCondition = (condition: SemanticCondition) => {
     const start = query.toLocaleLowerCase().indexOf(condition.source.toLocaleLowerCase());
     if (start < 0) return;
@@ -134,14 +140,26 @@ export function QuestionAnalysisOverview({
           <label className="relative block">
             <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
-              value={query}
-              onChange={(event) => updateParam("q", event.target.value, "")}
+              value={draftQuery}
+              inputMode="search"
+              onCompositionStart={() => { composingRef.current = true; }}
+              onCompositionEnd={(event) => {
+                composingRef.current = false;
+                const value = event.currentTarget.value;
+                setDraftQuery(value);
+                window.setTimeout(() => updateParam("q", value, ""), 0);
+              }}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDraftQuery(value);
+                if (!composingRef.current) updateParam("q", value, "");
+              }}
               placeholder={tx(locale, "例如：计算题 得分率低于 70% 低置信 已复核 Q3", "Example: calculation below 70% low confidence reviewed Q3")}
               aria-label={tx(locale, "自然语言筛选题目", "Filter questions with natural language")}
               className="h-11 w-full rounded-[9px] border bg-background pl-10 pr-10 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
             />
-            {query ? (
-              <button type="button" onClick={() => updateParam("q", "", "")} aria-label={tx(locale, "清除自然语言筛选", "Clear natural-language filter")} className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground">
+            {draftQuery ? (
+              <button type="button" onClick={() => { setDraftQuery(""); updateParam("q", "", ""); }} aria-label={tx(locale, "清除自然语言筛选", "Clear natural-language filter")} className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground">
                 <X aria-hidden="true" className="h-4 w-4" />
               </button>
             ) : null}

@@ -1,5 +1,5 @@
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Search, UserRound } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Search, UserRound, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   effectiveCorrectionScore,
@@ -13,12 +13,9 @@ import {
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
+import { matchReviewItems, questionSearchItems } from "@/lib/reviewDetail";
+import { ResultQuestionSidebar } from "@/routes/tasks/results/ResultQuestionSidebar";
 import type { Correction, ProblemInfo } from "@/types";
-
-interface QuestionSearchMatch {
-  question: QuestionSummary;
-  exact: boolean;
-}
 
 interface CountedSignal {
   label: string;
@@ -44,12 +41,12 @@ export function QuestionAnalysisDetail({
   model: ResultsModel;
 }) {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const [query, setQuery] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const query = searchParams.get("question_q") ?? "";
+  const [draftQuery, setDraftQuery] = useState(query);
+  const composingRef = useRef(false);
   const questionIndex = model.questions.findIndex((item) => item.id === questionId);
   const question = questionIndex >= 0 ? model.questions[questionIndex] : null;
-  const previous = questionIndex > 0 ? model.questions[questionIndex - 1] : null;
-  const next = questionIndex >= 0 && questionIndex < model.questions.length - 1 ? model.questions[questionIndex + 1] : null;
   const root = `/tasks/${encodeURIComponent(taskId)}/results/questions`;
   const returnQuery = searchParams.get("return") ?? "";
   const studentContext = searchParams.get("student") ?? "";
@@ -59,9 +56,27 @@ export function QuestionAnalysisDetail({
   if (returnQuery) detailParams.set("return", returnQuery);
   if (studentContext) detailParams.set("student", studentContext);
   if (studentReturnQuery) detailParams.set("student_return", studentReturnQuery);
+  if (query) detailParams.set("question_q", query);
   const detailReturnSuffix = detailParams.size ? `?${detailParams.toString()}` : "";
   const studentContextHref = studentContext ? buildStudentContextHref(taskId, studentContext, questionId, studentReturnQuery) : "";
-  const matches = useMemo(() => findQuestionMatches(query, model.questions), [model.questions, query]);
+  const matches = useMemo(() => matchReviewItems(questionSearchItems(model.questions), query), [model.questions, query]);
+  const visibleQuestions = useMemo(() => matches
+    .map((match) => model.questions.find((item) => item.id === match.item.id))
+    .filter((item): item is QuestionSummary => Boolean(item)), [matches, model.questions]);
+  const filteredQuestionIndex = visibleQuestions.findIndex((item) => item.id === questionId);
+  const previous = filteredQuestionIndex > 0 ? visibleQuestions[filteredQuestionIndex - 1] : null;
+  const next = filteredQuestionIndex >= 0 && filteredQuestionIndex < visibleQuestions.length - 1 ? visibleQuestions[filteredQuestionIndex + 1] : null;
+
+  useEffect(() => {
+    if (!composingRef.current) setDraftQuery(query);
+  }, [query]);
+
+  const updateQuery = (value: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (value.trim()) nextParams.set("question_q", value);
+    else nextParams.delete("question_q");
+    setSearchParams(nextParams, { replace: true });
+  };
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -97,9 +112,9 @@ export function QuestionAnalysisDetail({
   const studentPreview = [...question.entries]
     .sort((left, right) => entryPercent(left) - entryPercent(right) || left.student.name.localeCompare(right.student.name, locale === "en-US" ? "en" : "zh-Hans-CN"))
     .slice(0, 5);
+  const showTestMaterials = isProgrammingProblem(question.problem);
 
   const goToQuestion = (targetId: string) => {
-    setQuery("");
     navigate(`${root}/${encodeURIComponent(targetId)}${detailReturnSuffix}`);
   };
 
@@ -118,49 +133,63 @@ export function QuestionAnalysisDetail({
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">{question.type || "—"}</span>
           </div>
           <p className="mt-1 text-[12px] text-muted-foreground">
-            {tx(locale, `筛选结果中的第 ${questionIndex + 1} / ${model.questions.length} 题`, `Question ${questionIndex + 1} of ${model.questions.length}`)}
+            {filteredQuestionIndex >= 0
+              ? tx(locale, `筛选结果中的第 ${filteredQuestionIndex + 1} / ${visibleQuestions.length} 题`, `Question ${filteredQuestionIndex + 1} of ${visibleQuestions.length}`)
+              : tx(locale, `当前题目 · 共 ${model.questions.length} 题`, `Current question · ${model.questions.length} total`)}
           </p>
         </div>
         <QuestionStepButtons locale={locale} previous={previous} next={next} onSelect={goToQuestion} />
       </div>
 
-      <div className="mt-4 grid gap-2 lg:grid-cols-[minmax(0,1fr)_220px]">
-        <div className="relative">
-          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-[13px] h-4 w-4 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={tx(locale, "输入题号、题干、题型或知识点，例如“积分题”", "Search number, stem, type, or knowledge point")}
-            aria-label={tx(locale, "智能查找题目", "Find a question")}
-            className="h-10 w-full rounded-[8px] border bg-background pl-10 pr-3 text-[12px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-          />
-          {query ? (
-            <div className="mt-2 overflow-hidden rounded-[8px] border bg-background shadow-sm">
-              {matches.length ? matches.slice(0, 6).map((match) => (
-                <button key={match.question.id} type="button" onClick={() => goToQuestion(match.question.id)} className="flex w-full items-center gap-3 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted">
-                  <span className="min-w-12 text-[12px] font-bold text-foreground">{match.question.label}</span>
-                  <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", match.exact ? "bg-emerald-100 text-emerald-700" : "bg-blue-50 text-primary")}>{match.exact ? tx(locale, "完全匹配", "Exact") : tx(locale, "相关匹配", "Related")}</span>
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{match.question.stem || match.question.type || "—"}</span>
-                </button>
-              )) : (
-                <p className="px-3 py-4 text-center text-[11px] text-muted-foreground">{tx(locale, "没有匹配题目；可清空后直接选择。", "No question matched; clear the search to select directly.")}</p>
-              )}
-            </div>
-          ) : null}
-        </div>
-        <label>
-          <span className="sr-only">{tx(locale, "直接选择题目", "Select question directly")}</span>
-          <select value={question.id} onChange={(event) => goToQuestion(event.target.value)} className="h-10 w-full rounded-[8px] border bg-background px-3 text-[12px] font-semibold text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15">
-            {model.questions.map((item) => <option key={item.id} value={item.id}>{item.label} · {item.type || tx(locale, "未标题型", "Unlabelled type")}</option>)}
-          </select>
-        </label>
+      <div className="relative mt-4">
+        <Search aria-hidden="true" className="pointer-events-none absolute left-4 top-4 h-4 w-4 text-muted-foreground" />
+        <input
+          value={draftQuery}
+          inputMode="search"
+          onCompositionStart={() => { composingRef.current = true; }}
+          onCompositionEnd={(event) => {
+            composingRef.current = false;
+            const value = event.currentTarget.value;
+            setDraftQuery(value);
+            window.setTimeout(() => updateQuery(value), 0);
+          }}
+          onChange={(event) => {
+            const value = event.target.value;
+            setDraftQuery(value);
+            if (!composingRef.current) updateQuery(value);
+          }}
+          placeholder={tx(locale, "输入题号、题干、题型或知识点，例如“积分题”", "Search number, stem, type, or knowledge point")}
+          aria-label={tx(locale, "智能查找题目", "Find a question")}
+          className="h-12 w-full rounded-[10px] border bg-background pl-11 pr-11 text-[13px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+        />
+        {draftQuery ? <button type="button" onClick={() => { setDraftQuery(""); updateQuery(""); }} aria-label={tx(locale, "清空题目筛选", "Clear question filter")} className="absolute right-2.5 top-2.5 inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><X aria-hidden="true" className="h-4 w-4" /></button> : null}
+        {query && draftQuery === query ? (
+          <div className="absolute left-0 right-0 top-[52px] z-30 max-h-64 overflow-y-auto rounded-[8px] border bg-card p-1.5 shadow-lg">
+            {matches.length ? matches.slice(0, 10).map((match) => (
+              <button key={match.item.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => goToQuestion(match.item.id)} className="flex w-full items-center gap-3 rounded-[6px] px-3 py-2 text-left hover:bg-muted">
+                <span className="min-w-14 text-[12px] font-bold text-foreground">{match.item.primary}</span>
+                <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", match.kind === "exact" ? "bg-emerald-100 text-emerald-700" : "bg-blue-50 text-primary")}>{match.kind === "exact" ? tx(locale, "完全匹配", "Exact") : tx(locale, "相关匹配", "Related")}</span>
+                <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{match.item.secondary || "—"}</span>
+              </button>
+            )) : <p className="px-3 py-5 text-center text-[11px] text-muted-foreground">{tx(locale, "没有匹配题目；清空筛选即可恢复全部。", "No question matched; clear the filter to restore all questions.")}</p>}
+          </div>
+        ) : null}
       </div>
 
       <p className="mt-2 text-[10px] text-muted-foreground">
-        {tx(locale, "快捷键：↑ 上一题，↓ 下一题；输入框聚焦时不会触发切换。", "Shortcuts: ↑ previous question, ↓ next question; shortcuts pause while typing.")}
+        {tx(locale, "搜索只筛选题目；输入中文时在选词完成后应用。输入框聚焦时方向键只编辑文本，退出后 ↑/↓ 切换题目。", "Search filters questions only and waits for IME composition. Arrow keys edit text while focused; after leaving, ↑/↓ switch questions.")}
       </p>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-6">
+      <div className="mt-4 grid items-start gap-4 lg:grid-cols-[132px_minmax(0,1fr)]">
+        <ResultQuestionSidebar
+          locale={locale}
+          questions={visibleQuestions}
+          activeId={question.id}
+          onSelect={goToQuestion}
+          stateForQuestion={(item) => item.reviewCount > 0 ? "warning" : "ready"}
+        />
+        <div className="min-w-0">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
         <DetailMetric label={tx(locale, "作答人数", "Responses")} value={String(question.count)} tone="primary" />
         <DetailMetric label={tx(locale, "平均分", "Mean")} value={`${formatScore(question.avgScore)} / ${formatScore(question.maxScore)}`} tone="accent" />
         <DetailMetric label={tx(locale, "中位数", "Median")} value={formatScore(metrics.median)} tone="primary" />
@@ -179,9 +208,11 @@ export function QuestionAnalysisDetail({
         <MaterialPanel title={tx(locale, "标答 / 参考答案", "Reference answer")} source={fieldSource(question.problem, "reference_answer", locale)}>
           {question.problem?.reference_answer ? <MarkdownMath className="text-[13px] leading-6 text-foreground">{question.problem.reference_answer}</MarkdownMath> : <MissingText locale={locale} />}
         </MaterialPanel>
-        <MaterialPanel title={tx(locale, "代码 / 测试资料", "Code / test materials")} source={fieldSource(question.problem, "test_cases", locale)}>
-          <TestMaterialSummary locale={locale} problem={question.problem} />
-        </MaterialPanel>
+        {showTestMaterials ? (
+          <MaterialPanel title={tx(locale, "代码 / 测试资料", "Code / test materials")} source={fieldSource(question.problem, "test_cases", locale)}>
+            <TestMaterialSummary locale={locale} problem={question.problem} />
+          </MaterialPanel>
+        ) : null}
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
@@ -224,6 +255,8 @@ export function QuestionAnalysisDetail({
           {studentContextHref ? <Link to={studentContextHref} className="inline-flex h-9 items-center rounded-[7px] border bg-card px-3 text-[11px] font-semibold text-primary hover:bg-muted">{tx(locale, "当前学生详情", "Current student")}</Link> : null}
         </div>
         <QuestionStepButtons locale={locale} previous={previous} next={next} onSelect={goToQuestion} />
+      </div>
+        </div>
       </div>
     </section>
   );
@@ -308,9 +341,7 @@ function StudentPreview({ locale, taskId, question, entry }: { locale: Locale; t
 }
 
 function TestMaterialSummary({ locale, problem }: { locale: Locale; problem?: ProblemInfo }) {
-  const programming = /编程|代码|program|coding/i.test(problem?.type ?? "");
   const testCases = problem?.test_cases ?? [];
-  if (!programming && !testCases.length) return <p className="text-[12px] text-muted-foreground">{tx(locale, "非编程题，不适用测试样例。", "Not a programming question; test cases do not apply.")}</p>;
   if (!testCases.length) return <MissingText locale={locale} />;
   return (
     <div className="grid gap-2">
@@ -322,6 +353,15 @@ function TestMaterialSummary({ locale, problem }: { locale: Locale; problem?: Pr
       ))}
       {problem?.solution_code ? <pre className="max-h-20 overflow-auto rounded-[6px] bg-slate-950 p-2 text-[10px] text-slate-100">{problem.solution_code}</pre> : null}
     </div>
+  );
+}
+
+function isProgrammingProblem(problem?: ProblemInfo): boolean {
+  const type = problem?.type ?? "";
+  return Boolean(
+    problem?.solution_code?.trim()
+    || (problem?.test_cases?.length ?? 0) > 0
+    || /编程|程序|代码|program|coding|code/i.test(type),
   );
 }
 
@@ -435,38 +475,11 @@ function fieldSource(problem: ProblemInfo | undefined, field: "stem" | "criterio
   return tx(locale, "未提供", "Unavailable");
 }
 
-function findQuestionMatches(query: string, questions: QuestionSummary[]): QuestionSearchMatch[] {
-  const normalized = normalizeText(query).replace(/题$/, "");
-  if (!normalized) return [];
-  return questions
-    .map((question) => {
-      const candidates = [question.id, question.label, question.problem?.number ?? ""].map(normalizeText);
-      const exact = candidates.some((candidate) => candidate === normalized || candidate.replace(/^q/, "") === normalized.replace(/^q/, ""));
-      const haystack = normalizeText([question.id, question.label, question.type ?? "", question.stem ?? "", ...getKnowledgePoints(question.problem)].join(" "));
-      const related = haystack.includes(normalized)
-        || (normalized.includes("积分") && (haystack.includes("积分") || haystack.includes("\\int") || haystack.includes("integral")))
-        || (normalized.includes("微分") && (haystack.includes("微分") || haystack.includes("导数") || haystack.includes("derivative")))
-        || (normalized.includes("证明") && (haystack.includes("证明") || haystack.includes("proof")))
-        || (normalized.includes("编程") && (haystack.includes("编程") || haystack.includes("代码") || haystack.includes("program")));
-      return exact || related ? { question, exact } : null;
-    })
-    .filter((match): match is QuestionSearchMatch => match !== null)
-    .sort((left, right) => Number(right.exact) - Number(left.exact) || left.question.label.localeCompare(right.question.label, undefined, { numeric: true }));
-}
-
 function buildStudentContextHref(taskId: string, studentId: string, questionId: string, serialized: string): string {
   const params = new URLSearchParams(serialized);
   if (!params.has("question")) params.set("question", questionId);
   const query = params.toString();
   return `/tasks/${encodeURIComponent(taskId)}/results/students/${encodeURIComponent(studentId)}${query ? `?${query}` : ""}#question-${encodeURIComponent(questionId)}`;
-}
-
-function getKnowledgePoints(problem?: ProblemInfo): string[] {
-  if (!problem) return [];
-  const record = problem as unknown as Record<string, unknown>;
-  const raw = record.knowledge_points ?? record.knowledgePoints ?? record.knowledge_point ?? record.topic;
-  const values = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[,，;；]/) : [];
-  return Array.from(new Set(values.map((value) => String(value).trim()).filter(Boolean))).slice(0, 6);
 }
 
 function entryPercent(entry: QuestionEntry): number {
@@ -487,10 +500,6 @@ function median(values: number[]): number | null {
 
 function averageOrNull(values: number[]): number | null {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-}
-
-function normalizeText(value: string): string {
-  return value.normalize("NFKC").trim().toLocaleLowerCase();
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

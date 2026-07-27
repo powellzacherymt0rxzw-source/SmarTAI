@@ -10,7 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, type ComponentType, type ReactNode } from "react";
-import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { useTask, useTaskFinalization, useTaskResult } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import {
@@ -59,7 +59,6 @@ export function FinalResultsWorkspacePage() {
   const { taskId, questionId, studentId } = useParams();
   const { locale } = useI18n();
   const location = useLocation();
-  const navigate = useNavigate();
   const taskQuery = useTask(taskId);
   const resultQuery = useTaskResult(taskId);
   const finalizationQuery = useTaskFinalization(taskId);
@@ -68,7 +67,7 @@ export function FinalResultsWorkspacePage() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
-  }, [section]);
+  }, [questionId, section, studentId]);
 
   if (taskId && task?.status === "grading") return <Navigate replace to={`/tasks/${taskId}/grading/progress`} />;
   if (taskId && task?.status === "graded") return <Navigate replace to={`/tasks/${taskId}/review`} />;
@@ -111,49 +110,32 @@ export function FinalResultsWorkspacePage() {
 
       <NewTaskStepper currentStep={7} />
 
-      <ResultStateBanner locale={locale} finalization={finalization} />
+      <ResultStateBanner locale={locale} taskId={taskId} finalization={finalization} />
 
-      <div className="mt-6 grid items-start gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <aside className="hidden overflow-hidden rounded-[10px] border bg-card p-2 lg:block" aria-label={tx(locale, "结果工作区", "Results workspace")}>
-          <WorkspaceNavigation locale={locale} root={root} section={section} />
-        </aside>
+      <WorkspaceNavigation locale={locale} root={root} section={section} />
 
-        <label className="block lg:hidden">
-          <span className="sr-only">{tx(locale, "切换结果页面", "Switch results page")}</span>
-          <select
-            value={section}
-            onChange={(event) => {
-              const item = WORKSPACE_NAV.find((candidate) => candidate.key === event.target.value);
-              if (item) navigate(`${root}${item.suffix}`);
-            }}
-            className="h-11 w-full rounded-[9px] border bg-card px-3 text-sm font-semibold text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-          >
-            {WORKSPACE_NAV.map((item) => (
-              <option key={item.key} value={item.key}>{locale === "en-US" ? item.labelEn : item.label}</option>
-            ))}
-          </select>
-        </label>
-
-        <main className="min-w-0">
-          <WorkspaceContent
-            locale={locale}
-            section={section}
-            taskId={taskId}
-            taskName={task.name}
-            questionId={questionId}
-            studentId={studentId}
-            finalization={finalization}
-            result={result}
-          />
-        </main>
-      </div>
+      <main className="mt-5 min-w-0">
+        <WorkspaceContent
+          locale={locale}
+          section={section}
+          taskId={taskId}
+          taskName={task.name}
+          questionId={questionId}
+          studentId={studentId}
+          finalization={finalization}
+          result={result}
+        />
+      </main>
     </div>
   );
 }
 
 function WorkspaceNavigation({ locale, root, section }: { locale: Locale; root: string; section: WorkspaceSection }) {
   return (
-    <nav className="grid gap-1">
+    <nav
+      className="mt-5 flex snap-x gap-2 overflow-x-auto rounded-[10px] border bg-card p-2 overscroll-x-contain lg:grid lg:grid-cols-5 lg:overflow-visible"
+      aria-label={tx(locale, "结果工作区", "Results workspace")}
+    >
       {WORKSPACE_NAV.map((item) => {
         const Icon = item.icon;
         const active = item.key === section;
@@ -163,12 +145,23 @@ function WorkspaceNavigation({ locale, root, section }: { locale: Locale; root: 
             to={`${root}${item.suffix}`}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "flex h-11 items-center gap-3 rounded-[8px] px-3 text-[13px] font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-ring",
-              active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              "flex min-h-[70px] min-w-[188px] snap-start items-center gap-3 rounded-[8px] border px-4 py-3 outline-none transition lg:min-w-0",
+              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              active
+                ? "border-blue-200 bg-blue-50/80 text-primary shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-blue-900 dark:bg-blue-950/30"
+                : "border-transparent text-muted-foreground hover:border-border hover:bg-muted/60 hover:text-foreground",
             )}
           >
-            <Icon aria-hidden={true} className="h-[17px] w-[17px]" />
-            <span>{locale === "en-US" ? item.labelEn : item.label}</span>
+            <span className={cn(
+              "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px]",
+              active ? "bg-blue-100 text-primary dark:bg-blue-900/50" : "bg-muted text-muted-foreground",
+            )}>
+              <Icon aria-hidden={true} className="h-[18px] w-[18px]" />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-[14px] font-bold leading-5">{item.label}</span>
+              <span className="mt-0.5 block truncate text-[10px] font-medium opacity-70">{item.labelEn}</span>
+            </span>
           </Link>
         );
       })}
@@ -176,7 +169,7 @@ function WorkspaceNavigation({ locale, root, section }: { locale: Locale; root: 
   );
 }
 
-function ResultStateBanner({ locale, finalization }: { locale: Locale; finalization: TaskFinalizationResponse }) {
+function ResultStateBanner({ locale, taskId, finalization }: { locale: Locale; taskId: string; finalization: TaskFinalizationResponse }) {
   const stale = finalization.final_result_dirty || finalization.analysis_status === "stale";
   return (
     <section className={cn(
@@ -196,6 +189,16 @@ function ResultStateBanner({ locale, finalization }: { locale: Locale; finalizat
           {tx(locale, "确认时间", "Confirmed")}：{formatTaskTime(finalization.final_result_updated_at ?? undefined, true, locale)} · {analysisStatusLabel(locale, finalization.analysis_status)}
         </p>
       </div>
+      <Link
+        to={stale ? `/tasks/${encodeURIComponent(taskId)}/review` : `/tasks/${encodeURIComponent(taskId)}/results/reports`}
+        className={cn(
+          "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[8px] px-4 text-[12px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          stale ? "border border-amber-300 bg-card text-amber-800 hover:bg-amber-100" : "bg-primary text-primary-foreground hover:opacity-90",
+        )}
+      >
+        {stale ? tx(locale, "返回复核并重新确认", "Review and reconfirm") : tx(locale, "报告与下载", "Reports & downloads")}
+        <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
+      </Link>
     </section>
   );
 }
@@ -496,7 +499,6 @@ function WorkspaceState({ locale, loading = false, onRetry }: { locale: Locale; 
 function sectionFromPath(pathname: string): WorkspaceSection {
   if (/\/results\/questions(?:\/[^/]+)?\/?$/.test(pathname)) return "questions";
   if (/\/results\/students(?:\/[^/]+)?\/?$/.test(pathname)) return "students";
-  if (/\/results\/(?!questions$|students$|visualizations$|reports$)[^/]+\/?$/.test(pathname)) return "students";
   if (pathname.endsWith("/visualizations")) return "visualizations";
   if (pathname.endsWith("/reports")) return "reports";
   return "overview";

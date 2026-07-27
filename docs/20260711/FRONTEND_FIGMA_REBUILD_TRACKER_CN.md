@@ -106,7 +106,7 @@
 | D-07 | 添加题目支持上传/课程资料库，并支持“已按题整理/从原文提取” | 已确认 | 原文提取需要章节/题号等说明输入。 |
 | D-08 | 学生和题目是两个互不干扰的筛选/导航维度 | 已确认 | 左右切学生，上下切题目。 |
 | D-09 | 学生详情同时支持“全部题目长视图”和“单题切换视图” | 已确认 | 进入来源决定默认视图。 |
-| D-10 | 正式结果拆成总览、题目分析、学生分析、可视化分析、报告与下载五个独立子页 | 已确认 | `报告与下载` 是结果工作区局部侧栏第五项。 |
+| D-10 | 正式结果拆成总览、题目分析、学生分析、可视化分析、报告与下载五个独立子页 | 已确认 | 2026-07-27 最终覆盖：五项使用顶部等宽大入口；为详情左侧题号目录保留内容宽度。 |
 | D-11 | Figma 16 不足以承载最终结果，只保留其视觉语言和完成/下载状态 | 已确认 | 新结果 shell 参考旧代码信息架构。 |
 | D-12 | 学期选项始终包含下一学期，最早从 `2025-2026 秋季学期` 开始 | 已确认 | 月份映射只服务默认选择，不要求达到学校教务校历精度。 |
 | D-13 | 创建后可回到同一 Figma 03 表单编辑当前任务信息 | 已确认 | `/tasks/:id/edit` 复用创建表单；回到 Q01 时保留来源草稿。 |
@@ -675,15 +675,15 @@
 
 - [~] A00-01 正式完成任务默认进入 `/tasks/:id/results`。工程完成：正式结果三种状态均由统一 destination 进入 `/results`，`graded` 仍进入 `/review`；等待用户验收。
 - [~] A00-02 保留全局顶部导航和任务上下文栏。工程完成：复用 70px Figma 顶栏、1300px 版心、任务名/版本和七步流程，不恢复旧全局侧栏。
-- [~] A00-03 内容区使用局部左侧导航：总览、题目分析、学生分析、可视化分析、报告与下载。工程完成：五个 canonical route 均可直接访问。
-- [~] A00-04 局部左侧栏只负责结果工作区切换，主内容仍是单一纵向焦点。工程完成：每个 route 只渲染一个主内容面板，无横向大 tab 和卡片套卡片。
-- [~] A00-05 移动端把局部侧栏折叠为下拉或横向 tabs。工程完成：390×844 使用单一下拉，主内容无页面级横向溢出。
+- [~] A00-03 内容区使用顶部五项大入口：总览、题目分析、学生分析、可视化分析、报告与下载。2026-07-27 按用户最终要求覆盖旧局部左侧栏；五个 canonical route 均可直接访问。
+- [~] A00-04 顶部入口只负责结果工作区切换，主内容仍是单一纵向焦点；释放的左侧空间供 A03/A05 使用统一题号目录。
+- [~] A00-05 移动端五项入口仅在自身容器横向滚动，语义和顺序不变；不再切换为另一个下拉控件。
 - [~] A00-06 所有子页显示 final result 版本、生成时间和 stale 状态。工程完成：共用版本横幅展示版本、确认时间和 artifact 状态；教师改分后保留上一版本并回到待复核，分析状态按事实变 stale。
 
 ### 8.1 A-00 最终结果生命周期与工作区壳阶段工程记录（2026-07-24）
 
 - 详细决定与验收矩阵：`docs/20260724/A00_FINAL_RESULTS_WORKSPACE_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
-- Figma 约束：只调用一次 Figma 16 节点 `1:1260` 并缓存上下文；保留 1300px 内容、七步流程、浅色完成态横幅、低饱和指标卡和大留白。按用户覆盖将单页扩成局部左侧五入口，不复制旧全局侧栏或横向大 tab。
+- Figma 约束：只调用一次 Figma 16 节点 `1:1260` 并缓存上下文；保留 1300px 内容、七步流程、浅色完成态横幅、低饱和指标卡和大留白。2026-07-27 用户最终覆盖为顶部五项大入口；不复制旧全局侧栏或高饱和大 tab。
 - 生命周期合同：新增 `GET /tasks/:id/finalization` 与幂等 `POST /tasks/:id/finalization/confirm`；只有低置信、后端复核标记、专家分歧或 grading failure 等真实门禁全部确认后才创建不可变版本。AI 原始值与教师覆盖同时保留。
 - 版本与 stale：任务级 `final_result_version/fingerprint/dirty` 与 artifact `analysis_status/result_version` 分离；确认后改分回到 `graded`，上一版快照不删除，已有分析按事实标 stale；不会自动触发昂贵重算。
 - 路由与页面：`graded → /review`；确认后进入 `/results`。五个 route 为 `/results`、`/questions`、`/students`、`/visualizations`、`/reports`；A00 只建立真实壳和事实空态，详细总览/分析按 A01-A07 继续。
@@ -775,7 +775,7 @@
 - 详细决定与验收矩阵：`docs/20260724/A05_STUDENT_ANALYSIS_DETAIL_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
 - 页面职责：正式结果只读复看；学生与题目分行导航；全部题目长视图和单题聚焦并存，不建立第二套教师改分入口。
 - 交互证据：学生 `PB20111611` exact、`低置信` 6 个 related；题目 `Q2` exact、`积分题` 1 个 related；Alice/Q2 经 `→` 到 Bob/Q2，再经 `↓` 到 Bob/Q3。
-- 双向证据：A05 Alice/Q2 → A03 Q2 → A05 Alice/Q2 恢复；旧 `/results/:sid` 兼容入口也只渲染新工作区，遗留 `TaskStudentDetailPage.tsx` 已删除。
+- 双向证据：A05 Alice/Q2 → A03 Q2 → A05 Alice/Q2 恢复；2026-07-27 删除旧 `/results/:sid` 兼容 route，只保留 `/results/students/:sid` canonical 路由，遗留 `TaskStudentDetailPage.tsx` 已删除。
 - 工程证据：visible-scope audit 扫描 79 文件、TypeScript、lint、Vite production build（`480 modules`）与 `git diff --check` 通过。
 - 浏览器证据：`A05-student-analysis-detail-desktop.png`（1440×900）与 `A05-student-analysis-detail-mobile.png`（390×844）；两端无页面级横向溢出，匿名 fixture、未调用 provider。
 - 当前状态：代码、双维交互、两种查看模式、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。下一步先读取官方额度，再决定 A06。
@@ -905,11 +905,21 @@
 - [x] R02-VISUAL-01 保持 Figma 15 的两行导航、全宽作答、AI/教师双列和评分标准首屏层级；1440×900 最新截图无新增说明卡或页面级横向溢出。
 - [x] R02-QA-01 isolated finalized fixture 浏览器控制台 `0 errors`；visible-scope 67 文件、TypeScript 与 production build（`930 modules transformed`）通过，未调用 provider 或复核写接口。
 
+### 9.10 A08 结果工作区导航与详情交互统一（2026-07-27）
+
+- [x] A08-NAV-01 五个结果子页改为版本横幅下方的顶部等宽大入口；桌面不再占用 220px 局部左栏，窄屏只在导航自身横向滚动。
+- [x] A08-SIDEBAR-01 A03/A05 共用 132px 独立滚动题号目录；当前题高亮、状态点、标题说明与上下题行为统一。
+- [x] A08-IME-01 A02/A03/A04/A05 搜索统一 composition 门禁；题目和学生条件继续写入 URL 且互不覆盖。
+- [x] A08-ROUTE-01 删除旧 `/tasks/:id/results/:studentId` 兼容 route，只保留 `/results/students/:studentId`；切换学生回页面顶部，不携带旧锚点。
+- [x] A08-STATE-01 正式版本横幅提供“报告与下载”或“返回复核并重新确认”真实动作，不再只有状态说明。
+- [x] A08-QA-01 本地教师 fixture 五入口、A03/A05 目录与筛选、Alice→Kate 回顶、`积分题`→Q1 已通过；控制台 `0 errors / 0 warnings`，未调用 provider。
+- 详细记录：`docs/20260727/A08_RESULTS_NAVIGATION_AND_DETAIL_UNIFICATION_STAGE_CN.md`。
+
 ---
 
 ## 10. 本轮产品决定确认记录
 
 - [x] OPEN-01 顶部入口命名确认为 `工作台 / Workspace`；不再使用 `任务总览/任务驾驶舱`。确认时间：2026-07-11 16:00 UTC+8。
 - [x] OPEN-02 学期最早从 `2025-2026 秋季学期` 开始，并始终允许选择当前学期之后一个学期；月份映射无需达到教务校历精度。确认时间：2026-07-11 16:00 UTC+8。
-- [x] OPEN-03 正式结果局部侧栏增加独立第五项 `报告与下载 / Reports & Downloads`。确认时间：2026-07-11 16:00 UTC+8。
+- [x] OPEN-03 正式结果增加独立第五项 `报告与下载 / Reports & Downloads`；2026-07-27 最终覆盖为顶部五项大入口，不再使用局部工作区侧栏。
 - [x] OPEN-04 使用“待复核 `/review`、正式完成 `/results`”两个清晰入口；具体子 route 由主 Agent 以语义单一、后端无冲突为原则统一维护。确认时间：2026-07-11 16:00 UTC+8。

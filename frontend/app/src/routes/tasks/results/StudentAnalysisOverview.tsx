@@ -1,5 +1,5 @@
 import { ArrowRight, Search, X } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   effectiveCorrectionScore,
@@ -52,6 +52,8 @@ const PAGE_SIZE = 5;
 export function StudentAnalysisOverview({ locale, taskId, model }: { locale: Locale; taskId: string; model: ResultsModel }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q") ?? "";
+  const [draftQuery, setDraftQuery] = useState(query);
+  const composingRef = useRef(false);
   const scoreFilter = normalizeScoreFilter(searchParams.get("score"));
   const passFilter = normalizePassFilter(searchParams.get("pass"));
   const confidenceFilter = normalizeConfidenceFilter(searchParams.get("confidence"));
@@ -91,6 +93,10 @@ export function StudentAnalysisOverview({ locale, taskId, model }: { locale: Loc
     setSearchParams(next, { replace: true });
   };
 
+  useEffect(() => {
+    if (!composingRef.current) setDraftQuery(query);
+  }, [query]);
+
   const removeSemanticCondition = (condition: SemanticCondition) => {
     const start = query.toLocaleLowerCase().indexOf(condition.source.toLocaleLowerCase());
     if (start < 0) return;
@@ -117,13 +123,25 @@ export function StudentAnalysisOverview({ locale, taskId, model }: { locale: Loc
           <label className="relative block">
             <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
-              value={query}
-              onChange={(event) => updateParam("q", event.target.value, "")}
+              value={draftQuery}
+              inputMode="search"
+              onCompositionStart={() => { composingRef.current = true; }}
+              onCompositionEnd={(event) => {
+                composingRef.current = false;
+                const value = event.currentTarget.value;
+                setDraftQuery(value);
+                window.setTimeout(() => updateParam("q", value, ""), 0);
+              }}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDraftQuery(value);
+                if (!composingRef.current) updateParam("q", value, "");
+              }}
               placeholder={tx(locale, "例如：PB2011 不及格 低置信 待复核 低分优先", "Example: PB2011 failed low confidence pending review low score first")}
               aria-label={tx(locale, "自然语言筛选学生", "Filter students with natural language")}
               className="h-11 w-full rounded-[9px] border bg-background pl-10 pr-10 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
             />
-            {query ? <button type="button" onClick={() => updateParam("q", "", "")} aria-label={tx(locale, "清除自然语言筛选", "Clear natural-language filter")} className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><X aria-hidden="true" className="h-4 w-4" /></button> : null}
+            {draftQuery ? <button type="button" onClick={() => { setDraftQuery(""); updateParam("q", "", ""); }} aria-label={tx(locale, "清除自然语言筛选", "Clear natural-language filter")} className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><X aria-hidden="true" className="h-4 w-4" /></button> : null}
           </label>
           <div className="mt-2 flex min-h-7 flex-wrap items-center gap-2">
             {semanticPlan.conditions.length ? semanticPlan.conditions.map((condition) => (

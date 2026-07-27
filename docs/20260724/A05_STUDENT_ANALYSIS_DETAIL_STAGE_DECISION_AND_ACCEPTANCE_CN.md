@@ -10,7 +10,7 @@
 
 ## 1. 阶段结论
 
-A05 已完全替换遗留 `TaskStudentDetailPage`。canonical route 与旧 `/results/:studentId` 兼容入口现在都渲染同一套正式结果工作区；旧页面文件已删除，不会再因旧入口回到旧视觉。
+A05 已完全替换遗留 `TaskStudentDetailPage`。2026-07-27 进一步删除旧 `/results/:studentId` 兼容入口，只保留 `/results/students/:studentId` canonical route；旧页面文件和旧分流规则都不再维护。
 
 - 学生与题目分别占一整行导航，互不改写对方的筛选或当前选择。
 - 两行都提供上一项/下一项、当前项、输入匹配、直接下拉选择和清空筛选。
@@ -38,7 +38,7 @@ A05 已完全替换遗留 `TaskStudentDetailPage`。canonical route 与旧 `/res
 - A05 进入 `/results/questions/:qid` 时携带当前学生和 A05 查询上下文。
 - A03 在检测到学生上下文时新增“返回当前学生详情”，并在题目间上下切换时继续保留该上下文。
 - 浏览器实测 A05 Alice/Q2 → A03 Q2 → 返回 A05 Alice/Q2；URL、学生和题目均恢复。
-- 旧 `/results/PB20111610?question=q2` 实测显示新工作区和“单题聚焦”，不再出现旧“批改详情”页面。
+- 题目聚焦通过 canonical `/results/students/PB20111610?question=q2` 表达；不再存在第二种学生详情 URL。
 
 ## 4. 交互与数据证据
 
@@ -54,6 +54,7 @@ A05 已完全替换遗留 `TaskStudentDetailPage`。canonical route 与旧 `/res
 - `npm run lint`：visible-scope audit 扫描 79 个用户可见源文件，TypeScript 通过。
 - `npm run build`：Vite production build 通过，`480 modules transformed`；移除遗留学生详情后模块数下降。
 - `git diff --check` 通过。
+- 2026-07-27 A08 复验：A03/A05 使用同一 132px 独立滚动题号目录；学生直选 Alice → Kate 后 canonical URL 正确且页面回到顶部，`积分题` 只筛出 Q1，学生维度保持不变。
 - 桌面单题：`A05-student-analysis-detail-desktop.png`（1440×900），页面宽度 `1440/1440`，完整页高约 1185px。
 - 移动单题：`A05-student-analysis-detail-mobile.png`（390×844），页面宽度 `390/390`，完整页高约 2073px。
 - 桌面全部题目实渲染 8 张题目卡，完整页高约 3633px；该长度来自用户明确要求的全题长视图，不是把其他页面职责堆入本页。
