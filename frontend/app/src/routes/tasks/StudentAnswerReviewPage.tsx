@@ -40,6 +40,7 @@ import {
   answerMap,
   buildSubmissionQuestions,
   getAnswerState,
+  studentNeedsAttention,
   type SubmissionAnswerState,
   type SubmissionQuestion,
 } from "@/lib/submissionReview";
@@ -52,6 +53,7 @@ type PickerItem = {
   secondary: string;
   searchable: string;
   exactValues: string[];
+  attention?: boolean;
 };
 
 type PickerMatch = {
@@ -65,6 +67,7 @@ type AnswerDraft = {
 
 const STATUS_KEYS: Record<SubmissionAnswerState, MessageKey> = {
   recognized: "studentSubmissionStatusRecognized",
+  reviewed: "studentSubmissionStatusReviewed",
   flagged: "studentSubmissionStatusFlagged",
   empty: "studentSubmissionStatusEmpty",
   missing: "studentSubmissionStatusMissing",
@@ -115,8 +118,8 @@ export function StudentAnswerReviewPage() {
   );
   const answers = useMemo(() => student ? answerMap(student) : new Map(), [student]);
   const studentItems = useMemo(
-    () => students.map((candidate) => studentPickerItem(candidate, t)),
-    [students, t],
+    () => students.map((candidate) => studentPickerItem(candidate, questions, t)),
+    [questions, students, t],
   );
   const questionItems = useMemo(() => questions.map(questionPickerItem), [questions]);
   const studentMatches = useMemo(
@@ -372,6 +375,30 @@ export function StudentAnswerReviewPage() {
     }
   }
 
+  async function confirmAnswer(question: SubmissionQuestion) {
+    if (!taskId || !student || !taskQuery.data || readOnly) return;
+    setSavingQuestionId(question.id);
+    setSaveErrors((current) => {
+      const next = { ...current };
+      delete next[question.id];
+      return next;
+    });
+    try {
+      await answerMutation.mutateAsync({
+        taskId,
+        studentId: student.stu_id,
+        qId: question.id,
+        expectedWorkflowRevision: taskQuery.data.workflow_revision,
+        reviewStatus: "confirmed",
+      });
+      toast.success(t("answerReviewConfirmed"));
+    } catch (error) {
+      setSaveErrors((current) => ({ ...current, [question.id]: answerErrorMessage(error, t) }));
+    } finally {
+      setSavingQuestionId(null);
+    }
+  }
+
   function startEditing(question: SubmissionQuestion) {
     if (readOnly) return;
     const answer = answers.get(question.id);
@@ -486,9 +513,9 @@ export function StudentAnswerReviewPage() {
             />
             <ReviewMetric
               label={t("studentSubmissionMetricReview")}
-              value={String(questions.filter((question) => getAnswerState(answers.get(question.id)) !== "recognized").length)}
+              value={String(questions.filter((question) => !["recognized", "reviewed"].includes(getAnswerState(answers.get(question.id)))).length)}
               detail={t("studentSubmissionMetricQuestions")}
-              tone={questions.some((question) => getAnswerState(answers.get(question.id)) !== "recognized") ? "danger" : "accent"}
+              tone={questions.some((question) => !["recognized", "reviewed"].includes(getAnswerState(answers.get(question.id)))) ? "danger" : "accent"}
             />
             <ReviewMetric
               label={t("studentSubmissionMetricSource")}
@@ -567,20 +594,22 @@ export function StudentAnswerReviewPage() {
             </form>
           ) : null}
 
-          <div className="mt-3 rounded-[10px] border bg-card p-2">
-            <SmartPicker
-              label={t("answerReviewQuestionSearchLabel")}
-              placeholder={t("answerReviewQuestionSearchPlaceholder")}
-              query={questionFilter}
-              matches={questionMatches}
-              currentId={activeQuestion?.id ?? ""}
-              onDraftChange={setQuestionFilter}
-              onCommit={(value) => setFilterParam("questionFilter", value)}
-              onCompositionState={(composing) => { questionFilterComposingRef.current = composing; }}
-              onSelect={(id) => scrollToQuestion(id)}
-              t={t}
-            />
-            <div className="flex flex-col gap-1 px-2 pt-2 text-[11px] leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div className="mt-3">
+            <div className="rounded-[10px] border bg-card p-2">
+              <SmartPicker
+                label={t("answerReviewQuestionSearchLabel")}
+                placeholder={t("answerReviewQuestionSearchPlaceholder")}
+                query={questionFilter}
+                matches={questionMatches}
+                currentId={activeQuestion?.id ?? ""}
+                onDraftChange={setQuestionFilter}
+                onCommit={(value) => setFilterParam("questionFilter", value)}
+                onCompositionState={(composing) => { questionFilterComposingRef.current = composing; }}
+                onSelect={(id) => scrollToQuestion(id)}
+                t={t}
+              />
+            </div>
+            <div className="mt-1.5 flex flex-col gap-1 px-1 text-[11px] leading-5 text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <span>{tx(locale, "搜索只筛选题目；当前学生保持不变。输入中文时会在选词完成后再应用筛选。", "Question search only filters questions; the selected student stays unchanged. IME text is applied after composition finishes.")}</span>
               <span className="inline-flex shrink-0 items-center gap-1.5 font-medium text-foreground/70">
                 <Keyboard aria-hidden="true" className="h-3.5 w-3.5" />
@@ -615,7 +644,7 @@ export function StudentAnswerReviewPage() {
                         <span className="truncate">{tx(locale, `第 ${question.label} 题`, `Q${question.label}`)}</span>
                         <span className={cn(
                           "ml-1 h-2 w-2 shrink-0 rounded-full",
-                          active ? "bg-white" : state === "recognized" ? "bg-emerald-500" : state === "flagged" ? "bg-amber-500" : "bg-red-500",
+                          active ? "bg-white" : state === "recognized" ? "bg-emerald-500" : state === "reviewed" ? "bg-blue-500" : state === "flagged" ? "bg-amber-500" : "bg-red-500",
                         )} />
                       </button>
                     );
@@ -642,6 +671,7 @@ export function StudentAnswerReviewPage() {
                     onSave={(moveNext) => void saveAnswer(question, moveNext)}
                     onEdit={() => startEditing(question)}
                     onCancel={() => cancelEditing(question)}
+                    onConfirm={() => void confirmAnswer(question)}
                     onNavigate={scrollToQuestion}
                     locale={locale}
                     t={t}
@@ -677,11 +707,11 @@ export function StudentAnswerReviewPage() {
               {t("answerReviewBackMatrix")}
             </Link>
             <Link
-              to={`/tasks/${encodeURIComponent(taskId)}/grading/preflight`}
+              to={`/tasks/${encodeURIComponent(taskId)}/grading-setup`}
               onClick={(event) => { if (!confirmLeave()) event.preventDefault(); }}
               className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              {tx(locale, "进入执行批改", "Continue to Grading")}
+              {t("submissionReviewEnterGradingSetup")}
               <ChevronRight aria-hidden="true" className="h-4 w-4" />
             </Link>
           </div>
@@ -808,14 +838,20 @@ function SmartPicker({ label, placeholder, query, matches, currentId, onDraftCha
               }}
               className={cn(
                 "flex min-h-[44px] w-full items-center justify-between gap-3 rounded-[7px] px-2.5 py-1.5 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
-                item.id === currentId && "bg-primary/[0.055]",
+                item.attention && "bg-amber-50/80 hover:bg-amber-100/75 dark:bg-amber-950/25 dark:hover:bg-amber-950/40",
+                item.id === currentId && !item.attention && "bg-primary/[0.055]",
+                item.id === currentId && item.attention && "ring-1 ring-inset ring-amber-300/70 dark:ring-amber-800",
               )}
             >
               <span className="min-w-0">
                 <span className="block truncate text-xs font-semibold text-foreground">{item.primary}</span>
                 <span className="block truncate text-[10px] text-muted-foreground">{item.secondary}</span>
               </span>
-              {kind !== "all" ? (
+              {item.attention ? (
+                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/70 dark:text-amber-200">
+                  {t("historyNeedsAttention")}
+                </span>
+              ) : kind !== "all" ? (
                 <span className={cn(
                   "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold",
                   kind === "exact" ? "bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-200" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
@@ -833,7 +869,7 @@ function SmartPicker({ label, placeholder, query, matches, currentId, onDraftCha
   );
 }
 
-function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, next, dirty, saving, saveError, editing, readOnly, onDraftChange, onSave, onEdit, onCancel, onNavigate, locale, t }: {
+function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, next, dirty, saving, saveError, editing, readOnly, onDraftChange, onSave, onEdit, onCancel, onConfirm, onNavigate, locale, t }: {
   question: SubmissionQuestion;
   answer?: StudentAnswerInfo;
   draft: AnswerDraft;
@@ -849,6 +885,7 @@ function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, n
   onSave: (moveNext: boolean) => void;
   onEdit: () => void;
   onCancel: () => void;
+  onConfirm: () => void;
   onNavigate: (id: string) => void;
   locale: Locale;
   t: (key: MessageKey) => string;
@@ -862,6 +899,18 @@ function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, n
             <h2 className="text-[20px] font-bold text-foreground">{tx(locale, `第 ${question.label} 题`, `Question ${question.label}`)}</h2>
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground dark:bg-slate-800">{question.type || t("studentSubmissionUnknownType")}</span>
             <AnswerStateBadge state={state} answer={answer} locale={locale} t={t} />
+            {!readOnly && !editing && !["recognized", "reviewed"].includes(state) ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-7 border-amber-200 bg-amber-50 px-3 text-[11px] font-semibold text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+                disabled={saving}
+                onClick={onConfirm}
+              >
+                {saving ? <LoaderCircle aria-hidden="true" className="h-3.5 w-3.5 animate-spin" /> : <Check aria-hidden="true" className="h-3.5 w-3.5" />}
+                {t(saving ? "answerReviewConfirming" : "answerReviewConfirm")}
+              </Button>
+            ) : null}
           </div>
           <p className="mt-1 text-[11px] text-muted-foreground">{tx(locale, "题目与学生作答在同一卡片内连续校对；题目只读。", "Review the read-only question and student answer together in this card.")}</p>
         </div>
@@ -954,6 +1003,7 @@ function AnswerStateBadge({ state, answer, locale, t }: {
     <span className={cn(
       "inline-flex h-7 shrink-0 items-center justify-center rounded-full px-3 text-[11px] font-semibold",
       state === "recognized" && "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-200",
+      state === "reviewed" && "bg-blue-100 text-primary dark:bg-blue-950/60 dark:text-blue-200",
       state === "flagged" && "bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-200",
       (state === "empty" || state === "missing") && "bg-red-100 text-red-600 dark:bg-red-950/60 dark:text-red-200",
     )} title={flagText || undefined}>
@@ -1025,14 +1075,21 @@ function matchPickerItems(items: PickerItem[], query: string): PickerMatch[] {
     .sort((a, b) => Number(b.kind === "exact") - Number(a.kind === "exact"));
 }
 
-function studentPickerItem(student: StudentSubmission, t: (key: MessageKey) => string): PickerItem {
+function studentPickerItem(student: StudentSubmission, questions: SubmissionQuestion[], t: (key: MessageKey) => string): PickerItem {
   const name = student.stu_name || student.stu_id;
+  const answers = answerMap(student);
+  const questionIssues = questions.filter((question) => !["recognized", "reviewed"].includes(getAnswerState(answers.get(question.id)))).length;
+  const issueCount = questionIssues + Number(student.identity_status === "needs_review");
+  const attention = studentNeedsAttention(student, questions);
   return {
     id: student.stu_id,
     primary: `${student.stu_id} · ${name}`,
-    secondary: t(student.identity_status === "needs_review" ? "studentSubmissionIdentityReview" : "studentSubmissionIdentityMatched"),
+    secondary: attention
+      ? `${issueCount}${t("answerReviewPendingCountSuffix")}`
+      : t("studentSubmissionIdentityMatched"),
     searchable: `${student.stu_id} ${name}`,
     exactValues: [student.stu_id, name],
+    attention,
   };
 }
 

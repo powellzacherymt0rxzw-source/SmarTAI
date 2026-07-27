@@ -96,24 +96,27 @@ def _fake_parser(observed: dict):
     return fake_parse
 
 
-def test_submission_upload_requires_saved_grading_setup_before_provider_work(client, monkeypatch):
-    get_task_store().create(_task(configured=False))
-
-    def provider_must_not_be_selected(*_args, **_kwargs):
-        raise AssertionError("provider selection must happen after the grading-setup gate")
-
-    monkeypatch.setattr(
-        "backend.llm.registry.ExpertRegistryView.select",
-        provider_must_not_be_selected,
+def test_submission_upload_uses_owner_default_independent_of_saved_grading_setup(client, monkeypatch):
+    task = _task(configured=True)
+    task.grading_setup = TaskGradingSetup(
+        selected_provider_ids=["mock:stale-grader"],
+        primary_provider_id="mock:stale-grader",
     )
+    get_task_store().create(task)
+    provider = MagicMock(provider_id=PROVIDER_ID)
+    monkeypatch.setattr(
+        "backend.llm.registry.ExpertRegistryView.pick_default",
+        lambda _self: provider,
+    )
+    monkeypatch.setattr("backend.api.tasks.parse_student_answers", _fake_parser({}))
     response = client.post(
         "/tasks/T_s01/parse_submissions",
         headers=HEADERS,
         files={"file": ("PB20111600_Kate.txt", b"answer", "text/plain")},
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "grading_setup_required"
+    assert response.status_code == 200, response.text
+    assert response.json()["recognition_provider_id"] == PROVIDER_ID
 
 
 @pytest.mark.asyncio

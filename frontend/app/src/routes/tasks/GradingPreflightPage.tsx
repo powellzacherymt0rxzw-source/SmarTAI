@@ -1,5 +1,5 @@
-import { AlertTriangle, CheckCircle2, ChevronRight, LoaderCircle } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronRight, LoaderCircle, Timer } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { normalizeAPIError } from "@/api/client";
 import { useGradingSetup, useStartGrading, useTask } from "@/api/hooks";
@@ -11,6 +11,8 @@ import { gradingPreflightText as copy } from "@/lib/gradingPreflightCopy";
 import { getTaskDestination, getTaskGradingSetupHref, hasTaskReachedStep } from "@/lib/taskFlow";
 import type { GradingFeedbackLength, GradingSetup, ProblemInfo, StudentSubmission } from "@/types";
 
+const AUTO_START_SECONDS = 5;
+
 /** C02: one read-only checkpoint before the idempotent grading mutation. */
 export function GradingPreflightPage() {
   const { taskId } = useParams();
@@ -19,6 +21,10 @@ export function GradingPreflightPage() {
   const taskQuery = useTask(taskId);
   const setupQuery = useGradingSetup(taskId);
   const startGrading = useStartGrading();
+  const [countdown, setCountdown] = useState(AUTO_START_SECONDS);
+  const [autoStartEnabled, setAutoStartEnabled] = useState(true);
+  const startTriggeredRef = useRef(false);
+  const startHandlerRef = useRef<() => void>(() => undefined);
 
   const task = taskQuery.data;
   const setupResponse = setupQuery.data;
@@ -43,13 +49,6 @@ export function GradingPreflightPage() {
   );
   const historyView = Boolean(task && task.status !== "submissions_ready");
 
-  if (taskQuery.isSuccess && taskId && task) {
-    if (task.status === "grading" || (task.status === "error" && task.grading_job_id)) {
-      return <Navigate replace to={`/tasks/${taskId}/grading/progress`} />;
-    }
-    if (!hasTaskReachedStep(task, 5)) return <Navigate replace to={getTaskDestination(task)} />;
-  }
-
   const blockingIssues = setupResponse?.readiness.blocking_issues ?? [];
   const hasEnabledSelection = selectedExperts.length > 0 && selectedExperts.every((expert) => expert.enabled);
   const canStart = Boolean(
@@ -62,9 +61,12 @@ export function GradingPreflightPage() {
     && summary.problemCount > 0
     && summary.studentCount > 0,
   );
+  const countdownActive = canStart && autoStartEnabled && !startGrading.isPending;
 
   async function handleStart() {
-    if (!taskId || !canStart) return;
+    if (!taskId || !canStart || startTriggeredRef.current) return;
+    startTriggeredRef.current = true;
+    setAutoStartEnabled(false);
     try {
       const response = await startGrading.mutateAsync({ taskId });
       if (response.status === "already_done") {
@@ -74,8 +76,28 @@ export function GradingPreflightPage() {
       navigate(`/tasks/${taskId}/grading/progress`, { replace: true });
     } catch {
       // The normalized response is rendered below; task data remains intact.
+      startTriggeredRef.current = false;
     }
   }
+
+  startHandlerRef.current = () => { void handleStart(); };
+
+  useEffect(() => {
+    if (!canStart || historyView || !autoStartEnabled) {
+      setCountdown(AUTO_START_SECONDS);
+      return;
+    }
+
+    setCountdown(AUTO_START_SECONDS);
+    const intervalId = window.setInterval(() => {
+      setCountdown((current) => Math.max(0, current - 1));
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [autoStartEnabled, canStart, historyView, taskId]);
+
+  useEffect(() => {
+    if (countdownActive && countdown === 0) startHandlerRef.current();
+  }, [countdown, countdownActive]);
 
   const isLoading = taskQuery.isLoading || setupQuery.isLoading;
   const isError = taskQuery.isError || setupQuery.isError;
@@ -87,6 +109,13 @@ export function GradingPreflightPage() {
     blockingIssues,
     hasEnabledSelection,
   });
+
+  if (taskQuery.isSuccess && taskId && task) {
+    if (task.status === "grading" || (task.status === "error" && task.grading_job_id)) {
+      return <Navigate replace to={`/tasks/${taskId}/grading/progress`} />;
+    }
+    if (!hasTaskReachedStep(task, 5)) return <Navigate replace to={getTaskDestination(task)} />;
+  }
 
   return (
     <div className="w-full max-w-[1300px]">
@@ -107,7 +136,59 @@ export function GradingPreflightPage() {
         <PageState title={copy(locale, "missingTask")} href="/history" action={copy(locale, "retry")} />
       ) : (
         <div className="mx-auto mt-[34px] w-full max-w-[1100px]">
-          <section className="min-h-[130px] rounded-[10px] border bg-card px-6 py-5 sm:px-8" aria-labelledby="preflight-task-summary">
+          {!historyView ? (
+            <section className="overflow-hidden rounded-[10px] border border-primary/25 bg-card" aria-labelledby="grading-countdown-title" aria-live="polite">
+              <div className="flex flex-col gap-5 px-6 py-5 sm:px-8 lg:flex-row lg:items-center">
+                <div className="flex min-w-0 flex-1 items-center gap-4 sm:gap-5">
+                  <span className={cn(
+                    "inline-flex h-[70px] w-[70px] shrink-0 flex-col items-center justify-center rounded-full border-4 text-center",
+                    countdownActive ? "border-primary/20 bg-primary/[0.055] text-primary" : "border-slate-200 bg-slate-50 text-muted-foreground dark:border-slate-700 dark:bg-slate-900/50",
+                  )}>
+                    <strong className="text-[25px] leading-7">{countdownActive ? countdown : "—"}</strong>
+                    <span className="text-[10px] font-semibold">{locale === "en-US" ? "SEC" : "秒"}</span>
+                  </span>
+                  <div className="min-w-0">
+                    <h2 id="grading-countdown-title" className="flex items-center gap-2 text-[18px] font-bold leading-6 text-foreground">
+                      <Timer aria-hidden="true" className="h-5 w-5 text-primary" />
+                      {copy(locale, "countdownTitle")}
+                    </h2>
+                    <p className="mt-1.5 text-[12px] leading-5 text-muted-foreground">
+                      {countdownActive ? copy(locale, "countdownDescription") : disabledReason ?? copy(locale, "readyMessage")}
+                    </p>
+                    {countdownActive ? <p className="mt-1 text-[11px] font-semibold text-primary">{countdown} {copy(locale, "countdownUnit")}</p> : null}
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                  <Link
+                    to={getTaskGradingSetupHref(taskId, `/tasks/${taskId}/grading/preflight`)}
+                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[8px] border bg-card px-4 text-[13px] font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+                    {copy(locale, "backToSetup")}
+                  </Link>
+                  <button
+                    type="button"
+                    disabled={!canStart || startGrading.isPending}
+                    onClick={() => void handleStart()}
+                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[8px] bg-primary px-5 text-[13px] font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {startGrading.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
+                    {copy(locale, startGrading.isPending ? "starting" : "startNow")}
+                    {!startGrading.isPending ? <ChevronRight aria-hidden="true" className="h-4 w-4" /> : null}
+                  </button>
+                </div>
+              </div>
+              <div className="h-1 bg-slate-100 dark:bg-slate-800">
+                <div
+                  className="h-full bg-primary transition-[width] duration-1000 ease-linear"
+                  style={{ width: countdownActive ? `${(countdown / AUTO_START_SECONDS) * 100}%` : "0%" }}
+                />
+              </div>
+              {startError ? <p role="alert" className="border-t px-6 py-2 text-[11px] font-medium text-danger sm:px-8">{startError || copy(locale, "startError")}</p> : null}
+            </section>
+          ) : null}
+
+          <section className={cn("min-h-[130px] rounded-[10px] border bg-card px-6 py-5 sm:px-8", historyView ? "" : "mt-[30px]")} aria-labelledby="preflight-task-summary">
             <h2 id="preflight-task-summary" className="text-[18px] font-bold leading-6 text-foreground">
               {copy(locale, "taskSummary")}
             </h2>
@@ -241,22 +322,7 @@ export function GradingPreflightPage() {
                   <ChevronRight aria-hidden="true" className="h-4 w-4" />
                 </Link>
               </>
-            ) : (
-              <>
-                {disabledReason ? <p className="max-w-[520px] text-right text-[12px] leading-5 text-danger">{disabledReason}</p> : null}
-                {startError ? <p role="alert" className="max-w-[520px] text-right text-[12px] leading-5 text-danger">{startError || copy(locale, "startError")}</p> : null}
-                <button
-                  type="button"
-                  disabled={!canStart || startGrading.isPending}
-                  onClick={() => void handleStart()}
-                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-6 text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[180px]"
-                >
-                  {startGrading.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
-                  {copy(locale, startGrading.isPending ? "starting" : "start")}
-                  {!startGrading.isPending ? <ChevronRight aria-hidden="true" className="h-4 w-4" /> : null}
-                </button>
-              </>
-            )}
+            ) : null}
           </div>
         </div>
       )}
@@ -285,7 +351,7 @@ function summarizeTask(problems: ProblemInfo[], students: StudentSubmission[]): 
     programmingCount: programming.length,
     testsComplete: programming.filter((problem) => (problem.test_cases?.length ?? 0) > 0).length,
     flaggedAnswers: students.reduce(
-      (count, student) => count + student.stu_ans.filter((answer) => (answer.flag?.length ?? 0) > 0 || !answer.content?.trim()).length,
+      (count, student) => count + student.stu_ans.filter((answer) => answer.review_status !== "confirmed" && ((answer.flag?.length ?? 0) > 0 || !answer.content?.trim())).length,
       0,
     ),
     flaggedIdentities: students.filter((student) => student.identity_status === "needs_review").length,

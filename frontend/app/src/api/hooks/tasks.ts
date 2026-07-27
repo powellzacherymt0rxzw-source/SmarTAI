@@ -233,6 +233,7 @@ export function useUpdateStudentAnswer() {
       expectedWorkflowRevision,
       content,
       flag,
+      reviewStatus,
     }: {
       taskId: string;
       studentId: string;
@@ -240,10 +241,12 @@ export function useUpdateStudentAnswer() {
       expectedWorkflowRevision?: number;
       content?: string;
       flag?: string[];
+      reviewStatus?: "pending" | "confirmed";
     }) => tasksApi.updateStudentAnswer(taskId, studentId, qId, {
       expected_workflow_revision: expectedWorkflowRevision,
       content,
       flag,
+      review_status: reviewStatus,
     }),
     onSuccess: (data, variables) => {
       queryClient.setQueryData<Task>(taskKeys.detail(variables.taskId), (current) => {

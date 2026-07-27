@@ -197,6 +197,7 @@ class UpdateStudentAnswerRequest(BaseModel):
     expected_workflow_revision: Optional[int] = Field(default=None, ge=0)
     content: Optional[str] = None
     flag: Optional[List[str]] = None      # pass [] to clear flags
+    review_status: Optional[Literal["pending", "confirmed"]] = None
 
 
 class UpdateStudentIdentityRequest(BaseModel):
@@ -3636,31 +3637,31 @@ async def task_parse_submissions(
     _check_owner(t, current)
     _require_task_llm_principal(t, current)
     base_workflow_revision = t.workflow_revision
-    if t.grading_setup is None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail={"code": "grading_setup_required"},
-        )
     problems_snapshot = {
         q_id: dict(problem) for q_id, problem in t.problem_data.items()
     }
 
     owner_registry = registry.for_owner(current.id)
-    selected_provider_id = (
-        str(recognition_provider_id or "").strip()
-        or t.grading_setup.primary_provider_id
-    )
-    try:
-        recognition_registry = owner_registry.select(
-            [selected_provider_id],
-            primary_provider_id=selected_provider_id,
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "recognition_provider_not_enabled"},
-        ) from exc
-    provider = recognition_registry.pick_default()
+    selected_provider_id = str(recognition_provider_id or "").strip()
+    if selected_provider_id:
+        try:
+            recognition_registry = owner_registry.select(
+                [selected_provider_id],
+                primary_provider_id=selected_provider_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "recognition_provider_not_enabled"},
+            ) from exc
+        provider = recognition_registry.pick_default()
+    else:
+        # Submission recognition and grading are separate decisions.  A saved
+        # grading setup must not silently choose the recognition model when a
+        # teacher replaces submissions; use the owner's current default unless
+        # a dedicated recognition provider was explicitly requested.
+        provider = owner_registry.pick_default()
+        selected_provider_id = str(getattr(provider, "provider_id", "") or "")
     if provider is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -4976,14 +4977,24 @@ def update_student_answer(
             "type": str(problem.get("type") or ""),
             "content": "",
             "flag": [],
+            "review_status": "pending",
         }
     else:
         # Patch — copy-on-write so TaskStore's update detects the change.
         new_answer = dict(answers[target_idx])
+    changed_recognition = req.content is not None or req.flag is not None
     if req.content is not None:
         new_answer["content"] = req.content
     if req.flag is not None:
         new_answer["flag"] = list(req.flag)
+    if req.review_status is not None:
+        new_answer["review_status"] = req.review_status
+    elif changed_recognition:
+        # Any later text/flag edit reopens the acknowledgement so a stale
+        # confirmation cannot silently survive changed recognition content.
+        new_answer["review_status"] = "pending"
+    else:
+        new_answer.setdefault("review_status", "pending")
 
     new_answers = list(answers)
     if target_idx is None:

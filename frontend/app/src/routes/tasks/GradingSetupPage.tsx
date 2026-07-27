@@ -43,19 +43,7 @@ const SAMPLE_OPTIONS = [1, 2, 3, 4, 5] as const;
 const MAX_NOTES_LENGTH = 500;
 const NON_BLOCKING_SETUP_ISSUES = new Set(["grading_setup_required"]);
 
-type GradingSetupPageProps = {
-  embedded?: boolean;
-  submitLabel?: string;
-  onBack?: () => void;
-  onSaved?: () => void | Promise<void>;
-};
-
-export function GradingSetupPage({
-  embedded = false,
-  submitLabel,
-  onBack,
-  onSaved,
-}: GradingSetupPageProps = {}) {
+export function GradingSetupPage() {
   const { taskId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -74,14 +62,11 @@ export function GradingSetupPage({
   const [selectionNoticeKey, setSelectionNoticeKey] = useState<GradingSetupCopyKey | null>(null);
 
   const response = setupQuery.data;
-  const returnTo = taskId && !embedded
+  const returnTo = taskId
     ? getSafeTaskReturnTo(taskId, searchParams.get("returnTo"))
     : null;
   const setupHref = taskId ? getTaskGradingSetupHref(taskId, returnTo ?? undefined) : null;
-  const backHref = taskId ? returnTo ?? `/tasks/${taskId}/questions` : "/";
-  const byokReturnHref = taskId && embedded
-    ? `/tasks/${taskId}/submissions/upload?phase=settings`
-    : setupHref;
+  const backHref = taskId ? returnTo ?? `/tasks/${taskId}/submissions` : "/";
   const serverSetup = response?.grading_setup ?? response?.suggested_setup ?? null;
   const serverKey = response
     ? `${response.workflow_revision}:${response.grading_setup_fingerprint ?? "suggested"}:${response.available_experts.map((expert) => `${expert.provider_id}:${expert.enabled}:${expert.is_shared}`).sort().join("|")}`
@@ -213,11 +198,7 @@ export function GradingSetupPage({
       });
       initialSetupRef.current = serializeSetup(setup);
       allowLeaveRef.current = true;
-      if (onSaved) {
-        await onSaved();
-        return;
-      }
-      navigate(returnTo ?? `/tasks/${taskId}/submissions/upload`);
+      navigate(returnTo ?? `/tasks/${taskId}/grading/preflight`);
     } catch (error) {
       const normalized = normalizeAPIError(error);
       const code = apiErrorCode(normalized);
@@ -237,20 +218,13 @@ export function GradingSetupPage({
   }
 
   return (
-    <div className={embedded ? "min-w-0 w-full" : "min-w-0 w-full max-w-[1300px]"}>
-      {!embedded ? (
-        <>
-          <h1 className="min-h-9 break-words text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
-            {gradingSetupText(locale, "title")}
-          </h1>
-          <NewTaskStepper currentStep={3} />
-        </>
-      ) : null}
+    <div className="min-w-0 w-full max-w-[1300px]">
+      <h1 className="min-h-9 break-words text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
+        {gradingSetupText(locale, "title")}
+      </h1>
+      <NewTaskStepper currentStep={5} />
 
-      <section className={cn(
-        "w-full rounded-[10px] border bg-card px-5 pb-4 pt-5 sm:px-8 sm:pb-5 sm:pt-5",
-        embedded ? "mt-4" : "mx-auto mt-[35px] max-w-[980px] sm:min-h-[540px]",
-      )}>
+      <section className="mx-auto mt-[35px] w-full max-w-[980px] rounded-[10px] border bg-card px-5 pb-4 pt-5 sm:min-h-[540px] sm:px-8 sm:pb-5 sm:pt-5">
         {!taskId ? (
           <CenteredState
             title={gradingSetupText(locale, "taskMissingTitle")}
@@ -270,8 +244,6 @@ export function GradingSetupPage({
         ) : response && !setup ? (
           <ModelRequiredState
             locale={locale}
-            taskId={taskId}
-            embedded={embedded}
             setupHref={setupHref ?? `/tasks/${taskId}/grading-setup`}
             backHref={backHref}
             hasReturnTo={Boolean(returnTo)}
@@ -323,7 +295,7 @@ export function GradingSetupPage({
                 <div role="alert" className="mt-2 flex items-center justify-between gap-3 text-[11px] leading-4 text-danger">
                   <span>{blockingMessage}</span>
                   {blockingIssue === "provider_required" ? (
-                    <Link to={`/settings/byok?returnTo=${encodeURIComponent(byokReturnHref ?? `/tasks/${taskId}/grading-setup`)}`} className="inline-flex h-7 shrink-0 items-center rounded-[6px] bg-primary px-2.5 font-semibold text-primary-foreground hover:opacity-90">
+                    <Link to={`/settings/byok?returnTo=${encodeURIComponent(setupHref ?? `/tasks/${taskId}/grading-setup`)}`} className="inline-flex h-7 shrink-0 items-center rounded-[6px] bg-primary px-2.5 font-semibold text-primary-foreground hover:opacity-90">
                       {gradingSetupText(locale, "configureModels")}
                     </Link>
                   ) : isReadOnly ? (
@@ -338,29 +310,13 @@ export function GradingSetupPage({
             </div>
 
             <footer className="mt-3 flex shrink-0 flex-col-reverse gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
-              {onBack ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isDirty || window.confirm(gradingSetupText(locale, "leaveDescription"))) {
-                      allowLeaveRef.current = true;
-                      onBack();
-                    }
-                  }}
-                  className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] border bg-card px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto"
-                >
-                  <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-                  {gradingSetupText(locale, "backToUpload")}
-                </button>
-              ) : (
-                <Link to={backHref} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] border bg-card px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto">
-                  <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-                  {gradingSetupText(locale, returnTo ? "backToPrevious" : "backToQuestions")}
-                </Link>
-              )}
+              <Link to={backHref} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] border bg-card px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto">
+                <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+                {gradingSetupText(locale, "backToPrevious")}
+              </Link>
               <button type="submit" disabled={actionDisabled} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[270px]">
                 {saveSetup.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
-                {saveSetup.isPending ? gradingSetupText(locale, "saving") : submitLabel ?? gradingSetupText(locale, "saveAndContinue")}
+                {saveSetup.isPending ? gradingSetupText(locale, "saving") : gradingSetupText(locale, "saveAndContinue")}
                 {!saveSetup.isPending ? <ChevronRight aria-hidden="true" className="h-4 w-4" /> : null}
               </button>
             </footer>
@@ -849,17 +805,12 @@ function SelectField({ label, value, disabled = false, description, onChange, ch
   );
 }
 
-function ModelRequiredState({ locale, taskId, embedded, setupHref, backHref, hasReturnTo }: {
+function ModelRequiredState({ locale, setupHref, backHref, hasReturnTo }: {
   locale: Locale;
-  taskId: string;
-  embedded: boolean;
   setupHref: string;
   backHref: string;
   hasReturnTo: boolean;
 }) {
-  const byokReturnTo = embedded
-    ? `/tasks/${taskId}/submissions/upload?phase=settings`
-    : setupHref;
   return (
     <div className="flex min-h-[450px] flex-col justify-center">
       <div className="rounded-[10px] border border-amber-200 bg-amber-50/70 px-5 py-5 dark:border-amber-900 dark:bg-amber-950/20 sm:flex sm:items-center sm:justify-between sm:gap-5">
@@ -867,7 +818,7 @@ function ModelRequiredState({ locale, taskId, embedded, setupHref, backHref, has
           <div className="flex items-center gap-2"><Settings2 aria-hidden="true" className="h-5 w-5 text-warning" /><h2 className="text-[17px] font-bold text-foreground">{gradingSetupText(locale, "noModelsTitle")}</h2></div>
           <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{gradingSetupText(locale, "noModelsDescription")}</p>
         </div>
-        <Link to={`/settings/byok?returnTo=${encodeURIComponent(byokReturnTo)}`} className="mt-4 inline-flex h-10 shrink-0 items-center justify-center rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring sm:mt-0">
+        <Link to={`/settings/byok?returnTo=${encodeURIComponent(setupHref)}`} className="mt-4 inline-flex h-10 shrink-0 items-center justify-center rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring sm:mt-0">
           {gradingSetupText(locale, "configureModels")}
         </Link>
       </div>

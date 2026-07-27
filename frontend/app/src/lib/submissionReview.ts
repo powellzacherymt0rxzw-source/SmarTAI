@@ -1,6 +1,6 @@
 import type { ProblemInfo, StudentAnswerInfo, StudentSubmission } from "@/types";
 
-export type SubmissionAnswerState = "recognized" | "flagged" | "empty" | "missing";
+export type SubmissionAnswerState = "recognized" | "reviewed" | "flagged" | "empty" | "missing";
 export type SubmissionReviewFilter = "all" | "review" | "missing" | "identity";
 export type SubmissionReviewSort = "student_id" | "student_name" | "attention";
 
@@ -64,6 +64,7 @@ export function buildSubmissionQuestions(
 
 export function getAnswerState(answer?: StudentAnswerInfo): SubmissionAnswerState {
   if (!answer) return "missing";
+  if (answer.review_status === "confirmed") return "reviewed";
   if (!answer.content?.trim()) return "empty";
   if (answer.flag?.length) return "flagged";
   return "recognized";
@@ -84,7 +85,7 @@ export function getSubmissionReviewStats(
       const answer = answers.get(question.id);
       const state = getAnswerState(answer);
       if (answer?.content?.trim()) answeredCells += 1;
-      if (state !== "recognized") reviewCells += 1;
+      if (!["recognized", "reviewed"].includes(state)) reviewCells += 1;
     }
   }
 
@@ -139,7 +140,7 @@ export function selectSubmissionReview(
 
     const answers = new Map((student.stu_ans ?? []).map((answer) => [answer.q_id, answer]));
     const states = scopedQuestions.map((question) => getAnswerState(answers.get(question.id)));
-    if ((filter === "review" || wantsReview) && !states.some((state) => state !== "recognized")) return false;
+    if ((filter === "review" || wantsReview) && !states.some((state) => !["recognized", "reviewed"].includes(state))) return false;
     if ((filter === "missing" || wantsMissing) && !states.some((state) => state === "missing" || state === "empty")) return false;
     if (wantsRecognized && !states.some((state) => state === "recognized")) return false;
 
@@ -172,7 +173,7 @@ export function answerMap(student: StudentSubmission): Map<string, StudentAnswer
 export function studentNeedsAttention(student: StudentSubmission, questions: SubmissionQuestion[]): boolean {
   if (student.identity_status === "needs_review") return true;
   const answers = answerMap(student);
-  return questions.some((question) => getAnswerState(answers.get(question.id)) !== "recognized");
+  return questions.some((question) => !["recognized", "reviewed"].includes(getAnswerState(answers.get(question.id))));
 }
 
 function compareStudents(

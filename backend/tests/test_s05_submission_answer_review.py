@@ -85,6 +85,7 @@ def test_answer_correction_uses_revision_cas_and_avoids_pii_log(client, caplog):
     body = response.json()
     assert body["answer"]["content"] == "teacher corrected text"
     assert body["answer"]["flag"] == []
+    assert body["answer"]["review_status"] == "pending"
     assert body["workflow_revision"] == 1
     assert get_task_store().get("T_s05").workflow_revision == 1
     assert "PB-SENSITIVE" not in caplog.text
@@ -114,6 +115,7 @@ def test_missing_matrix_cell_can_be_created_only_for_real_question(client):
         "type": "证明题",
         "content": "newly restored answer",
         "flag": ["teacher restored from source"],
+        "review_status": "pending",
     }
     stored_answers = get_task_store().get("T_s05").student_data["PB-SENSITIVE"]["stu_ans"]
     assert [item["q_id"] for item in stored_answers] == ["q-sensitive-1", "q2"]
@@ -173,3 +175,40 @@ def test_answer_correction_is_blocked_while_workflow_is_busy(client):
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "task_workflow_busy"
     assert get_task_store().get("T_s05").workflow_revision == 0
+
+
+def test_flagged_or_blank_answer_can_be_confirmed_without_erasing_audit_flags(client):
+    get_task_store().create(_task())
+
+    response = client.put(
+        "/tasks/T_s05/students/PB-SENSITIVE/answers/q-sensitive-1",
+        headers=HEADERS,
+        json={
+            "expected_workflow_revision": 0,
+            "review_status": "confirmed",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["answer"]["review_status"] == "confirmed"
+    assert response.json()["answer"]["flag"] == ["low confidence"]
+    stored = get_task_store().get("T_s05")
+    assert stored.student_data["PB-SENSITIVE"]["stu_ans"][0]["review_status"] == "confirmed"
+
+
+def test_editing_confirmed_answer_reopens_review(client):
+    task = _task()
+    task.student_data["PB-SENSITIVE"]["stu_ans"][0]["review_status"] = "confirmed"
+    get_task_store().create(task)
+
+    response = client.put(
+        "/tasks/T_s05/students/PB-SENSITIVE/answers/q-sensitive-1",
+        headers=HEADERS,
+        json={
+            "expected_workflow_revision": 0,
+            "content": "teacher changed the recognized text again",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["answer"]["review_status"] == "pending"

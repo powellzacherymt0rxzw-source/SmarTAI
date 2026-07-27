@@ -268,6 +268,10 @@ class StudentAnswerInfo(BaseModel):
     type: str
     content: str = Field(description="Student's answer content; empty string if unanswered")
     flag: List[str] = Field(default_factory=list, description="Recognition issues/flags")
+    review_status: Literal["pending", "confirmed"] = Field(
+        default="pending",
+        description="Teacher acknowledgement state for recognition issues; flags remain as audit evidence.",
+    )
 
     @field_validator("q_id", mode="before")
     @classmethod

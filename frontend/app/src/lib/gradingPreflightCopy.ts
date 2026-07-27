@@ -1,7 +1,12 @@
 import type { Locale } from "@/i18n/messages";
 
 const copy = {
-  title: ["批改前确认", "Pre-Grading Confirmation"],
+  title: ["批改任务摘要", "Grading Run Summary"],
+  countdownTitle: ["即将开始 SmarTAI 批改", "SmarTAI grading is about to start"],
+  countdownDescription: ["请快速核对本次任务摘要；倒计时结束后会自动进入执行批改。", "Review this run summary. Grading starts automatically when the countdown ends."],
+  countdownUnit: ["秒后自动开始", "seconds until automatic start"],
+  backToSetup: ["返回修改批改设置", "Back to Grading Setup"],
+  startNow: ["立即开始批改", "Start Grading Now"],
   taskSummary: ["任务摘要", "Task Summary"],
   problems: ["道题", "problems"],
   students: ["名学生", "students"],
@@ -33,7 +38,7 @@ const copy = {
   editSubmissions: ["校对学生作答", "Review submissions"],
   editSetup: ["修改批改设置", "Edit grading setup"],
   configureModels: ["配置模型与 BYOK", "Configure models and BYOK"],
-  start: ["开始批改", "Start Grading"],
+  start: ["立即开始批改", "Start Grading Now"],
   starting: ["正在启动…", "Starting…"],
   loading: ["正在读取批改前确认信息…", "Loading pre-grading confirmation…"],
   loadError: ["无法读取批改前确认信息", "Pre-grading confirmation could not be loaded"],

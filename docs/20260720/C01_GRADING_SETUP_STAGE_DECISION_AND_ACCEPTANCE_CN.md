@@ -1,6 +1,8 @@
 # C01 批改设置阶段决定与验收记录（2026-07-20）
 
-> 兼容路由：`/tasks/:id/grading-setup`；主流程自 2026-07-27 起内嵌在 `/tasks/:id/submissions/upload?phase=settings`
+> **2026-07-27 最新覆盖：** C01 不再内嵌于上传作答，也不参与作答识别。它归属顶部第 6“执行批改”，主动作“开启 SmarTAI 批改”先进入带 5 秒倒计时的只读任务摘要。作答识别独立使用当前用户默认可用 provider。最新合同见 `docs/20260727/S01_S05_C01_C02_SUBMISSION_TO_GRADING_REALIGNMENT_STAGE_CN.md`。
+
+> canonical 路由：`/tasks/:id/grading-setup`；同日较早采用的 `/tasks/:id/submissions/upload?phase=settings` 内嵌方案已废止。
 >
 > 该表单只负责编辑并保存本任务的批改方案。主流程把它作为“上传作答”的第二个内部阶段；后续 C02 `/tasks/:id/grading/preflight` 只读取同一份配置做批改前确认，不再提供第二套可编辑控件。
 

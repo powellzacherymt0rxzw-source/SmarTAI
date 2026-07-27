@@ -1,4 +1,4 @@
-import { FileCheck2, FileUp, LoaderCircle, SlidersHorizontal } from "lucide-react";
+import { FileUp, LoaderCircle } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -6,7 +6,7 @@ import {
   type ChangeEvent,
   type DragEvent,
 } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { normalizeAPIError } from "@/api/client";
 import { useParseSubmissions, useTask } from "@/api/hooks";
@@ -15,7 +15,6 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { MessageKey } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import type { SubmissionIdentityMode } from "@/types";
-import { GradingSetupPage } from "./GradingSetupPage";
 
 const SUBMISSION_SUFFIXES = [
   ".zip", ".rar", ".7z", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2",
@@ -40,7 +39,6 @@ const submissionDrafts = new Map<string, SubmissionDraft>();
 export function AddSubmissionsPage() {
   const { taskId } = useParams();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useI18n();
   const taskQuery = useTask(taskId);
   const parseSubmissions = useParseSubmissions();
@@ -51,12 +49,10 @@ export function AddSubmissionsPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(savedDraft?.selectedFile ?? null);
   const [rosterFile, setRosterFile] = useState<File | null>(savedDraft?.rosterFile ?? null);
   const [identityMode, setIdentityMode] = useState<SubmissionIdentityMode>(savedDraft?.identityMode ?? "filename");
-  const [phase, setPhase] = useState<"upload" | "settings">(
-    searchParams.get("phase") === "settings" && savedDraft?.selectedFile ? "settings" : "upload",
-  );
   const [isDragging, setIsDragging] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
   const [formError, setFormError] = useState<string | null>(null);
+  const [needsModel, setNeedsModel] = useState(false);
 
   const task = taskQuery.data;
   const hasExistingSubmissions = Boolean(task?.submission_file_name || task?.student_count);
@@ -93,6 +89,7 @@ export function AddSubmissionsPage() {
     setSelectedFile(file);
     setUploadPercent(0);
     setFormError(null);
+    setNeedsModel(false);
   }
 
   function selectRoster(file: File | undefined) {
@@ -103,6 +100,7 @@ export function AddSubmissionsPage() {
     }
     setRosterFile(file);
     setFormError(null);
+    setNeedsModel(false);
   }
 
   function handleSubmissionInput(event: ChangeEvent<HTMLInputElement>) {
@@ -121,29 +119,9 @@ export function AddSubmissionsPage() {
     selectSubmission(event.dataTransfer.files?.[0]);
   }
 
-  function showSettings() {
-    setFormError(null);
-    if (isRecognitionRunning) {
-      if (taskId) navigate(`/tasks/${taskId}/submissions/progress`);
-      return;
-    }
-    if (uploadDisabledReason) {
-      setFormError(uploadDisabledReason);
-      return;
-    }
-    setPhase("settings");
-    setSearchParams({ phase: "settings" }, { replace: true });
-    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  }
-
-  function showUpload() {
-    setPhase("upload");
-    setSearchParams({}, { replace: true });
-    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  }
-
   async function handleStart() {
     setFormError(null);
+    setNeedsModel(false);
     if (!taskId) {
       setFormError(t("submissionUploadTaskUnavailable"));
       return;
@@ -180,6 +158,7 @@ export function AddSubmissionsPage() {
         navigate(`/tasks/${taskId}/submissions/progress`);
       }
     } catch (error) {
+      setNeedsModel(submissionErrorCode(error) === "recognition_provider_not_enabled");
       setFormError(localizeSubmissionError(error, t));
     }
   }
@@ -189,46 +168,6 @@ export function AddSubmissionsPage() {
     : identityMode === "manual_review"
       ? t("submissionUploadManualHelp")
       : t("submissionUploadFilenameHelp");
-
-  if (phase === "settings" && selectedFile) {
-    return (
-      <div className="w-full max-w-[1300px]">
-        <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
-          {t("submissionUploadSetupTitle")}
-        </h1>
-        <NewTaskStepper currentStep={3} />
-        <p className="mt-5 max-w-3xl text-[13px] leading-5 text-muted-foreground">
-          {t("submissionUploadSetupDescription")}
-        </p>
-        <div className="mt-4 flex min-h-[72px] flex-col gap-3 rounded-[10px] border bg-card px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[9px] bg-primary/10 text-primary">
-              <FileCheck2 aria-hidden="true" className="h-5 w-5" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-muted-foreground">{t("submissionUploadSetupFileLabel")}</p>
-              <p className="mt-1 truncate text-sm font-semibold text-foreground" title={selectedFile.name}>{selectedFile.name}</p>
-            </div>
-          </div>
-          <span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-primary/10 px-3 text-xs font-semibold text-primary">
-            <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5" />
-            {t("submissionUploadIdentityTitle")}
-          </span>
-        </div>
-        {formError ? (
-          <p className="mt-3 rounded-[8px] border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-200" role="alert">
-            {formError}
-          </p>
-        ) : null}
-        <GradingSetupPage
-          embedded
-          submitLabel={t("submissionUploadSaveAndStart")}
-          onBack={showUpload}
-          onSaved={handleStart}
-        />
-      </div>
-    );
-  }
 
   return (
     <div className="w-full max-w-[1300px]">
@@ -305,6 +244,7 @@ export function AddSubmissionsPage() {
                 onClick={() => {
                   setIdentityMode(option.mode);
                   setFormError(null);
+                  setNeedsModel(false);
                 }}
                 className={cn(
                   "inline-flex h-7 items-center justify-center rounded-full px-3 text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
@@ -354,7 +294,17 @@ export function AddSubmissionsPage() {
         <div className="mt-[31px] flex min-h-10 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 text-[13px] leading-5">
             {formError ? (
-              <p id="submission-upload-action-message" role="alert" className="text-danger">{formError}</p>
+              <p id="submission-upload-action-message" role="alert" className="text-danger">
+                {formError}
+                {needsModel && taskId ? (
+                  <Link
+                    to={`/settings/byok?returnTo=${encodeURIComponent(`/tasks/${taskId}/submissions/upload`)}`}
+                    className="ml-2 font-semibold text-primary underline underline-offset-2"
+                  >
+                    {t("submissionUploadConfigureModels")}
+                  </Link>
+                ) : null}
+              </p>
             ) : hasExistingSubmissions ? (
               <p id="submission-upload-action-message" className="text-muted-foreground">
                 {t("submissionUploadExisting")} {" "}
@@ -374,13 +324,15 @@ export function AddSubmissionsPage() {
             disabled={parseSubmissions.isPending || isWorkflowBusy}
             title={uploadDisabledReason ?? undefined}
             aria-describedby={formError || hasExistingSubmissions || uploadDisabledReason ? "submission-upload-action-message" : undefined}
-            onClick={showSettings}
+            onClick={() => void handleStart()}
           >
             {parseSubmissions.isPending ? (
               <><LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />{t("submissionUploadStarting")}</>
             ) : isRecognitionRunning
               ? t("submissionUploadViewProgress")
-              : t("submissionUploadContinueSetup")}
+              : hasExistingSubmissions
+                ? t("submissionUploadOverwriteStart")
+                : t("submissionUploadStart")}
           </button>
         </div>
       </div>
@@ -418,10 +370,7 @@ function formatFileSize(bytes: number) {
 
 function localizeSubmissionError(error: unknown, t: (key: MessageKey) => string) {
   const normalized = normalizeAPIError(error);
-  const detail = normalized.payload?.detail;
-  const code = typeof detail === "object" && detail && "code" in detail
-    ? String((detail as { code?: unknown }).code ?? "")
-    : "";
+  const code = submissionErrorCode(error);
   if (["submission_source_unsupported", "submission_source_empty", "submission_archive_empty", "submission_archive_invalid"].includes(code)) {
     return t("submissionUploadErrorInvalid");
   }
@@ -430,10 +379,17 @@ function localizeSubmissionError(error: unknown, t: (key: MessageKey) => string)
   }
   if (code.startsWith("submission_roster_")) return t("submissionUploadErrorRoster");
   if (code === "recognition_provider_not_enabled") return t("submissionUploadErrorProvider");
-  if (code === "grading_setup_required") return t("submissionUploadSetupRequired");
   if (["workflow_busy", "different_submission_running"].includes(code)) return t("submissionUploadBusy");
   if (["invalid_state", "stale_revision", "replacement_confirmation_required"].includes(code)) {
     return t("submissionUploadErrorConflict");
   }
   return t("submissionUploadErrorGeneric");
+}
+
+function submissionErrorCode(error: unknown) {
+  const normalized = normalizeAPIError(error);
+  const detail = normalized.payload?.detail;
+  return typeof detail === "object" && detail && "code" in detail
+    ? String((detail as { code?: unknown }).code ?? "")
+    : "";
 }

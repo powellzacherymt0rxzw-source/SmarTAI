@@ -32,7 +32,10 @@ export function getTaskReachableStep(task?: TaskReachabilityInput | null): numbe
     case "parsing_submissions":
       return 3;
     case "submissions_ready":
-      return 4;
+      // Once recognition is complete, both the review surface (step 5) and
+      // grading setup (step 6) are valid.  Teachers can move forward after
+      // review without an otherwise-disabled stepper target.
+      return 5;
     case "grading":
       return 5;
     case "graded":

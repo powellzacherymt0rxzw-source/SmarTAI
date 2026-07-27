@@ -35,7 +35,7 @@ const EXPLANATION_KEYS: Record<SubmissionReviewSelection["explanation"], Message
 export function SubmissionReviewOverviewPage() {
   const { taskId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   const taskQuery = useTask(taskId);
   const query = searchParams.get("q") ?? "";
   const deferredQuery = useDeferredValue(query);
@@ -69,10 +69,10 @@ export function SubmissionReviewOverviewPage() {
     setSearchParams(next, { replace: true });
   }
 
-  const firstAttentionStudent = selection.students.find((student) => studentNeedsAttention(student, selection.questions))
-    ?? selection.students[0];
-  const firstAttentionQuestion = firstAttentionStudent
-    ? firstReviewQuestion(firstAttentionStudent, selection.questions)
+  const attentionStudent = selection.students.find((student) => studentNeedsAttention(student, selection.questions));
+  const detailStudent = attentionStudent ?? selection.students[0];
+  const detailQuestion = detailStudent
+    ? firstReviewQuestion(detailStudent, selection.questions)
     : null;
 
   return (
@@ -203,19 +203,19 @@ export function SubmissionReviewOverviewPage() {
                 {t("submissionReviewShowingQuestionsSuffix")}
               </p>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                {firstAttentionStudent && firstAttentionQuestion ? (
+                {detailStudent && detailQuestion ? (
                   <Link
-                    to={studentReviewPath(taskId, firstAttentionStudent.stu_id, firstAttentionQuestion.id, searchParams.toString())}
+                    to={studentReviewPath(taskId, detailStudent.stu_id, detailQuestion.id, searchParams.toString())}
                     className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto"
                   >
-                    {t("submissionReviewOpenStudent")}
+                    {t(attentionStudent ? "submissionReviewOpenStudent" : "submissionReviewOpenDetails")}
                   </Link>
                 ) : null}
                 <Link
-                  to={`/tasks/${taskId}/grading/preflight`}
+                  to={`/tasks/${taskId}/grading-setup`}
                   className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
                 >
-                  {locale === "en-US" ? "Pre-Grading Confirmation" : "批改前确认"}
+                  {t("submissionReviewEnterGradingSetup")}
                   <ChevronRight aria-hidden="true" className="h-4 w-4" />
                 </Link>
               </div>
@@ -334,6 +334,7 @@ function AnswerStatusLink({
   const state = getAnswerState(answer);
   const labels: Record<SubmissionAnswerState, MessageKey> = {
     recognized: "submissionReviewCellRecognized",
+    reviewed: "submissionReviewCellReviewed",
     flagged: "submissionReviewCellFlagged",
     empty: "submissionReviewCellEmpty",
     missing: "submissionReviewCellMissing",
@@ -348,6 +349,7 @@ function AnswerStatusLink({
       className={cn(
         "inline-flex h-7 min-w-[82px] items-center justify-center rounded-full px-3 text-[11px] font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-ring",
         state === "recognized" && "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-200",
+        state === "reviewed" && "bg-blue-100 text-primary hover:bg-blue-200 dark:bg-blue-950/70 dark:text-blue-200",
         state === "flagged" && "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-950/70 dark:text-amber-200",
         (state === "empty" || state === "missing") && "bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-950/60 dark:text-red-200",
       )}
@@ -444,7 +446,7 @@ function studentReviewPath(taskId: string, studentId: string, questionId: string
 
 function firstReviewQuestion(student: StudentSubmission, questions: SubmissionQuestion[]) {
   const answers = answerMap(student);
-  return questions.find((question) => getAnswerState(answers.get(question.id)) !== "recognized")
+  return questions.find((question) => !["recognized", "reviewed"].includes(getAnswerState(answers.get(question.id))))
     ?? questions[0]
     ?? null;
 }

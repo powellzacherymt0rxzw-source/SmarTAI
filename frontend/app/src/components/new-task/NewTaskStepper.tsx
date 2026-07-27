@@ -23,7 +23,7 @@ const STEP_PATHS = [
   "questions",
   "submissions/upload",
   "submissions",
-  "grading/preflight",
+  "grading-setup",
   "review",
   "results",
 ] as const;
@@ -94,8 +94,12 @@ function stepHref(
     return `/tasks/${encodeURIComponent(taskId)}/edit?returnTo=${encodeURIComponent(returnTo)}`;
   }
   if (index === 5 && pathname.endsWith("/grading/progress")) return `${pathname}${search}`;
+  if (index === 5 && pathname.endsWith("/grading/preflight")) return `${pathname}${search}`;
   if (index === 5 && (task?.status === "grading" || (task?.status === "error" && task.grading_job_id))) {
     return `/tasks/${encodeURIComponent(taskId)}/grading/progress`;
+  }
+  if (index === 5 && ["graded", "review_confirmed", "generating_analysis", "finalized"].includes(task?.status ?? "")) {
+    return `/tasks/${encodeURIComponent(taskId)}/grading/preflight`;
   }
   return `/tasks/${encodeURIComponent(taskId)}/${STEP_PATHS[index]}`;
 }
