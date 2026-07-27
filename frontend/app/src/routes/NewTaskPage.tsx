@@ -44,7 +44,7 @@ export function NewTaskPage() {
   const [searchParams] = useSearchParams();
   const isEditing = Boolean(taskId);
   const returnTo = safeTaskReturnPath(searchParams.get("returnTo"), taskId);
-  const reachableStep = isEditing ? taskStepFromPath(returnTo) : 0;
+  const returnReachableStep = isEditing ? taskStepFromPath(returnTo) : 0;
   const semesterOptions = useMemo(() => buildSemesterOptions(), []);
   const initialSemester = useMemo(() => {
     const current = getCurrentSemesterId();
@@ -78,6 +78,9 @@ export function NewTaskPage() {
   const updateTask = useUpdateTask();
   const taskQuery = useTask(taskId);
   const expertsQuery = useExperts();
+  const reachableStep = isEditing
+    ? Math.max(returnReachableStep, (taskQuery.data?.problem_count ?? 0) > 0 ? 2 : 0)
+    : 0;
   const enabledExperts = (expertsQuery.data ?? []).filter((expert) => expert.enabled);
   const courseQueryIsCurrent = debouncedCourseDraft.trim() === courseDraft.trim();
   const tagQueryIsCurrent = debouncedTagDraft.trim() === tagDraft.trim();
@@ -406,9 +409,9 @@ function TaskMetadataHeading({
 function taskStepFromPath(pathname: string) {
   if (pathname.includes("/results")) return 7;
   if (pathname.includes("/review")) return 6;
-  if (pathname.includes("/grading/progress")) return 5;
-  if (pathname.includes("/grading-setup") || pathname.includes("/grading/preflight")) return 4;
-  if (pathname.includes("/submissions") || pathname.includes("/students/")) return 3;
+  if (pathname.includes("/grading/")) return 5;
+  if (pathname.includes("/students/") || pathname.endsWith("/submissions")) return 4;
+  if (pathname.includes("/submissions/upload") || pathname.includes("/submissions/progress") || pathname.includes("/grading-setup")) return 3;
   if (pathname.includes("/questions")) return 2;
   if (pathname.includes("/upload/problems") || pathname.includes("/problems/progress")) return 1;
   return 0;

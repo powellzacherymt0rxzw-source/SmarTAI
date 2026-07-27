@@ -1,8 +1,10 @@
 import { Check } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
+import { useTask } from "@/api/hooks/tasks";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { MessageKey } from "@/i18n/messages";
+import { getTaskReachableStep } from "@/lib/taskFlow";
 
 const STEP_KEYS: MessageKey[] = [
   "newTaskStepTask",
@@ -20,8 +22,8 @@ const STEP_PATHS = [
   "upload/problems",
   "questions",
   "submissions/upload",
-  "grading-setup",
-  "grading/progress",
+  "submissions",
+  "grading/preflight",
   "review",
   "results",
 ] as const;
@@ -29,9 +31,11 @@ const STEP_PATHS = [
 export function NewTaskStepper({ currentStep = 0, reachableStep = currentStep, returnState }: { currentStep?: number; reachableStep?: number; returnState?: unknown }) {
   const { t } = useI18n();
   const { taskId } = useParams();
+  const taskQuery = useTask(taskId);
   const location = useLocation();
   const navRef = useRef<HTMLElement>(null);
   const currentStepRef = useRef<HTMLLIElement>(null);
+  const effectiveReachableStep = Math.max(currentStep, reachableStep, getTaskReachableStep(taskQuery.data));
 
   useLayoutEffect(() => {
     const nav = navRef.current;
@@ -50,7 +54,7 @@ export function NewTaskStepper({ currentStep = 0, reachableStep = currentStep, r
             key={key}
             className={`relative flex shrink-0 items-center ${index < STEP_KEYS.length - 1 ? "w-[166px]" : "w-auto"}`}
           >
-            {index <= reachableStep && (taskId || index === 0) ? (
+            {index <= effectiveReachableStep && (taskId || index === 0) ? (
               <Link
                 to={stepHref(taskId, index, location.pathname, location.search)}
                 state={returnState}

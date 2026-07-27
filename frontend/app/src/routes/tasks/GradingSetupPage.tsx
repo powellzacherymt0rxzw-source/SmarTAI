@@ -24,7 +24,19 @@ const SAMPLE_OPTIONS = [1, 2, 3, 4, 5] as const;
 const MAX_NOTES_LENGTH = 500;
 const NON_BLOCKING_SETUP_ISSUES = new Set(["grading_setup_required"]);
 
-export function GradingSetupPage() {
+type GradingSetupPageProps = {
+  embedded?: boolean;
+  submitLabel?: string;
+  onBack?: () => void;
+  onSaved?: () => void | Promise<void>;
+};
+
+export function GradingSetupPage({
+  embedded = false,
+  submitLabel,
+  onBack,
+  onSaved,
+}: GradingSetupPageProps = {}) {
   const { taskId } = useParams();
   const navigate = useNavigate();
   const { locale } = useI18n();
@@ -171,7 +183,12 @@ export function GradingSetupPage() {
         expectedWorkflowRevision: response.workflow_revision,
         gradingSetup: setup,
       });
+      initialSetupRef.current = serializeSetup(setup);
       allowLeaveRef.current = true;
+      if (onSaved) {
+        await onSaved();
+        return;
+      }
       navigate(`/tasks/${taskId}/submissions/upload`);
     } catch (error) {
       const normalized = normalizeAPIError(error);
@@ -192,13 +209,20 @@ export function GradingSetupPage() {
   }
 
   return (
-    <div className="min-w-0 w-full max-w-[1300px]">
-      <h1 className="min-h-9 break-words text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
-        {gradingSetupText(locale, "title")}
-      </h1>
-      <NewTaskStepper currentStep={4} />
+    <div className={embedded ? "min-w-0 w-full" : "min-w-0 w-full max-w-[1300px]"}>
+      {!embedded ? (
+        <>
+          <h1 className="min-h-9 break-words text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
+            {gradingSetupText(locale, "title")}
+          </h1>
+          <NewTaskStepper currentStep={3} />
+        </>
+      ) : null}
 
-      <section className="mx-auto mt-[35px] w-full max-w-[900px] rounded-[10px] border bg-card px-5 pb-4 pt-5 sm:min-h-[540px] sm:px-10 sm:pb-5 sm:pt-5 lg:h-[620px] lg:overflow-hidden">
+      <section className={cn(
+        "w-full rounded-[10px] border bg-card px-5 pb-4 pt-5 sm:px-8 sm:pb-5 sm:pt-5",
+        embedded ? "mt-4" : "mx-auto mt-[35px] max-w-[980px] sm:min-h-[540px]",
+      )}>
         {!taskId ? (
           <CenteredState
             title={gradingSetupText(locale, "taskMissingTitle")}
@@ -216,14 +240,14 @@ export function GradingSetupPage() {
             action={<button type="button" onClick={() => void setupQuery.refetch()} className="h-9 rounded-[7px] border bg-card px-4 text-sm font-semibold hover:bg-muted">{gradingSetupText(locale, "retry")}</button>}
           />
         ) : response && !setup ? (
-          <ModelRequiredState locale={locale} taskId={taskId} />
+          <ModelRequiredState locale={locale} taskId={taskId} embedded={embedded} />
         ) : response && setup ? (
           <form className="flex h-full min-h-0 flex-col" onSubmit={(event) => { event.preventDefault(); void handleSubmit(); }}>
             <fieldset
               disabled={isReadOnly || saveSetup.isPending}
               className={cn("min-h-0 min-w-0 flex-1 border-0 p-0", isReadOnly && "opacity-70")}
             >
-              <div className="h-full min-h-0 lg:overflow-y-auto lg:pr-2">
+              <div className={cn("min-h-0", !embedded && "lg:max-h-[560px] lg:overflow-y-auto lg:pr-2")}>
                 <ModelSection
                   locale={locale}
                   experts={response.available_experts}
@@ -280,13 +304,29 @@ export function GradingSetupPage() {
             </div>
 
             <footer className="mt-3 flex shrink-0 flex-col-reverse gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
-              <Link to={`/tasks/${taskId}/questions`} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] border bg-card px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto">
-                <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-                {gradingSetupText(locale, "backToQuestions")}
-              </Link>
+              {onBack ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isDirty || window.confirm(gradingSetupText(locale, "leaveDescription"))) {
+                      allowLeaveRef.current = true;
+                      onBack();
+                    }
+                  }}
+                  className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] border bg-card px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto"
+                >
+                  <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+                  {gradingSetupText(locale, "backToUpload")}
+                </button>
+              ) : (
+                <Link to={`/tasks/${taskId}/questions`} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] border bg-card px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto">
+                  <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+                  {gradingSetupText(locale, "backToQuestions")}
+                </Link>
+              )}
               <button type="submit" disabled={actionDisabled} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[270px]">
                 {saveSetup.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
-                {gradingSetupText(locale, saveSetup.isPending ? "saving" : "saveAndContinue")}
+                {saveSetup.isPending ? gradingSetupText(locale, "saving") : submitLabel ?? gradingSetupText(locale, "saveAndContinue")}
                 {!saveSetup.isPending ? <ChevronRight aria-hidden="true" className="h-4 w-4" /> : null}
               </button>
             </footer>
@@ -616,8 +656,10 @@ function SelectField({ label, value, disabled = false, description, onChange, ch
   );
 }
 
-function ModelRequiredState({ locale, taskId }: { locale: Locale; taskId: string }) {
-  const returnTo = `/tasks/${taskId}/grading-setup`;
+function ModelRequiredState({ locale, taskId, embedded }: { locale: Locale; taskId: string; embedded: boolean }) {
+  const returnTo = embedded
+    ? `/tasks/${taskId}/submissions/upload?phase=settings`
+    : `/tasks/${taskId}/grading-setup`;
   return (
     <div className="flex min-h-[450px] flex-col justify-center">
       <div className="rounded-[10px] border border-amber-200 bg-amber-50/70 px-5 py-5 dark:border-amber-900 dark:bg-amber-950/20 sm:flex sm:items-center sm:justify-between sm:gap-5">

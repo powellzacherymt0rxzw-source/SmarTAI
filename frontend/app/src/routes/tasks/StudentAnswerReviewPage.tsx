@@ -12,7 +12,15 @@ import {
   Save,
   Search,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type FocusEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CompositionEvent,
+  type FocusEvent,
+  type ReactNode,
+} from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { normalizeAPIError } from "@/api/client";
@@ -21,8 +29,9 @@ import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { Button } from "@/components/ui/Button";
 import { MarkdownMath } from "@/components/ui/MarkdownMath";
 import { useI18n } from "@/i18n/I18nProvider";
-import type { MessageKey } from "@/i18n/messages";
+import type { Locale, MessageKey } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
+import { questionSearchAliases } from "@/lib/questionSearch";
 import {
   answerMap,
   buildSubmissionQuestions,
@@ -33,17 +42,22 @@ import {
 import { getTaskDestination } from "@/lib/taskFlow";
 import type { StudentSubmission } from "@/types";
 
-type PickerMatch = {
-  item: PickerItem;
-  kind: "all" | "exact" | "related";
-};
-
 type PickerItem = {
   id: string;
   primary: string;
   secondary: string;
   searchable: string;
   exactValues: string[];
+};
+
+type PickerMatch = {
+  item: PickerItem;
+  kind: "all" | "exact" | "related";
+};
+
+type AnswerDraft = {
+  content: string;
+  flags: string;
 };
 
 const STATUS_KEYS: Record<SubmissionAnswerState, MessageKey> = {
@@ -53,20 +67,28 @@ const STATUS_KEYS: Record<SubmissionAnswerState, MessageKey> = {
   missing: "studentSubmissionStatusMissing",
 };
 
-/** S05: focused correction for exactly one student × one question. */
+/** S05: one selected student with all questions in one continuous, editable review. */
 export function StudentAnswerReviewPage() {
   const { taskId, studentId, questionId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const taskQuery = useTask(taskId);
   const answerMutation = useUpdateStudentAnswer();
-  const [contentDraft, setContentDraft] = useState("");
-  const [flagDraft, setFlagDraft] = useState("");
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, AnswerDraft>>({});
+  const [savingQuestionId, setSavingQuestionId] = useState<string | null>(null);
+  const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
+  const [activeQuestionId, setActiveQuestionId] = useState(questionId ?? "");
+  const studentFilterParam = searchParams.get("studentFilter") ?? "";
+  const questionFilterParam = searchParams.get("questionFilter") ?? "";
+  const [studentFilter, setStudentFilter] = useState(studentFilterParam);
+  const [questionFilter, setQuestionFilter] = useState(questionFilterParam);
+  const studentFilterComposingRef = useRef(false);
+  const questionFilterComposingRef = useRef(false);
+  const initializedStudentRef = useRef<string | null>(null);
+  const positionedRouteRef = useRef<string | null>(null);
+  const selectedQuestionRef = useRef(questionId ?? "");
 
-  const studentFilter = searchParams.get("studentFilter") ?? "";
-  const questionFilter = searchParams.get("questionFilter") ?? "";
   const students = useMemo(
     () => Object.values(taskQuery.data?.student_data ?? {}).sort(compareStudents),
     [taskQuery.data?.student_data],
@@ -79,11 +101,7 @@ export function StudentAnswerReviewPage() {
     () => students.find((candidate) => candidate.stu_id === studentId),
     [studentId, students],
   );
-  const question = useMemo(
-    () => questions.find((candidate) => candidate.id === questionId),
-    [questionId, questions],
-  );
-  const answer = student && question ? answerMap(student).get(question.id) : undefined;
+  const answers = useMemo(() => student ? answerMap(student) : new Map(), [student]);
   const studentItems = useMemo(
     () => students.map((candidate) => studentPickerItem(candidate, t)),
     [students, t],
@@ -97,32 +115,118 @@ export function StudentAnswerReviewPage() {
     () => matchPickerItems(questionItems, questionFilter),
     [questionFilter, questionItems],
   );
-  const navigableStudents = useMemo(
-    () => selectNavigable(students, studentMatches, studentFilter, (value) => value.stu_id),
-    [studentFilter, studentMatches, students],
-  );
-  const navigableQuestions = useMemo(
-    () => selectNavigable(questions, questionMatches, questionFilter, (value) => value.id),
+  const filteredQuestions = useMemo(
+    () => selectMatched(questions, questionMatches, questionFilter, (value) => value.id),
     [questionFilter, questionMatches, questions],
   );
+  const navigableStudents = useMemo(
+    () => selectMatched(students, studentMatches, studentFilter, (value) => value.stu_id, true),
+    [studentFilter, studentMatches, students],
+  );
   const studentNeighbors = neighbors(navigableStudents, studentId, (value) => value.stu_id);
-  const questionNeighbors = neighbors(navigableQuestions, questionId, (value) => value.id);
-
-  const originalContent = answer?.content ?? "";
-  const originalFlags = (answer?.flag ?? []).join("\n");
-  const isDirty = contentDraft !== originalContent || flagDraft !== originalFlags;
+  const activeIndex = Math.max(0, filteredQuestions.findIndex((question) => question.id === activeQuestionId));
+  const activeQuestion = filteredQuestions[activeIndex] ?? filteredQuestions[0] ?? null;
+  const questionNeighbors = {
+    previous: activeIndex > 0 ? filteredQuestions[activeIndex - 1] : null,
+    next: activeIndex >= 0 && activeIndex < filteredQuestions.length - 1 ? filteredQuestions[activeIndex + 1] : null,
+  };
 
   useEffect(() => {
-    setContentDraft(originalContent);
-    setFlagDraft(originalFlags);
-    setSaveError(null);
-  }, [questionId, studentId, originalContent, originalFlags]);
+    if (!studentFilterComposingRef.current) setStudentFilter(studentFilterParam);
+  }, [studentFilterParam]);
+
+  useEffect(() => {
+    if (!questionFilterComposingRef.current) setQuestionFilter(questionFilterParam);
+  }, [questionFilterParam]);
+
+  useEffect(() => {
+    if (questionId) selectedQuestionRef.current = questionId;
+  }, [questionId]);
+
+  useEffect(() => {
+    if (!student) return;
+    if (initializedStudentRef.current === student.stu_id) {
+      setDrafts((current) => {
+        let changed = false;
+        const next = { ...current };
+        questions.forEach((question) => {
+          if (next[question.id]) return;
+          const answer = answers.get(question.id);
+          next[question.id] = { content: answer?.content ?? "", flags: (answer?.flag ?? []).join("\n") };
+          changed = true;
+        });
+        return changed ? next : current;
+      });
+      return;
+    }
+    initializedStudentRef.current = student.stu_id;
+    setDrafts(Object.fromEntries(questions.map((question) => {
+      const answer = answers.get(question.id);
+      return [question.id, { content: answer?.content ?? "", flags: (answer?.flag ?? []).join("\n") }];
+    })));
+    setSaveErrors({});
+  }, [answers, questions, student]);
+
+  const dirtyQuestionIds = useMemo(() => new Set(questions.flatMap((question) => {
+    const answer = answers.get(question.id);
+    const draft = drafts[question.id];
+    if (!draft) return [];
+    return draft.content !== (answer?.content ?? "") || draft.flags !== (answer?.flag ?? []).join("\n")
+      ? [question.id]
+      : [];
+  })), [answers, drafts, questions]);
+  const isDirty = dirtyQuestionIds.size > 0;
+
+  useEffect(() => {
+    if (!filteredQuestions.length) return;
+    const requested = filteredQuestions.find((question) => question.id === questionId) ?? filteredQuestions[0];
+    const routeKey = `${studentId ?? ""}:${questionId ?? ""}:${questionFilterParam}`;
+    if (positionedRouteRef.current === routeKey) return;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        positionedRouteRef.current = routeKey;
+        setActiveQuestionId(requested.id);
+        if (questionId && requested.id === questionId) scrollQuestionIntoView(requested.id, "auto");
+        else window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [filteredQuestions, questionFilterParam, questionId, studentId]);
+
+  useEffect(() => {
+    if (!filteredQuestions.length) return;
+    let frame = 0;
+    const updateActiveQuestion = () => {
+      frame = 0;
+      let active = filteredQuestions[0]?.id ?? "";
+      for (const question of filteredQuestions) {
+        const element = document.getElementById(questionAnchorId(question.id));
+        if (!element || element.getBoundingClientRect().top > 112) break;
+        active = question.id;
+      }
+      if (active) setActiveQuestionId(active);
+    };
+    const scheduleUpdate = () => {
+      if (!frame) frame = window.requestAnimationFrame(updateActiveQuestion);
+    };
+    updateActiveQuestion();
+    window.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    return () => {
+      window.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [filteredQuestions]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       if (isKeyboardNavigationBlocked(event.target)) return;
-
       if (event.key === "ArrowLeft" && studentNeighbors.previous) {
         event.preventDefault();
         goToStudent(studentNeighbors.previous);
@@ -131,18 +235,17 @@ export function StudentAnswerReviewPage() {
         goToStudent(studentNeighbors.next);
       } else if (event.key === "ArrowUp" && questionNeighbors.previous) {
         event.preventDefault();
-        goToQuestion(questionNeighbors.previous);
+        scrollToQuestion(questionNeighbors.previous.id);
       } else if (event.key === "ArrowDown" && questionNeighbors.next) {
         event.preventDefault();
-        goToQuestion(questionNeighbors.next);
+        scrollToQuestion(questionNeighbors.next.id);
       }
     };
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-    // Navigation callbacks intentionally follow the latest draft and route.
+    // Navigation callbacks intentionally use the latest route and dirty state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDirty, questionNeighbors.next, questionNeighbors.previous, studentNeighbors.next, studentNeighbors.previous]);
+  }, [isDirty, questionNeighbors.next?.id, questionNeighbors.previous?.id, studentNeighbors.next?.stu_id, studentNeighbors.previous?.stu_id]);
 
   useEffect(() => {
     if (!isDirty) return;
@@ -155,7 +258,7 @@ export function StudentAnswerReviewPage() {
     return <Navigate replace to={getTaskDestination(taskQuery.data)} />;
   }
 
-  function setFilter(key: "studentFilter" | "questionFilter", value: string) {
+  function setFilterParam(key: "studentFilter" | "questionFilter", value: string) {
     setSearchParams((previous) => {
       const next = new URLSearchParams(previous);
       if (value.trim()) next.set(key, value);
@@ -169,49 +272,69 @@ export function StudentAnswerReviewPage() {
   }
 
   function goToStudent(target: StudentSubmission | null) {
-    if (!target || !taskId || !questionId || !confirmLeave()) return;
+    const selectedQuestionStillVisible = filteredQuestions.some((question) => question.id === selectedQuestionRef.current);
+    const anchorQuestionId = selectedQuestionStillVisible
+      ? selectedQuestionRef.current
+      : activeQuestion?.id || questionId;
+    if (!target || !taskId || !anchorQuestionId || !confirmLeave()) return;
     navigate({
-      pathname: reviewPath(taskId, target.stu_id, questionId),
+      pathname: reviewPath(taskId, target.stu_id, anchorQuestionId),
       search: searchParams.toString() ? `?${searchParams.toString()}` : "",
     });
   }
 
-  function goToQuestion(target: SubmissionQuestion | null) {
-    if (!target || !taskId || !studentId || !confirmLeave()) return;
-    navigate({
-      pathname: reviewPath(taskId, studentId, target.id),
-      search: searchParams.toString() ? `?${searchParams.toString()}` : "",
+  function scrollToQuestion(targetId: string, behavior: ScrollBehavior = "smooth") {
+    selectedQuestionRef.current = targetId;
+    setActiveQuestionId(targetId);
+    scrollQuestionIntoView(targetId, behavior);
+  }
+
+  function updateDraft(qId: string, patch: Partial<AnswerDraft>) {
+    setDrafts((current) => ({
+      ...current,
+      [qId]: { ...(current[qId] ?? { content: "", flags: "" }), ...patch },
+    }));
+    setSaveErrors((current) => {
+      if (!current[qId]) return current;
+      const next = { ...current };
+      delete next[qId];
+      return next;
     });
   }
 
-  async function saveAnswer(moveNext: boolean) {
-    if (!taskId || !student || !question || !taskQuery.data) return;
-    setSaveError(null);
+  async function saveAnswer(question: SubmissionQuestion, moveNext: boolean) {
+    if (!taskId || !student || !taskQuery.data) return;
+    const draft = drafts[question.id];
+    if (!draft) return;
+    setSavingQuestionId(question.id);
+    setSaveErrors((current) => {
+      const next = { ...current };
+      delete next[question.id];
+      return next;
+    });
     try {
       await answerMutation.mutateAsync({
         taskId,
         studentId: student.stu_id,
         qId: question.id,
         expectedWorkflowRevision: taskQuery.data.workflow_revision,
-        content: contentDraft,
-        flag: parseFlags(flagDraft),
+        content: draft.content,
+        flag: parseFlags(draft.flags),
       });
       toast.success(t("answerReviewSaved"));
-      if (moveNext && questionNeighbors.next) {
-        navigate({
-          pathname: reviewPath(taskId, student.stu_id, questionNeighbors.next.id),
-          search: searchParams.toString() ? `?${searchParams.toString()}` : "",
-        });
-      } else {
-        await taskQuery.refetch();
+      if (moveNext) {
+        const index = filteredQuestions.findIndex((candidate) => candidate.id === question.id);
+        const next = index >= 0 ? filteredQuestions[index + 1] : null;
+        if (next) window.requestAnimationFrame(() => scrollToQuestion(next.id));
       }
     } catch (error) {
-      setSaveError(answerErrorMessage(error, t));
+      setSaveErrors((current) => ({ ...current, [question.id]: answerErrorMessage(error, t) }));
+    } finally {
+      setSavingQuestionId(null);
     }
   }
 
-  const backHref = buildBackHref(taskId, studentId, questionId, searchParams);
-  const state = getAnswerState(answer);
+  const backHref = buildBackHref(taskId, studentId, activeQuestion?.id ?? questionId, searchParams);
 
   return (
     <div className="w-full max-w-[1300px]">
@@ -221,24 +344,22 @@ export function StudentAnswerReviewPage() {
         </h1>
         <Link
           to={backHref}
-          onClick={(event) => {
-            if (!confirmLeave()) event.preventDefault();
-          }}
+          onClick={(event) => { if (!confirmLeave()) event.preventDefault(); }}
           className="inline-flex shrink-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
         >
           <ArrowLeft aria-hidden="true" className="h-4 w-4" />
           {t(searchParams.get("from") === "student" ? "answerReviewBackStudent" : "answerReviewBackMatrix")}
         </Link>
       </div>
-      <NewTaskStepper currentStep={3} />
+      <NewTaskStepper currentStep={4} />
 
       {taskQuery.isLoading ? (
         <PageState title={t("answerReviewLoading")} busy />
       ) : taskQuery.isError ? (
         <PageState title={t("answerReviewLoadError")} action={t("answerReviewRetry")} onAction={() => void taskQuery.refetch()} />
-      ) : !taskId || !studentId || !questionId ? (
+      ) : !taskId || !studentId ? (
         <PageState title={t("answerReviewRouteMissing")} href="/history" action={t("studentSubmissionBackHistory")} />
-      ) : !student || !question ? (
+      ) : !student ? (
         <PageState
           title={t("answerReviewNotFound")}
           description={t("answerReviewNotFoundDescription")}
@@ -246,22 +367,14 @@ export function StudentAnswerReviewPage() {
           action={t("answerReviewBackMatrix")}
         />
       ) : (
-        <section className="mt-[22px] min-w-0" aria-label={`${student.stu_id} · ${question.label}`}>
-          <DimensionNavigation
-            ariaLabel={t("answerReviewStudentNavigation")}
-            currentLabel={student.stu_name || student.stu_id}
-            currentDetail={student.stu_id}
+        <section className="mt-[22px] min-w-0" aria-label={`${student.stu_id} · ${t("studentSubmissionAllAnswersTitle")}`}>
+          <StudentNavigation
+            student={student}
             previous={studentNeighbors.previous}
             next={studentNeighbors.next}
-            previousLabel={(value) => value.stu_name || value.stu_id}
-            nextLabel={(value) => value.stu_name || value.stu_id}
             onPrevious={() => goToStudent(studentNeighbors.previous)}
             onNext={() => goToStudent(studentNeighbors.next)}
-            previousText={t("answerReviewPreviousStudent")}
-            nextText={t("answerReviewNextStudent")}
-            previousIcon={<ArrowLeft aria-hidden="true" className="h-4 w-4" />}
-            nextIcon={<ArrowRight aria-hidden="true" className="h-4 w-4" />}
-            shortcut={t("answerReviewStudentShortcut")}
+            t={t}
           >
             <SmartPicker
               label={t("answerReviewStudentSearchLabel")}
@@ -269,255 +382,171 @@ export function StudentAnswerReviewPage() {
               query={studentFilter}
               matches={studentMatches}
               currentId={student.stu_id}
-              onQueryChange={(value) => setFilter("studentFilter", value)}
+              onDraftChange={setStudentFilter}
+              onCommit={(value) => setFilterParam("studentFilter", value)}
+              onCompositionState={(composing) => { studentFilterComposingRef.current = composing; }}
               onSelect={(id) => goToStudent(students.find((candidate) => candidate.stu_id === id) ?? null)}
               t={t}
             />
-          </DimensionNavigation>
+          </StudentNavigation>
 
-          <div className="mt-3">
-            <DimensionNavigation
-              ariaLabel={t("answerReviewQuestionNavigation")}
-              currentLabel={`${t("answerReviewQuestionPrefix")}${question.label}`}
-              currentDetail={question.type || t("studentSubmissionUnknownType")}
-              previous={questionNeighbors.previous}
-              next={questionNeighbors.next}
-              previousLabel={(value) => `${t("answerReviewQuestionPrefix")}${value.label}`}
-              nextLabel={(value) => `${t("answerReviewQuestionPrefix")}${value.label}`}
-              onPrevious={() => goToQuestion(questionNeighbors.previous)}
-              onNext={() => goToQuestion(questionNeighbors.next)}
-              previousText={t("answerReviewPreviousQuestion")}
-              nextText={t("answerReviewNextQuestion")}
-              previousIcon={<ArrowUp aria-hidden="true" className="h-4 w-4" />}
-              nextIcon={<ArrowDown aria-hidden="true" className="h-4 w-4" />}
-              shortcut={t("answerReviewQuestionShortcut")}
-            >
-              <SmartPicker
-                label={t("answerReviewQuestionSearchLabel")}
-                placeholder={t("answerReviewQuestionSearchPlaceholder")}
-                query={questionFilter}
-                matches={questionMatches}
-                currentId={question.id}
-                onQueryChange={(value) => setFilter("questionFilter", value)}
-                onSelect={(id) => goToQuestion(questions.find((candidate) => candidate.id === id) ?? null)}
-                t={t}
-              />
-            </DimensionNavigation>
-          </div>
-
-          <article className="mt-4 overflow-hidden rounded-[10px] border bg-card">
-            <header className="flex min-h-[48px] flex-wrap items-center justify-between gap-3 border-b bg-slate-50 px-5 py-2 dark:bg-slate-900/40">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">{t("answerReviewRecognizedTextTitle")}</h2>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">{t("answerReviewRecognizedTextDescription")}</p>
-              </div>
-              <AnswerStateBadge state={state} t={t} />
-            </header>
-            <label className="block p-4 sm:p-5">
-              <span className="sr-only">{t("answerReviewContentLabel")}</span>
-              <textarea
-                value={contentDraft}
-                onChange={(event) => setContentDraft(event.target.value)}
-                placeholder={t("answerReviewContentPlaceholder")}
-                className="min-h-[92px] w-full resize-y rounded-[8px] border bg-slate-50 px-4 py-3 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:bg-card focus:ring-2 focus:ring-primary/15 dark:bg-slate-900/45"
-              />
-            </label>
-          </article>
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-[0.94fr_1.06fr]">
-            <article className="min-h-[155px] rounded-[10px] border bg-card p-5">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-foreground">{t("answerReviewQuestionContextTitle")}</h2>
-                <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary">
-                  {question.type || t("studentSubmissionUnknownType")}
-                </span>
-              </div>
-              {question.stem ? (
-                <MarkdownMath className="mt-4 text-foreground">{question.stem}</MarkdownMath>
-              ) : (
-                <p className="mt-4 text-sm leading-6 text-muted-foreground">{t("answerReviewStemUnavailable")}</p>
-              )}
-            </article>
-
-            <article className="min-h-[155px] rounded-[10px] border bg-card p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold text-foreground">{t("answerReviewRecognitionTitle")}</h2>
-                  <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{t("answerReviewRecognitionDescription")}</p>
-                </div>
-                {flagDraft ? (
-                  <button
-                    type="button"
-                    onClick={() => setFlagDraft("")}
-                    className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <RotateCcw aria-hidden="true" className="h-3 w-3" />
-                    {t("answerReviewClearFlags")}
-                  </button>
-                ) : null}
-              </div>
-              <label className="mt-3 block">
-                <span className="sr-only">{t("answerReviewFlagsLabel")}</span>
-                <textarea
-                  value={flagDraft}
-                  onChange={(event) => setFlagDraft(event.target.value)}
-                  placeholder={t("answerReviewFlagsPlaceholder")}
-                  className="min-h-[64px] w-full resize-y rounded-[8px] border bg-slate-50 px-3 py-2.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:bg-card focus:ring-2 focus:ring-primary/15 dark:bg-slate-900/45"
-                />
-              </label>
-            </article>
-          </div>
-
-          <article className="mt-4 flex flex-col gap-3 rounded-[10px] border bg-card px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-start gap-3">
-              <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-teal-50 text-teal-600 dark:bg-teal-950/40 dark:text-teal-300">
-                <FileText aria-hidden="true" className="h-4 w-4" />
-              </span>
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-foreground">{t("answerReviewSourceTitle")}</h2>
-                <p className="mt-1 truncate text-xs text-muted-foreground" title={student.source_filename ?? undefined}>
-                  {student.source_filename || t("answerReviewSourceUnknown")}
-                </p>
-              </div>
-            </div>
-            <p className="max-w-[610px] text-[11px] leading-5 text-muted-foreground">{t("answerReviewSourceUnavailable")}</p>
-          </article>
-
-          {saveError ? (
-            <p className="mt-3 rounded-[8px] border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-200" role="alert">
-              {saveError}
-            </p>
-          ) : null}
-
-          <div className="mt-4 flex flex-col gap-3 rounded-[10px] border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
-              <Keyboard aria-hidden="true" className="h-4 w-4 shrink-0" />
-              <span>{t("answerReviewKeyboardHint")}</span>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button
-                type="button"
-                variant="secondary"
-                className="h-10 px-5"
-                disabled={answerMutation.isPending || !isDirty}
-                onClick={() => void saveAnswer(false)}
-              >
-                {answerMutation.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Save aria-hidden="true" className="h-4 w-4" />}
-                {t(answerMutation.isPending ? "answerReviewSaving" : "answerReviewSave")}
-              </Button>
-              <Button
-                type="button"
-                className="h-10 px-5"
-                disabled={answerMutation.isPending || !isDirty || !questionNeighbors.next}
-                onClick={() => void saveAnswer(true)}
-              >
-                <CheckCircle2 aria-hidden="true" className="h-4 w-4" />
-                {t("answerReviewSaveNext")}
-                <ArrowDown aria-hidden="true" className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-
-          <div className="mt-3">
-            <CompactQuestionNavigation
-              current={`${t("answerReviewQuestionPrefix")}${question.label}`}
-              previous={questionNeighbors.previous}
-              next={questionNeighbors.next}
-              onPrevious={() => goToQuestion(questionNeighbors.previous)}
-              onNext={() => goToQuestion(questionNeighbors.next)}
+          <div className="mt-3 rounded-[10px] border bg-card p-2">
+            <SmartPicker
+              label={t("answerReviewQuestionSearchLabel")}
+              placeholder={t("answerReviewQuestionSearchPlaceholder")}
+              query={questionFilter}
+              matches={questionMatches}
+              currentId={activeQuestion?.id ?? ""}
+              onDraftChange={setQuestionFilter}
+              onCommit={(value) => setFilterParam("questionFilter", value)}
+              onCompositionState={(composing) => { questionFilterComposingRef.current = composing; }}
+              onSelect={(id) => scrollToQuestion(id)}
               t={t}
             />
+            <p className="px-2 pt-2 text-[11px] leading-5 text-muted-foreground">
+              {tx(locale, "搜索只筛选题目；当前学生保持不变。输入中文时会在选词完成后再应用筛选。", "Question search only filters questions; the selected student stays unchanged. IME text is applied after composition finishes.")}
+            </p>
           </div>
+
+          {filteredQuestions.length ? (
+            <div className="mt-4 grid items-start gap-4 lg:grid-cols-[132px_minmax(0,1fr)]">
+              <aside className="sticky top-[86px] z-20 hidden max-h-[calc(100vh-102px)] overflow-hidden rounded-[10px] border bg-card lg:flex lg:flex-col" aria-label={tx(locale, "题目导航", "Question navigation")}>
+                <div className="shrink-0 border-b px-3 py-3">
+                  <p className="text-xs font-bold text-foreground">{tx(locale, "题目导航", "Questions")}</p>
+                  <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{tx(locale, `共 ${filteredQuestions.length} 题 · 点击定位`, `${filteredQuestions.length} questions · select to locate`)}</p>
+                </div>
+                <div className="min-h-0 overflow-y-auto p-2 overscroll-contain">
+                  {filteredQuestions.map((question) => {
+                    const answer = answers.get(question.id);
+                    const active = question.id === activeQuestion?.id;
+                    const state = getAnswerState(answer);
+                    return (
+                      <button
+                        key={question.id}
+                        type="button"
+                        aria-current={active ? "true" : undefined}
+                        onClick={() => scrollToQuestion(question.id)}
+                        className={cn(
+                          "mb-1 flex min-h-10 w-full items-center justify-between rounded-[7px] px-2.5 text-left text-xs font-semibold transition last:mb-0",
+                          active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                        )}
+                      >
+                        <span className="truncate">{tx(locale, `第 ${question.label} 题`, `Q${question.label}`)}</span>
+                        <span className={cn(
+                          "ml-1 h-2 w-2 shrink-0 rounded-full",
+                          active ? "bg-white" : state === "recognized" ? "bg-emerald-500" : state === "flagged" ? "bg-amber-500" : "bg-red-500",
+                        )} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </aside>
+
+              <main className="min-w-0 space-y-5">
+                {filteredQuestions.map((question, index) => (
+                  <AnswerReviewCard
+                    key={question.id}
+                    question={question}
+                    answer={answers.get(question.id)}
+                    draft={drafts[question.id] ?? { content: "", flags: "" }}
+                    sourceFilename={student.source_filename}
+                    previous={filteredQuestions[index - 1] ?? null}
+                    next={filteredQuestions[index + 1] ?? null}
+                    dirty={dirtyQuestionIds.has(question.id)}
+                    saving={savingQuestionId === question.id}
+                    saveError={saveErrors[question.id]}
+                    onDraftChange={(patch) => updateDraft(question.id, patch)}
+                    onSave={(moveNext) => void saveAnswer(question, moveNext)}
+                    onNavigate={scrollToQuestion}
+                    locale={locale}
+                    t={t}
+                  />
+                ))}
+              </main>
+            </div>
+          ) : (
+            <div className="mt-4 flex min-h-[260px] items-center justify-center rounded-[10px] border bg-card px-6 text-center">
+              <div>
+                <AlertCircle aria-hidden="true" className="mx-auto h-6 w-6 text-muted-foreground" />
+                <p className="mt-3 text-sm font-semibold text-foreground">{t("answerReviewNoMatches")}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuestionFilter("");
+                    setFilterParam("questionFilter", "");
+                  }}
+                  className="mt-2 text-sm font-semibold text-primary hover:underline"
+                >
+                  {t("answerReviewClearSearch")}
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       )}
     </div>
   );
 }
 
-function DimensionNavigation<T>({
-  ariaLabel,
-  currentLabel,
-  currentDetail,
-  previous,
-  next,
-  previousLabel,
-  nextLabel,
-  onPrevious,
-  onNext,
-  previousText,
-  nextText,
-  previousIcon,
-  nextIcon,
-  shortcut,
-  children,
-}: {
-  ariaLabel: string;
-  currentLabel: string;
-  currentDetail: string;
-  previous: T | null;
-  next: T | null;
-  previousLabel: (value: T) => string;
-  nextLabel: (value: T) => string;
+function StudentNavigation({ student, previous, next, onPrevious, onNext, children, t }: {
+  student: StudentSubmission;
+  previous: StudentSubmission | null;
+  next: StudentSubmission | null;
   onPrevious: () => void;
   onNext: () => void;
-  previousText: string;
-  nextText: string;
-  previousIcon: ReactNode;
-  nextIcon: ReactNode;
-  shortcut: string;
   children: ReactNode;
+  t: (key: MessageKey) => string;
 }) {
   return (
-    <nav
-      aria-label={ariaLabel}
-      className="grid min-h-[58px] gap-2 rounded-[10px] border bg-card p-2 sm:grid-cols-2 xl:grid-cols-[175px_225px_minmax(300px,1fr)_175px_150px] xl:items-center"
-    >
+    <nav aria-label={t("answerReviewStudentNavigation")} className="grid min-h-[58px] gap-2 rounded-[10px] border bg-card p-2 sm:grid-cols-2 xl:grid-cols-[170px_225px_minmax(300px,1fr)_170px_150px] xl:items-center">
       <Button type="button" variant="ghost" className="h-10 justify-start px-3" disabled={!previous} onClick={onPrevious}>
-        {previousIcon}
-        <span className="min-w-0 truncate">{previous ? previousLabel(previous) : previousText}</span>
+        <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+        <span className="min-w-0 truncate">{previous?.stu_name || t("answerReviewPreviousStudent")}</span>
       </Button>
       <div className="flex h-10 min-w-0 items-center rounded-[7px] bg-primary/[0.055] px-3">
         <div className="min-w-0">
-          <p className="truncate text-[13px] font-semibold text-primary">{currentLabel}</p>
-          <p className="truncate text-[10px] text-muted-foreground">{currentDetail}</p>
+          <p className="truncate text-[13px] font-semibold text-primary">{student.stu_name || student.stu_id}</p>
+          <p className="truncate text-[10px] text-muted-foreground">{student.stu_id}</p>
         </div>
       </div>
       <div className="relative col-span-2 min-w-0 sm:col-span-2 xl:col-span-1">{children}</div>
       <Button type="button" variant="ghost" className="h-10 justify-end px-3" disabled={!next} onClick={onNext}>
-        <span className="min-w-0 truncate">{next ? nextLabel(next) : nextText}</span>
-        {nextIcon}
+        <span className="min-w-0 truncate">{next?.stu_name || t("answerReviewNextStudent")}</span>
+        <ArrowRight aria-hidden="true" className="h-4 w-4" />
       </Button>
       <span className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[7px] bg-slate-50 px-3 text-[11px] text-muted-foreground dark:bg-slate-900/45">
         <Keyboard aria-hidden="true" className="h-3.5 w-3.5" />
-        {shortcut}
+        {t("answerReviewStudentShortcut")}
       </span>
     </nav>
   );
 }
 
-function SmartPicker({
-  label,
-  placeholder,
-  query,
-  matches,
-  currentId,
-  onQueryChange,
-  onSelect,
-  t,
-}: {
+function SmartPicker({ label, placeholder, query, matches, currentId, onDraftChange, onCommit, onCompositionState, onSelect, t }: {
   label: string;
   placeholder: string;
   query: string;
   matches: PickerMatch[];
   currentId: string;
-  onQueryChange: (value: string) => void;
+  onDraftChange: (value: string) => void;
+  onCommit: (value: string) => void;
+  onCompositionState: (composing: boolean) => void;
   onSelect: (id: string) => void;
   t: (key: MessageKey) => string;
 }) {
   const [open, setOpen] = useState(false);
+  const composingRef = useRef(false);
 
   function handleBlur(event: FocusEvent<HTMLDivElement>) {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+  }
+
+  function handleCompositionEnd(event: CompositionEvent<HTMLInputElement>) {
+    composingRef.current = false;
+    onCompositionState(false);
+    const value = event.currentTarget.value;
+    onDraftChange(value);
+    window.setTimeout(() => onCommit(value), 0);
   }
 
   return (
@@ -526,16 +555,30 @@ function SmartPicker({
         <span className="sr-only">{label}</span>
         <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
-          type="search"
+          type="text"
+          inputMode="search"
           value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
+          onCompositionStart={() => {
+            composingRef.current = true;
+            onCompositionState(true);
+          }}
+          onCompositionEnd={handleCompositionEnd}
+          onChange={(event) => {
+            const value = event.target.value;
+            onDraftChange(value);
+            if (!composingRef.current) onCommit(value);
+          }}
           placeholder={placeholder}
           className="h-10 w-full rounded-[7px] border-0 bg-slate-50 pl-9 pr-9 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/20 dark:bg-slate-900/50"
         />
         {query ? (
           <button
             type="button"
-            onClick={() => onQueryChange("")}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              onDraftChange("");
+              onCommit("");
+            }}
             className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t("answerReviewClearSearch")}
           >
@@ -548,10 +591,11 @@ function SmartPicker({
           <p className="px-2 py-1 text-[10px] leading-4 text-muted-foreground">
             {query ? `${matches.length} ${t("answerReviewMatches")}` : t("answerReviewLocalMatchHint")}
           </p>
-          {matches.length ? matches.slice(0, 12).map(({ item, kind }) => (
+          {matches.length ? matches.slice(0, 40).map(({ item, kind }) => (
             <button
               key={item.id}
               type="button"
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 onSelect(item.id);
                 setOpen(false);
@@ -583,33 +627,109 @@ function SmartPicker({
   );
 }
 
-function CompactQuestionNavigation({
-  current,
-  previous,
-  next,
-  onPrevious,
-  onNext,
-  t,
-}: {
-  current: string;
+function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, next, dirty, saving, saveError, onDraftChange, onSave, onNavigate, locale, t }: {
+  question: SubmissionQuestion;
+  answer: ReturnType<typeof answerMap> extends Map<string, infer T> ? T | undefined : never;
+  draft: AnswerDraft;
+  sourceFilename?: string | null;
   previous: SubmissionQuestion | null;
   next: SubmissionQuestion | null;
-  onPrevious: () => void;
-  onNext: () => void;
+  dirty: boolean;
+  saving: boolean;
+  saveError?: string;
+  onDraftChange: (patch: Partial<AnswerDraft>) => void;
+  onSave: (moveNext: boolean) => void;
+  onNavigate: (id: string) => void;
+  locale: Locale;
   t: (key: MessageKey) => string;
 }) {
+  const state = getAnswerState(answer);
   return (
-    <nav aria-label={t("answerReviewBottomQuestionNavigation")} className="grid gap-2 rounded-[10px] border bg-card p-2 sm:grid-cols-[1fr_180px_1fr] sm:items-center">
-      <Button type="button" variant="ghost" className="h-10 justify-start" disabled={!previous} onClick={onPrevious}>
-        <ArrowUp aria-hidden="true" className="h-4 w-4" />
-        {previous ? `${t("answerReviewQuestionPrefix")}${previous.label}` : t("answerReviewPreviousQuestion")}
-      </Button>
-      <span className="order-first flex h-10 items-center justify-center rounded-[7px] bg-primary/[0.055] text-[13px] font-semibold text-primary sm:order-none">{current}</span>
-      <Button type="button" variant="ghost" className="h-10 justify-end" disabled={!next} onClick={onNext}>
-        {next ? `${t("answerReviewQuestionPrefix")}${next.label}` : t("answerReviewNextQuestion")}
-        <ArrowDown aria-hidden="true" className="h-4 w-4" />
-      </Button>
-    </nav>
+    <article id={questionAnchorId(question.id)} data-question-id={question.id} className="scroll-mt-[86px] overflow-hidden rounded-[10px] border bg-card">
+      <header className="flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-[20px] font-bold text-foreground">{tx(locale, `第 ${question.label} 题`, `Question ${question.label}`)}</h2>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground dark:bg-slate-800">{question.type || t("studentSubmissionUnknownType")}</span>
+            <AnswerStateBadge state={state} t={t} />
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">{tx(locale, "题目、识别作答与提示在同一卡片内连续校对。", "Review the question, recognized answer, and flags together in this card.")}</p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button type="button" variant="secondary" className="h-9 px-3" disabled={!previous} onClick={() => previous && onNavigate(previous.id)}>
+            <ArrowUp aria-hidden="true" className="h-4 w-4" />{t("answerReviewPreviousQuestion")}
+          </Button>
+          <Button type="button" variant="secondary" className="h-9 px-3" disabled={!next} onClick={() => next && onNavigate(next.id)}>
+            {t("answerReviewNextQuestion")}<ArrowDown aria-hidden="true" className="h-4 w-4" />
+          </Button>
+        </div>
+      </header>
+
+      <div className="p-5">
+        <section>
+          <h3 className="text-sm font-semibold text-foreground">{t("answerReviewQuestionContextTitle")}</h3>
+          <div className="mt-3 min-h-[72px] rounded-[8px] bg-slate-50 px-4 py-3 dark:bg-slate-900/45">
+            {question.stem ? <MarkdownMath className="text-foreground">{question.stem}</MarkdownMath> : <p className="text-sm text-muted-foreground">{t("answerReviewStemUnavailable")}</p>}
+          </div>
+        </section>
+
+        <section className="mt-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">{t("answerReviewRecognizedTextTitle")}</h3>
+              <p className="mt-1 text-[11px] text-muted-foreground">{t("answerReviewRecognizedTextDescription")}</p>
+            </div>
+            {sourceFilename ? <span className="inline-flex max-w-[360px] items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={sourceFilename}><FileText aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />{sourceFilename}</span> : null}
+          </div>
+          <textarea
+            value={draft.content}
+            onChange={(event) => onDraftChange({ content: event.target.value })}
+            placeholder={t("answerReviewContentPlaceholder")}
+            className="mt-3 min-h-[112px] w-full resize-y rounded-[8px] border bg-slate-50 px-4 py-3 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:bg-card focus:ring-2 focus:ring-primary/15 dark:bg-slate-900/45"
+          />
+        </section>
+
+        <section className="mt-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">{t("answerReviewRecognitionTitle")}</h3>
+              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{t("answerReviewRecognitionDescription")}</p>
+            </div>
+            {draft.flags ? (
+              <button type="button" onClick={() => onDraftChange({ flags: "" })} className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-primary hover:underline">
+                <RotateCcw aria-hidden="true" className="h-3 w-3" />{t("answerReviewClearFlags")}
+              </button>
+            ) : null}
+          </div>
+          <textarea
+            value={draft.flags}
+            onChange={(event) => onDraftChange({ flags: event.target.value })}
+            placeholder={t("answerReviewFlagsPlaceholder")}
+            className="mt-3 min-h-[72px] w-full resize-y rounded-[8px] border bg-slate-50 px-3 py-2.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:bg-card focus:ring-2 focus:ring-primary/15 dark:bg-slate-900/45"
+          />
+        </section>
+
+        {saveError ? <p className="mt-3 rounded-[8px] border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-700" role="alert">{saveError}</p> : null}
+      </div>
+
+      <footer className="flex flex-col gap-3 border-t bg-slate-50/65 px-5 py-3 dark:bg-slate-900/25 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+          <Keyboard aria-hidden="true" className="h-4 w-4 shrink-0" />
+          <span>{t("answerReviewKeyboardHint")}</span>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button type="button" variant="secondary" className="h-9 px-4" disabled={saving || !dirty} onClick={() => onSave(false)}>
+            {saving ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : <Save aria-hidden="true" className="h-4 w-4" />}
+            {t(saving ? "answerReviewSaving" : "answerReviewSave")}
+          </Button>
+          <Button type="button" className="h-9 px-4" disabled={saving || !dirty} onClick={() => onSave(Boolean(next))}>
+            <CheckCircle2 aria-hidden="true" className="h-4 w-4" />
+            {next ? t("answerReviewSaveNext") : t("answerReviewSave")}
+            {next ? <ArrowDown aria-hidden="true" className="h-4 w-4" /> : null}
+          </Button>
+        </div>
+      </footer>
+    </article>
   );
 }
 
@@ -626,14 +746,7 @@ function AnswerStateBadge({ state, t }: { state: SubmissionAnswerState; t: (key:
   );
 }
 
-function PageState({
-  title,
-  description,
-  action,
-  onAction,
-  href,
-  busy = false,
-}: {
+function PageState({ title, description, action, onAction, href, busy = false }: {
   title: string;
   description?: string;
   action?: string;
@@ -658,17 +771,12 @@ function PageState({
 function matchPickerItems(items: PickerItem[], query: string): PickerMatch[] {
   const normalized = normalize(query);
   if (!normalized) return items.map((item) => ({ item, kind: "all" }));
-
   return items
     .map((item): PickerMatch | null => {
-      if (item.exactValues.some((value) => normalizeComparable(value) === normalizeComparable(normalized))) {
-        return { item, kind: "exact" };
-      }
+      if (item.exactValues.some((value) => normalizeComparable(value) === normalizeComparable(normalized))) return { item, kind: "exact" };
       const descriptor = normalize(item.searchable);
       const terms = normalized.split(/\s+/).filter(Boolean);
-      if (descriptor.includes(normalized) || terms.every((term) => descriptor.includes(term))) {
-        return { item, kind: "related" };
-      }
+      if (descriptor.includes(normalized) || terms.every((term) => descriptor.includes(term))) return { item, kind: "related" };
       return null;
     })
     .filter((match): match is PickerMatch => match !== null)
@@ -688,27 +796,18 @@ function studentPickerItem(student: StudentSubmission, t: (key: MessageKey) => s
 
 function questionPickerItem(question: SubmissionQuestion): PickerItem {
   const descriptor = `${question.label} ${question.id} ${question.type} ${question.stem}`;
-  const aliases: string[] = [];
-  if (/\\int|∫|积分/i.test(descriptor)) aliases.push("积分 积分题 integral integration");
-  if (/证明|prove|proof/i.test(descriptor)) aliases.push("证明 证明题 proof");
-  if (/编程|代码|algorithm|code|python|java/i.test(descriptor)) aliases.push("编程 编程题 代码 算法 programming");
-  if (/计算|calculate|compute/i.test(descriptor)) aliases.push("计算 计算题 calculation");
   return {
     id: question.id,
     primary: `Q${question.label}`,
     secondary: question.type || question.stem || question.id,
-    searchable: `${descriptor} ${aliases.join(" ")}`,
+    searchable: `${descriptor} ${questionSearchAliases(descriptor)}`,
     exactValues: [question.id, question.label, `q${question.label}`, `第${question.label}题`, question.type],
   };
 }
 
-function selectNavigable<T>(
-  values: T[],
-  matches: PickerMatch[],
-  query: string,
-  getId: (value: T) => string,
-) {
-  if (!query.trim() || !matches.length) return values;
+function selectMatched<T>(values: T[], matches: PickerMatch[], query: string, getId: (value: T) => string, keepAllWhenEmpty = false) {
+  if (!query.trim()) return values;
+  if (!matches.length) return keepAllWhenEmpty ? values : [];
   const ids = new Set(matches.map((match) => match.item.id));
   return values.filter((value) => ids.has(getId(value)));
 }
@@ -721,12 +820,7 @@ function neighbors<T>(values: T[], currentId: string | undefined, getId: (value:
   };
 }
 
-function buildBackHref(
-  taskId: string | undefined,
-  studentId: string | undefined,
-  questionId: string | undefined,
-  searchParams: URLSearchParams,
-) {
+function buildBackHref(taskId: string | undefined, studentId: string | undefined, questionId: string | undefined, searchParams: URLSearchParams) {
   if (!taskId) return "/history";
   if (searchParams.get("from") === "student" && studentId) {
     const params = new URLSearchParams();
@@ -743,24 +837,30 @@ function buildBackHref(
 function answerErrorMessage(error: unknown, t: (key: MessageKey) => string) {
   const normalized = normalizeAPIError(error);
   const detail = normalized.payload?.detail;
-  const code = detail && typeof detail === "object" && "code" in detail
-    ? String((detail as { code: unknown }).code)
-    : "";
+  const code = detail && typeof detail === "object" && "code" in detail ? String((detail as { code: unknown }).code) : "";
   if (code === "task_workflow_changed") return t("answerReviewStale");
   if (code === "task_workflow_busy" || normalized.status === 409) return t("answerReviewUnavailable");
   return t("answerReviewSaveError");
 }
 
 function parseFlags(value: string) {
-  return value
-    .split(/\r?\n/)
-    .map((flag) => flag.trim())
-    .filter(Boolean);
+  return value.split(/\r?\n/).map((flag) => flag.trim()).filter(Boolean);
 }
 
 function isKeyboardNavigationBlocked(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   return Boolean(target.closest("input, textarea, select, [contenteditable='true'], [role='dialog']"));
+}
+
+function scrollQuestionIntoView(questionId: string, behavior: ScrollBehavior) {
+  const element = document.getElementById(questionAnchorId(questionId));
+  if (!element) return;
+  const top = window.scrollY + element.getBoundingClientRect().top - 86;
+  window.scrollTo({ top: Math.max(0, top), left: 0, behavior });
+}
+
+function questionAnchorId(questionId: string) {
+  return `answer-question-${questionId}`;
 }
 
 function normalize(value: string) {
@@ -781,4 +881,8 @@ function studentPath(taskId: string, studentId: string) {
 
 function compareStudents(a: StudentSubmission, b: StudentSubmission) {
   return a.stu_id.localeCompare(b.stu_id, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function tx(locale: Locale, zh: string, en: string) {
+  return locale === "zh-CN" ? zh : en;
 }

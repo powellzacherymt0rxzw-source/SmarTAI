@@ -90,7 +90,7 @@ export function GradingPreflightPage() {
       <h1 className="min-h-9 text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
         {copy(locale, "title")}
       </h1>
-      <NewTaskStepper currentStep={4} />
+      <NewTaskStepper currentStep={5} />
 
       {isLoading ? (
         <PageState title={copy(locale, "loading")} busy />

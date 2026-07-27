@@ -68,6 +68,7 @@ const COPY = {
   teacherNotesPlaceholder: ["例如：重点检查推导步骤；允许等价表述。", "For example: focus on derivation steps and accept equivalent wording."],
   charactersSuffix: [" 字", " characters"],
   backToQuestions: ["返回题目准备", "Back to Problem Preparation"],
+  backToUpload: ["返回上传作答", "Back to Answer Upload"],
   saveAndContinue: ["保存设置并添加学生作答", "Save & Add Submissions"],
   saving: ["正在保存…", "Saving…"],
   loading: ["正在读取批改设置…", "Loading grading setup…"],

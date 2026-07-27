@@ -1,19 +1,27 @@
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ChevronRight, Filter, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, ChevronRight, Filter, Search, X } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useTask } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { useI18n } from "@/i18n/I18nProvider";
 import { cn } from "@/lib/cn";
+import { isProgrammingProblem } from "@/lib/questionPreparation";
+import { questionSearchAliases } from "@/lib/questionSearch";
 import type { PreparationIssue, ProblemInfo } from "@/types";
 
-type RiskRow = {
+type QuestionMatrixRow = {
+  problem: ProblemInfo;
+  issues: PreparationIssue[];
+};
+
+type OpenRiskRow = {
   problem: ProblemInfo;
   issue: PreparationIssue;
 };
 
-type RiskSortKey = "number" | "type" | "field" | "reason" | "severity";
-type RiskSortDirection = "asc" | "desc";
+type MatrixSortKey = "number" | "type" | "attention";
+type MatrixSortDirection = "asc" | "desc";
+type MaterialField = "stem" | "answer" | "rubric" | "tests";
 
 export function QuestionPreparationOverviewPage() {
   const { taskId } = useParams();
@@ -24,8 +32,8 @@ export function QuestionPreparationOverviewPage() {
   const [query, setQuery] = useState(urlQuery);
   const composingRef = useRef(false);
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
-  const [sortKey, setSortKey] = useState<RiskSortKey>("number");
-  const [sortDirection, setSortDirection] = useState<RiskSortDirection>("asc");
+  const [sortKey, setSortKey] = useState<MatrixSortKey>("number");
+  const [sortDirection, setSortDirection] = useState<MatrixSortDirection>("asc");
   const deferredQuery = useDeferredValue(query);
 
   useEffect(() => {
@@ -37,17 +45,21 @@ export function QuestionPreparationOverviewPage() {
     [locale, taskQuery.data?.problem_data],
   );
   const allRisks = useMemo(() => collectRiskRows(problems), [problems]);
+  const allRows = useMemo<QuestionMatrixRow[]>(() => problems.map((problem) => ({
+    problem,
+    issues: (problem.preparation_issues ?? []).filter((issue) => issue.status === "open"),
+  })), [problems]);
   const availableTypes = useMemo(
-    () => [...new Set(allRisks.map((row) => row.problem.type || tx(locale, "未分类", "Uncategorized")))].sort((a, b) => a.localeCompare(b, locale)),
-    [allRisks, locale],
+    () => [...new Set(problems.map((problem) => problem.type || tx(locale, "未分类", "Uncategorized")))].sort((a, b) => a.localeCompare(b, locale)),
+    [locale, problems],
   );
-  const risks = useMemo(() => {
-    const textFiltered = filterRisks(allRisks, deferredQuery);
+  const rows = useMemo(() => {
+    const textFiltered = filterMatrixRows(allRows, deferredQuery, locale);
     const typeFiltered = selectedTypes.size
       ? textFiltered.filter((row) => selectedTypes.has(row.problem.type || tx(locale, "未分类", "Uncategorized")))
       : textFiltered;
-    return sortRiskRows(typeFiltered, sortKey, sortDirection, locale);
-  }, [allRisks, deferredQuery, locale, selectedTypes, sortDirection, sortKey]);
+    return sortMatrixRows(typeFiltered, sortKey, sortDirection, locale);
+  }, [allRows, deferredQuery, locale, selectedTypes, sortDirection, sortKey]);
   const metrics = useMemo(() => ({
     questions: new Set(allRisks.map((row) => row.problem.q_id)).size,
     lowConfidence: allRisks.filter((row) => row.issue.code === "low_confidence").length,
@@ -69,7 +81,7 @@ export function QuestionPreparationOverviewPage() {
     setSearchParams(next, { replace: true });
   }
 
-  function toggleSort(key: RiskSortKey) {
+  function toggleSort(key: MatrixSortKey) {
     if (sortKey === key) {
       setSortDirection((current) => current === "asc" ? "desc" : "asc");
       return;
@@ -91,12 +103,12 @@ export function QuestionPreparationOverviewPage() {
   return (
     <div className="w-full max-w-[1300px]">
       <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
-        {tx(locale, "题目资料风险总览", "Question Material Risk Overview")}
+        {tx(locale, "题目资料总览", "Question Material Overview")}
       </h1>
       <NewTaskStepper currentStep={2} />
 
       <section className="mt-[22px]" aria-labelledby="risk-matrix-title">
-        <h2 id="risk-matrix-title" className="sr-only">{tx(locale, "需要教师关注的题目资料", "Question material risks")}</h2>
+        <h2 id="risk-matrix-title" className="sr-only">{tx(locale, "全部题目资料状态矩阵", "All question material status matrix")}</h2>
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
           <RiskMetric label={tx(locale, "待关注题目", "Questions to Review")} value={metrics.questions} tone="primary" />
           <RiskMetric label={tx(locale, "低置信项", "Low Confidence")} value={metrics.lowConfidence} tone="warning" />
@@ -105,22 +117,24 @@ export function QuestionPreparationOverviewPage() {
         </dl>
 
         <label className="relative mt-4 block">
-          <span className="sr-only">{tx(locale, "筛选风险", "Filter risks")}</span>
+          <span className="sr-only">{tx(locale, "筛选题目资料", "Filter question materials")}</span>
           <Search aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
-            type="search"
+            type="text"
+            inputMode="search"
             value={query}
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={(event) => {
               composingRef.current = false;
-              setQuery(event.currentTarget.value);
-              updateQuery(event.currentTarget.value);
+              const value = event.currentTarget.value;
+              setQuery(value);
+              window.setTimeout(() => updateQuery(value), 0);
             }}
             onChange={(event) => {
               setQuery(event.target.value);
               if (!composingRef.current) updateQuery(event.target.value);
             }}
-            placeholder={tx(locale, "搜索题号、题型、风险字段或原因", "Search question, type, field, or risk")}
+            placeholder={tx(locale, "搜索题号、题型、资料状态或风险原因", "Search question, type, material status, or risk")}
             className="h-12 w-full rounded-[10px] border bg-card pl-11 pr-4 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
           />
         </label>
@@ -133,9 +147,9 @@ export function QuestionPreparationOverviewPage() {
               <p className="text-sm font-semibold text-foreground">{tx(locale, "无法读取题目资料状态", "Question material status could not be loaded")}</p>
               <button type="button" onClick={() => void taskQuery.refetch()} className="mt-3 h-9 rounded-[7px] border px-4 text-sm font-semibold hover:bg-muted">{tx(locale, "重新加载", "Reload")}</button>
             </div>
-          ) : risks.length ? (
-            <RiskTable
-              rows={risks}
+          ) : rows.length ? (
+            <QuestionMatrix
+              rows={rows}
               taskId={taskId ?? ""}
               locale={locale}
               sortKey={sortKey}
@@ -146,15 +160,9 @@ export function QuestionPreparationOverviewPage() {
               onToggleType={toggleType}
               onClearTypes={() => setSelectedTypes(new Set())}
             />
-          ) : (
-            <div className="flex min-h-[270px] flex-col items-center justify-center px-5 text-center">
-              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40"><AlertTriangle aria-hidden="true" className="h-5 w-5" /></span>
-              <p className="mt-4 text-sm font-semibold text-foreground">{query || selectedTypes.size ? tx(locale, "没有匹配的风险项", "No matching risks") : tx(locale, "没有需要额外处理的风险", "No additional risks need attention")}</p>
-              <p className="mt-1 max-w-xl text-xs leading-5 text-muted-foreground">{tx(locale, "正常识别、AI 生成和非编程题不再显示为“缺失”。你仍可进入完整审核，连续浏览所有题目资料。", "Normal recognition, AI generation, and non-programming questions are not shown as missing. You can still review every question continuously.")}</p>
-            </div>
-          )}
+          ) : <MatrixEmpty filtered={Boolean(query || selectedTypes.size)} locale={locale} />}
           <footer className="flex min-h-[58px] flex-col gap-2 border-t px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between xl:px-5">
-            <p className="text-xs text-muted-foreground">{tx(locale, `显示 ${risks.length} / ${allRisks.length} 个开放风险`, `Showing ${risks.length} / ${allRisks.length} open risks`)}</p>
+            <p className="text-xs text-muted-foreground">{tx(locale, `显示 ${rows.length} / ${problems.length} 道题 · ${allRisks.length} 个开放风险`, `Showing ${rows.length} / ${problems.length} questions · ${allRisks.length} open risks`)}</p>
             {taskId && firstQuestionId ? (
               <Link to={`/tasks/${taskId}/questions/${encodeURIComponent(firstQuestionId)}/content`} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring">
                 {tx(locale, "进入完整审核", "Open Full Review")}
@@ -168,25 +176,25 @@ export function QuestionPreparationOverviewPage() {
   );
 }
 
-function RiskTable({ rows, taskId, locale, sortKey, sortDirection, availableTypes, selectedTypes, onSort, onToggleType, onClearTypes }: {
-  rows: RiskRow[];
+function QuestionMatrix({ rows, taskId, locale, sortKey, sortDirection, availableTypes, selectedTypes, onSort, onToggleType, onClearTypes }: {
+  rows: QuestionMatrixRow[];
   taskId: string;
   locale: string;
-  sortKey: RiskSortKey;
-  sortDirection: RiskSortDirection;
+  sortKey: MatrixSortKey;
+  sortDirection: MatrixSortDirection;
   availableTypes: string[];
   selectedTypes: Set<string>;
-  onSort: (key: RiskSortKey) => void;
+  onSort: (key: MatrixSortKey) => void;
   onToggleType: (type: string) => void;
   onClearTypes: () => void;
 }) {
   return (
     <div className="max-h-[calc(100vh-520px)] min-h-[280px] overflow-auto overscroll-contain">
-      <table className="w-full min-w-[880px] border-collapse text-left text-[13px]">
+      <table className="w-full min-w-[1080px] border-collapse text-left text-[13px]">
         <thead className="sticky top-0 z-10 bg-muted/95 text-[12px] font-semibold text-muted-foreground backdrop-blur-sm">
           <tr className="border-b">
-            <SortableHeading className="w-[100px] px-5" label={tx(locale, "题号", "No.")} sortKey="number" activeKey={sortKey} direction={sortDirection} locale={locale} onSort={onSort} />
-            <th className="relative w-[170px] px-3 py-3" aria-sort={sortKey === "type" ? sortDirection === "asc" ? "ascending" : "descending" : "none"}>
+            <SortableHeading className="w-[88px] px-5" label={tx(locale, "题号", "No.")} sortKey="number" activeKey={sortKey} direction={sortDirection} locale={locale} onSort={onSort} />
+            <th className="relative w-[140px] px-3 py-3" aria-sort={sortKey === "type" ? sortDirection === "asc" ? "ascending" : "descending" : "none"}>
               <div className="flex items-center gap-1">
                 <SortButton label={tx(locale, "题型", "Type")} sortKey="type" activeKey={sortKey} direction={sortDirection} locale={locale} onSort={onSort} />
                 <details className="relative">
@@ -201,21 +209,25 @@ function RiskTable({ rows, taskId, locale, sortKey, sortDirection, availableType
                 </details>
               </div>
             </th>
-            <SortableHeading className="w-[160px] px-3" label={tx(locale, "风险字段", "Field")} sortKey="field" activeKey={sortKey} direction={sortDirection} locale={locale} onSort={onSort} />
-            <SortableHeading className="px-3" label={tx(locale, "需要关注的原因", "Reason")} sortKey="reason" activeKey={sortKey} direction={sortDirection} locale={locale} onSort={onSort} />
-            <SortableHeading className="w-[130px] px-3" label={tx(locale, "严重度", "Severity")} sortKey="severity" activeKey={sortKey} direction={sortDirection} locale={locale} onSort={onSort} />
+            <th className="w-[145px] px-3 py-3">{tx(locale, "题目", "Problem")}</th>
+            <th className="w-[145px] px-3 py-3">{tx(locale, "标答", "Answer")}</th>
+            <th className="w-[145px] px-3 py-3">{tx(locale, "评分标准", "Rubric")}</th>
+            <th className="w-[145px] px-3 py-3">{tx(locale, "测试样例", "Tests")}</th>
+            <SortableHeading className="w-[145px] px-3" label={tx(locale, "审核提示", "Attention")} sortKey="attention" activeKey={sortKey} direction={sortDirection} locale={locale} onSort={onSort} />
             <th className="w-[100px] px-5 py-3 text-right">{tx(locale, "操作", "Action")}</th>
           </tr>
         </thead>
         <tbody className="divide-y">
-          {rows.map(({ problem, issue }) => (
-            <tr key={issue.issue_id} className="h-[58px] hover:bg-muted/30">
+          {rows.map(({ problem, issues }) => (
+            <tr key={problem.q_id} className="h-[64px] hover:bg-muted/30">
               <td className="px-5 py-3 font-semibold text-foreground">{problem.number || problem.q_id}</td>
               <td className="px-3 py-3 text-muted-foreground">{problem.type || tx(locale, "未分类", "Uncategorized")}</td>
-              <td className="px-3 py-3"><span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{issueFieldLabel(issue.field, locale)}</span></td>
-              <td className="px-3 py-3 text-foreground">{issueCodeLabel(issue.code, locale)}</td>
-              <td className="px-3 py-3"><SeverityBadge severity={issue.severity} locale={locale} /></td>
-              <td className="px-5 py-3 text-right"><Link to={`/tasks/${taskId}/questions/${encodeURIComponent(problem.q_id)}/content#question-${encodeURIComponent(problem.q_id)}`} className="text-xs font-semibold text-primary hover:underline">{tx(locale, "查看", "Review")}</Link></td>
+              <td className="px-3 py-3"><MaterialStatus problem={problem} field="stem" locale={locale} /></td>
+              <td className="px-3 py-3"><MaterialStatus problem={problem} field="answer" locale={locale} /></td>
+              <td className="px-3 py-3"><MaterialStatus problem={problem} field="rubric" locale={locale} /></td>
+              <td className="px-3 py-3"><MaterialStatus problem={problem} field="tests" locale={locale} /></td>
+              <td className="px-3 py-3"><AttentionStatus issues={issues} locale={locale} /></td>
+              <td className="px-5 py-3 text-right"><Link to={`/tasks/${taskId}/questions/${encodeURIComponent(problem.q_id)}/content#question-${encodeURIComponent(problem.q_id)}`} className="text-xs font-semibold text-primary hover:underline">{tx(locale, "审核", "Review")}</Link></td>
             </tr>
           ))}
         </tbody>
@@ -224,11 +236,11 @@ function RiskTable({ rows, taskId, locale, sortKey, sortDirection, availableType
   );
 }
 
-function SortableHeading({ className, label, sortKey, activeKey, direction, locale, onSort }: { className: string; label: string; sortKey: RiskSortKey; activeKey: RiskSortKey; direction: RiskSortDirection; locale: string; onSort: (key: RiskSortKey) => void }) {
+function SortableHeading({ className, label, sortKey, activeKey, direction, locale, onSort }: { className: string; label: string; sortKey: MatrixSortKey; activeKey: MatrixSortKey; direction: MatrixSortDirection; locale: string; onSort: (key: MatrixSortKey) => void }) {
   return <th className={cn("py-3", className)} aria-sort={activeKey === sortKey ? direction === "asc" ? "ascending" : "descending" : "none"}><SortButton label={label} sortKey={sortKey} activeKey={activeKey} direction={direction} locale={locale} onSort={onSort} /></th>;
 }
 
-function SortButton({ label, sortKey, activeKey, direction, locale, onSort }: { label: string; sortKey: RiskSortKey; activeKey: RiskSortKey; direction: RiskSortDirection; locale: string; onSort: (key: RiskSortKey) => void }) {
+function SortButton({ label, sortKey, activeKey, direction, locale, onSort }: { label: string; sortKey: MatrixSortKey; activeKey: MatrixSortKey; direction: MatrixSortDirection; locale: string; onSort: (key: MatrixSortKey) => void }) {
   const active = activeKey === sortKey;
   const Icon = active ? direction === "asc" ? ArrowUp : ArrowDown : ArrowUpDown;
   return <button type="button" onClick={() => onSort(sortKey)} className="inline-flex h-7 items-center gap-1 rounded-[5px] text-left font-semibold hover:text-foreground" aria-label={tx(locale, `按${label}排序`, `Sort by ${label}`)}>{label}<Icon aria-hidden="true" className={cn("h-3.5 w-3.5", active ? "text-primary" : "text-slate-400")} /></button>;
@@ -243,39 +255,109 @@ function RiskMetric({ label, value, tone }: { label: string; value: number; tone
   );
 }
 
-function SeverityBadge({ severity, locale }: { severity: PreparationIssue["severity"]; locale: string }) {
-  const label = severity === "blocking" ? tx(locale, "阻断", "Blocking") : severity === "warning" ? tx(locale, "需核对", "Review") : tx(locale, "提示", "Info");
-  return <span className={cn("inline-flex rounded-full px-3 py-1 text-xs font-semibold", severity === "blocking" ? "bg-red-100 text-red-700" : severity === "warning" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700")}>{label}</span>;
+function MaterialStatus({ problem, field, locale }: { problem: ProblemInfo; field: MaterialField; locale: string }) {
+  const status = getMaterialStatus(problem, field, locale);
+  return (
+    <span
+      title={status.detail}
+      className={cn(
+        "inline-flex min-w-[82px] items-center justify-center gap-1 rounded-full px-3 py-1 text-xs font-semibold",
+        status.tone === "success" && "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+        status.tone === "warning" && "bg-amber-100 text-amber-700 dark:bg-amber-950/35 dark:text-amber-300",
+        status.tone === "danger" && "bg-red-100 text-red-700 dark:bg-red-950/35 dark:text-red-300",
+        status.tone === "neutral" && "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300",
+      )}
+    >
+      {status.tone === "success" ? <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5" /> : null}
+      {status.label}
+    </span>
+  );
 }
 
-function collectRiskRows(problems: ProblemInfo[]): RiskRow[] {
+function AttentionStatus({ issues, locale }: { issues: PreparationIssue[]; locale: string }) {
+  if (!issues.length) {
+    return <span className="inline-flex min-w-[88px] items-center justify-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"><CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5" />{tx(locale, "状态正常", "Ready")}</span>;
+  }
+  const blocking = issues.some((issue) => issue.severity === "blocking");
+  return <span title={issues.map((issue) => issueCodeLabel(issue.code, locale)).join("；")} className={cn("inline-flex min-w-[88px] items-center justify-center rounded-full px-3 py-1 text-xs font-semibold", blocking ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700")}>{tx(locale, `${issues.length} 项需核对`, `${issues.length} to review`)}</span>;
+}
+
+function MatrixEmpty({ filtered, locale }: { filtered: boolean; locale: string }) {
+  return (
+    <div className="flex min-h-[220px] flex-col items-center justify-center px-5 text-center">
+      <p className="text-sm font-semibold text-foreground">{filtered ? tx(locale, "没有匹配的题目", "No matching questions") : tx(locale, "尚未识别到题目", "No questions recognized yet")}</p>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">{filtered ? tx(locale, "清空搜索或题型筛选后查看全部题目资料。", "Clear the search or type filter to see every question.") : tx(locale, "完成题目识别后，这里会显示全题资料矩阵。", "The full material matrix appears after recognition.")}</p>
+    </div>
+  );
+}
+
+function getMaterialStatus(problem: ProblemInfo, field: MaterialField, locale: string): { label: string; detail: string; tone: "success" | "warning" | "danger" | "neutral" } {
+  const issueField = field === "tests" ? "programming_tests" : field;
+  const issues = (problem.preparation_issues ?? []).filter((issue) => issue.status === "open" && (issue.field === issueField || (field === "stem" && issue.field === "source")));
+  if (issues.length) {
+    const blocking = issues.some((issue) => issue.severity === "blocking");
+    return {
+      label: blocking ? tx(locale, "需处理", "Action needed") : tx(locale, "需核对", "Review"),
+      detail: issues.map((issue) => issueCodeLabel(issue.code, locale)).join("；"),
+      tone: blocking ? "danger" : "warning",
+    };
+  }
+
+  if (field === "tests" && !isProgrammingProblem(problem)) {
+    return { label: tx(locale, "不适用", "N/A"), detail: tx(locale, "非编程题无需测试样例", "Test cases are not required for non-programming questions"), tone: "neutral" };
+  }
+
+  const valueReady = field === "stem"
+    ? Boolean(problem.stem?.trim())
+    : field === "answer"
+      ? Boolean(problem.reference_answer?.trim())
+      : field === "rubric"
+        ? Boolean(problem.criterion?.trim())
+        : Boolean(problem.test_cases?.length);
+  if (!valueReady) return { label: tx(locale, "待处理", "Pending"), detail: tx(locale, "本项资料尚未准备完成", "This material is not ready"), tone: "danger" };
+
+  if (field === "stem") return { label: tx(locale, "已识别", "Recognized"), detail: tx(locale, "题目正文已识别", "Problem content recognized"), tone: "success" };
+  const provenanceKey = field === "answer" ? "reference_answer" : field === "rubric" ? "criterion" : "test_cases";
+  const material = problem.material_provenance?.[provenanceKey];
+  const generated = problem.ai_completion_provenance?.[provenanceKey];
+  if (material) return { label: tx(locale, "已识别", "Recognized"), detail: material.source_filename || tx(locale, "来自教师资料", "From teacher material"), tone: "success" };
+  if (generated) return { label: tx(locale, "已生成", "Generated"), detail: tx(locale, "由 AI 生成并已准备", "Generated by AI and ready"), tone: "success" };
+  if (field === "tests" && problem.test_cases?.every((item) => item.source === "llm_generated")) return { label: tx(locale, "已生成", "Generated"), detail: tx(locale, "测试样例由 AI 生成", "Test cases generated by AI"), tone: "success" };
+  return { label: tx(locale, "已准备", "Ready"), detail: tx(locale, "资料已准备，可进入完整审核", "Material is ready for full review"), tone: "success" };
+}
+
+function collectRiskRows(problems: ProblemInfo[]): OpenRiskRow[] {
   return problems.flatMap((problem) => (problem.preparation_issues ?? [])
     .filter((issue) => issue.status === "open")
     .map((issue) => ({ problem, issue })));
 }
 
-function filterRisks(rows: RiskRow[], rawQuery: string) {
+function filterMatrixRows(rows: QuestionMatrixRow[], rawQuery: string, locale: string) {
   const query = rawQuery.trim().toLocaleLowerCase();
   if (!query) return rows;
   const tokens = query.split(/[\s,，;；]+/).filter(Boolean);
-  return rows.filter(({ problem, issue }) => tokens.every((token) => [
-    problem.number,
-    problem.q_id,
-    problem.type,
-    issue.field,
-    issue.code,
-    ...(issue.source_ids ?? []),
-  ].join(" ").toLocaleLowerCase().includes(token)));
+  return rows.filter(({ problem, issues }) => {
+    const statuses = (["stem", "answer", "rubric", "tests"] as const).map((field) => getMaterialStatus(problem, field, locale).label);
+    const sourceText = [
+      problem.number,
+      problem.q_id,
+      problem.type,
+      problem.stem,
+      problem.reference_answer,
+      problem.criterion,
+      ...statuses,
+      ...(issues.flatMap((issue) => [issue.field, issue.code, issueCodeLabel(issue.code, locale), ...(issue.source_ids ?? [])])),
+    ].filter(Boolean).join(" ");
+    const haystack = `${sourceText} ${questionSearchAliases(sourceText)}`.toLocaleLowerCase();
+    return tokens.every((token) => haystack.includes(token));
+  });
 }
 
-function sortRiskRows(rows: RiskRow[], key: RiskSortKey, direction: RiskSortDirection, locale: string) {
-  const severityRank: Record<PreparationIssue["severity"], number> = { blocking: 0, warning: 1, info: 2 };
-  const value = (row: RiskRow) => {
+function sortMatrixRows(rows: QuestionMatrixRow[], key: MatrixSortKey, direction: MatrixSortDirection, locale: string) {
+  const value = (row: QuestionMatrixRow) => {
     if (key === "number") return row.problem.number || row.problem.q_id;
     if (key === "type") return row.problem.type || "";
-    if (key === "field") return issueFieldLabel(row.issue.field, locale);
-    if (key === "reason") return issueCodeLabel(row.issue.code, locale);
-    return severityRank[row.issue.severity];
+    return row.issues.length;
   };
   return [...rows].sort((left, right) => {
     const a = value(left);
@@ -289,17 +371,6 @@ function sortRiskRows(rows: RiskRow[], key: RiskSortKey, direction: RiskSortDire
 
 function sortProblems(problems: ProblemInfo[], locale: string) {
   return [...problems].sort((a, b) => (a.number || a.q_id).localeCompare(b.number || b.q_id, locale, { numeric: true }));
-}
-
-function issueFieldLabel(field: PreparationIssue["field"], locale: string) {
-  const labels = {
-    stem: ["题目", "Problem"],
-    answer: ["标答", "Answer"],
-    rubric: ["评分标准", "Rubric"],
-    programming_tests: ["测试样例", "Tests"],
-    source: ["资料来源", "Source"],
-  } as const;
-  return locale === "zh-CN" ? labels[field][0] : labels[field][1];
 }
 
 function issueCodeLabel(code: PreparationIssue["code"], locale: string) {

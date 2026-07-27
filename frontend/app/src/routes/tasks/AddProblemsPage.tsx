@@ -76,6 +76,7 @@ export function AddProblemsPage() {
   const enabledExperts = (expertsQuery.data ?? []).filter((expert) => expert.enabled);
   const isBusy = preflight.isPending || startPreparation.isPending;
   const hasExistingProblems = Boolean(taskQuery.data?.problem_file_name || taskQuery.data?.problem_count);
+  const hasRecognizedProblems = (taskQuery.data?.problem_count ?? 0) > 0;
   const hasProblemSource = configuredSources.some((source) => source.role === "problem");
   const taskReturnPath = taskId ? `/tasks/${taskId}/upload/problems` : "/tasks/new";
   const routeState: AddProblemsRouteState = {
@@ -176,7 +177,7 @@ export function AddProblemsPage() {
       <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
         {tx(locale, "题目与资料上传", "Upload Questions & Materials")}
       </h1>
-      <NewTaskStepper currentStep={1} returnState={routeState} />
+      <NewTaskStepper currentStep={1} reachableStep={hasRecognizedProblems ? 2 : 1} returnState={routeState} />
 
       <div className="mx-auto mt-9 w-full max-w-[940px]">
         <section className="overflow-hidden rounded-[10px] border bg-card">

@@ -1,4 +1,4 @@
-import type { TaskLite } from "@/types";
+import type { Task, TaskLite } from "@/types";
 
 const PROCESSING_STATUSES = new Set(["extracting_problems", "parsing_submissions", "grading", "generating_analysis"]);
 
@@ -17,6 +17,45 @@ type TaskDestinationInput = Pick<TaskLite, "task_id" | "status" | "grading_setup
   | "problem_count"
   | "student_count"
 >>;
+
+type TaskReachabilityInput = Partial<TaskDestinationInput> & Partial<Pick<Task, "problem_data">>;
+
+export function getTaskReachableStep(task?: TaskReachabilityInput | null): number {
+  if (!task) return 0;
+  switch (task.status) {
+    case "draft":
+      return (task.problem_count ?? 0) > 0 ? 2 : 1;
+    case "extracting_problems":
+      return 1;
+    case "problems_ready":
+      return task.grading_setup_configured || allProblemsConfirmed(task.problem_data) ? 3 : 2;
+    case "parsing_submissions":
+      return 3;
+    case "submissions_ready":
+      return 4;
+    case "grading":
+      return 5;
+    case "graded":
+      return 6;
+    case "review_confirmed":
+    case "generating_analysis":
+    case "finalized":
+      return 7;
+    case "error":
+      if (task.grading_job_id) return 5;
+      if (task.parse_job_id || task.submission_file_name || (task.student_count ?? 0) > 0) return 4;
+      if ((task.problem_count ?? 0) > 0) return allProblemsConfirmed(task.problem_data) ? 3 : 2;
+      if (task.extract_job_id || task.problem_file_name) return 1;
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function allProblemsConfirmed(problemData?: Task["problem_data"]) {
+  const problems = Object.values(problemData ?? {});
+  return problems.length > 0 && problems.every((problem) => problem.review_status === "confirmed");
+}
 
 export function getTaskDestination(task: TaskDestinationInput): string {
   const taskRoot = `/tasks/${task.task_id}`;

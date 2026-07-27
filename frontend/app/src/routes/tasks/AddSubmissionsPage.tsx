@@ -1,21 +1,21 @@
-import { ArrowLeft, FileUp, LoaderCircle } from "lucide-react";
+import { FileCheck2, FileUp, LoaderCircle, SlidersHorizontal } from "lucide-react";
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ChangeEvent,
   type DragEvent,
 } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { normalizeAPIError } from "@/api/client";
-import { useGradingSetup, useParseSubmissions, useTask } from "@/api/hooks";
+import { useParseSubmissions, useTask } from "@/api/hooks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { MessageKey } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import type { SubmissionIdentityMode } from "@/types";
+import { GradingSetupPage } from "./GradingSetupPage";
 
 const SUBMISSION_SUFFIXES = [
   ".zip", ".rar", ".7z", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2",
@@ -29,74 +29,60 @@ const IDENTITY_OPTIONS: Array<{ mode: SubmissionIdentityMode; label: MessageKey 
   { mode: "manual_review", label: "submissionUploadIdentityManual" },
 ];
 
+type SubmissionDraft = {
+  selectedFile: File | null;
+  rosterFile: File | null;
+  identityMode: SubmissionIdentityMode;
+};
+
+const submissionDrafts = new Map<string, SubmissionDraft>();
+
 export function AddSubmissionsPage() {
   const { taskId } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useI18n();
   const taskQuery = useTask(taskId);
-  const gradingSetupQuery = useGradingSetup(taskId);
   const parseSubmissions = useParseSubmissions();
   const submissionInputRef = useRef<HTMLInputElement>(null);
   const rosterInputRef = useRef<HTMLInputElement>(null);
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [rosterFile, setRosterFile] = useState<File | null>(null);
-  const [identityMode, setIdentityMode] = useState<SubmissionIdentityMode>("filename");
-  const [recognitionProviderId, setRecognitionProviderId] = useState("");
+  const savedDraft = taskId ? submissionDrafts.get(taskId) : undefined;
+  const [selectedFile, setSelectedFile] = useState<File | null>(savedDraft?.selectedFile ?? null);
+  const [rosterFile, setRosterFile] = useState<File | null>(savedDraft?.rosterFile ?? null);
+  const [identityMode, setIdentityMode] = useState<SubmissionIdentityMode>(savedDraft?.identityMode ?? "filename");
+  const [phase, setPhase] = useState<"upload" | "settings">(
+    searchParams.get("phase") === "settings" && savedDraft?.selectedFile ? "settings" : "upload",
+  );
   const [isDragging, setIsDragging] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
   const [formError, setFormError] = useState<string | null>(null);
 
   const task = taskQuery.data;
-  const setupResponse = gradingSetupQuery.data;
-  const availableExperts = useMemo(
-    () => (setupResponse?.available_experts ?? []).filter((expert) => expert.enabled),
-    [setupResponse?.available_experts],
-  );
-  const inheritedProviderId = setupResponse?.grading_setup?.primary_provider_id ?? "";
   const hasExistingSubmissions = Boolean(task?.submission_file_name || task?.student_count);
   const isRecognitionRunning = task?.status === "parsing_submissions";
   const isWorkflowBusy = task?.status === "extracting_problems" || task?.status === "grading";
 
   useEffect(() => {
-    if (!availableExperts.length) {
-      setRecognitionProviderId("");
-      return;
-    }
-    setRecognitionProviderId((current) => {
-      if (availableExperts.some((expert) => expert.provider_id === current)) {
-        return current;
-      }
-      const preferred = task?.submission_recognition_provider_id || inheritedProviderId;
-      return availableExperts.some((expert) => expert.provider_id === preferred)
-        ? preferred
-        : availableExperts[0].provider_id;
-    });
-  }, [availableExperts, inheritedProviderId, task?.submission_recognition_provider_id]);
+    if (!taskId) return;
+    submissionDrafts.set(taskId, { selectedFile, rosterFile, identityMode });
+  }, [identityMode, rosterFile, selectedFile, taskId]);
 
-  const disabledReason = isRecognitionRunning
+  const uploadDisabledReason = isRecognitionRunning
     ? null
     : taskQuery.isLoading
       ? t("submissionUploadTaskLoading")
       : taskQuery.isError || !task
         ? t("submissionUploadTaskUnavailable")
-        : task.grading_setup_configured !== true
-          ? t("submissionUploadSetupRequired")
-          : isWorkflowBusy
-            ? task.status === "grading"
-              ? t("submissionUploadGradingLocked")
-              : t("submissionUploadBusy")
-            : gradingSetupQuery.isLoading
-              ? t("submissionUploadModelsLoading")
-              : gradingSetupQuery.isError
-                ? t("submissionUploadModelsUnavailable")
-                : !recognitionProviderId
-                  ? t("submissionUploadModelRequired")
-                  : !selectedFile
-                    ? t("submissionUploadFileRequired")
-                    : identityMode === "roster" && !rosterFile
-                      ? t("submissionUploadRosterRequired")
-                      : null;
+        : isWorkflowBusy
+          ? task.status === "grading"
+            ? t("submissionUploadGradingLocked")
+            : t("submissionUploadBusy")
+          : !selectedFile
+            ? t("submissionUploadFileRequired")
+            : identityMode === "roster" && !rosterFile
+              ? t("submissionUploadRosterRequired")
+              : null;
 
   function selectSubmission(file: File | undefined) {
     if (!file || parseSubmissions.isPending) return;
@@ -135,6 +121,27 @@ export function AddSubmissionsPage() {
     selectSubmission(event.dataTransfer.files?.[0]);
   }
 
+  function showSettings() {
+    setFormError(null);
+    if (isRecognitionRunning) {
+      if (taskId) navigate(`/tasks/${taskId}/submissions/progress`);
+      return;
+    }
+    if (uploadDisabledReason) {
+      setFormError(uploadDisabledReason);
+      return;
+    }
+    setPhase("settings");
+    setSearchParams({ phase: "settings" }, { replace: true });
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }
+
+  function showUpload() {
+    setPhase("upload");
+    setSearchParams({}, { replace: true });
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }
+
   async function handleStart() {
     setFormError(null);
     if (!taskId) {
@@ -145,8 +152,8 @@ export function AddSubmissionsPage() {
       navigate(`/tasks/${taskId}/submissions/progress`);
       return;
     }
-    if (disabledReason) {
-      setFormError(disabledReason);
+    if (uploadDisabledReason) {
+      setFormError(uploadDisabledReason);
       return;
     }
     const replaceConfirmed = hasExistingSubmissions
@@ -160,14 +167,15 @@ export function AddSubmissionsPage() {
         file: selectedFile as File,
         identityMode,
         rosterFile: identityMode === "roster" ? rosterFile : null,
-        recognitionProviderId,
         replaceConfirmed,
         onProgress: setUploadPercent,
       });
       if (response.status === "already_done") {
+        submissionDrafts.delete(taskId);
         toast.info(t("submissionUploadViewProgress"));
         navigate(`/tasks/${taskId}/submissions`);
       } else {
+        submissionDrafts.delete(taskId);
         toast.success(t("submissionUploadStarted"));
         navigate(`/tasks/${taskId}/submissions/progress`);
       }
@@ -182,20 +190,49 @@ export function AddSubmissionsPage() {
       ? t("submissionUploadManualHelp")
       : t("submissionUploadFilenameHelp");
 
+  if (phase === "settings" && selectedFile) {
+    return (
+      <div className="w-full max-w-[1300px]">
+        <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
+          {t("submissionUploadSetupTitle")}
+        </h1>
+        <NewTaskStepper currentStep={3} />
+        <p className="mt-5 max-w-3xl text-[13px] leading-5 text-muted-foreground">
+          {t("submissionUploadSetupDescription")}
+        </p>
+        <div className="mt-4 flex min-h-[72px] flex-col gap-3 rounded-[10px] border bg-card px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[9px] bg-primary/10 text-primary">
+              <FileCheck2 aria-hidden="true" className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-muted-foreground">{t("submissionUploadSetupFileLabel")}</p>
+              <p className="mt-1 truncate text-sm font-semibold text-foreground" title={selectedFile.name}>{selectedFile.name}</p>
+            </div>
+          </div>
+          <span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-primary/10 px-3 text-xs font-semibold text-primary">
+            <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5" />
+            {t("submissionUploadIdentityTitle")}
+          </span>
+        </div>
+        {formError ? (
+          <p className="mt-3 rounded-[8px] border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-200" role="alert">
+            {formError}
+          </p>
+        ) : null}
+        <GradingSetupPage
+          embedded
+          submitLabel={t("submissionUploadSaveAndStart")}
+          onBack={showUpload}
+          onSaved={handleStart}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="w-full max-w-[1300px]">
-      <div className="flex min-h-9 items-center justify-between gap-4">
-        <h1 className="shrink-0 text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">
-          {t("submissionUploadTitle")}
-        </h1>
-        <Link
-          to={taskId ? `/tasks/${taskId}/grading-setup` : "/history"}
-          className="inline-flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ArrowLeft aria-hidden="true" className="h-4 w-4 shrink-0" />
-          <span>{t("submissionUploadBack")}</span>
-        </Link>
-      </div>
+      <h1 className="text-[30px] font-bold leading-9 tracking-[-0.02em] text-foreground">{t("submissionUploadTitle")}</h1>
 
       <NewTaskStepper currentStep={3} />
 
@@ -314,49 +351,6 @@ export function AddSubmissionsPage() {
           </div>
         </section>
 
-        <section className="mt-[30px] flex min-h-[74px] flex-col gap-3 rounded-[10px] border bg-card px-[29px] py-[17px] sm:h-[74px] sm:flex-row sm:items-center sm:justify-between sm:py-0">
-          <div className="min-w-0">
-            <h2 className="text-[14px] font-semibold leading-5 text-foreground">
-              {t("submissionUploadRecognitionTitle")}
-            </h2>
-            <p className="mt-1 truncate text-[12px] leading-4 text-muted-foreground" title={t("submissionUploadRecognitionHelp")}>
-              {t("submissionUploadRecognitionHelp")}
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {availableExperts.length ? (
-              <label className="sr-only" htmlFor="submission-recognition-provider">
-                {t("submissionUploadModelLabel")}
-              </label>
-            ) : null}
-            {availableExperts.length ? (
-              <select
-                id="submission-recognition-provider"
-                value={recognitionProviderId}
-                disabled={parseSubmissions.isPending}
-                onChange={(event) => setRecognitionProviderId(event.target.value)}
-                className="h-7 max-w-[210px] rounded-full border-0 bg-primary/[0.14] px-3 text-[12px] font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {availableExperts.map((expert) => (
-                  <option key={expert.provider_id} value={expert.provider_id}>
-                    {expert.display_name || expert.model}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <Link
-                to={`/settings/byok?returnTo=${encodeURIComponent(taskId ? `/tasks/${taskId}/submissions/upload` : "/history")}`}
-                className="inline-flex h-7 items-center rounded-full bg-primary/[0.14] px-3 text-[12px] font-semibold text-primary"
-              >
-                {t("submissionUploadConfigureModels")}
-              </Link>
-            )}
-            <span className="inline-flex h-7 items-center rounded-full bg-muted/70 px-3 text-[12px] font-semibold text-muted-foreground">
-              {t("submissionUploadOcrUnavailable")}
-            </span>
-          </div>
-        </section>
-
         <div className="mt-[31px] flex min-h-10 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 text-[13px] leading-5">
             {formError ? (
@@ -368,30 +362,25 @@ export function AddSubmissionsPage() {
                   {t("submissionUploadCreateSeparateTask")}
                 </Link>
               </p>
-            ) : disabledReason && disabledReason !== t("submissionUploadFileRequired") ? (
+            ) : uploadDisabledReason && uploadDisabledReason !== t("submissionUploadFileRequired") ? (
               <p id="submission-upload-action-message" className="text-muted-foreground">
-                {disabledReason} {task?.grading_setup_configured !== true && taskId ? (
-                  <Link to={`/tasks/${taskId}/grading-setup`} className="font-semibold text-primary underline-offset-2 hover:underline">
-                    {t("submissionUploadBack")}
-                  </Link>
-                ) : null}
+                {uploadDisabledReason}
               </p>
             ) : null}
           </div>
           <button
             type="button"
             className="inline-flex h-10 w-full shrink-0 items-center justify-center rounded-[8px] bg-primary px-4 text-[14px] font-semibold leading-[18px] text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[180px]"
-            disabled={!isRecognitionRunning && Boolean(disabledReason || parseSubmissions.isPending)}
-            aria-describedby={formError || hasExistingSubmissions || disabledReason ? "submission-upload-action-message" : undefined}
-            onClick={() => void handleStart()}
+            disabled={parseSubmissions.isPending || isWorkflowBusy}
+            title={uploadDisabledReason ?? undefined}
+            aria-describedby={formError || hasExistingSubmissions || uploadDisabledReason ? "submission-upload-action-message" : undefined}
+            onClick={showSettings}
           >
             {parseSubmissions.isPending ? (
               <><LoaderCircle aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />{t("submissionUploadStarting")}</>
             ) : isRecognitionRunning
               ? t("submissionUploadViewProgress")
-              : hasExistingSubmissions
-                ? t("submissionUploadOverwriteStart")
-                : t("submissionUploadStart")}
+              : t("submissionUploadContinueSetup")}
           </button>
         </div>
       </div>

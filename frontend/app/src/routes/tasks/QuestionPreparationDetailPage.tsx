@@ -13,7 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { Navigate, useBeforeUnload, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useBeforeUnload, useBlocker, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useTask, useUpdateProblem } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
@@ -23,6 +23,7 @@ import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useI18n } from "@/i18n/I18nProvider";
 import { cn } from "@/lib/cn";
 import { isProgrammingProblem } from "@/lib/questionPreparation";
+import { questionSearchAliases } from "@/lib/questionSearch";
 import type { ProblemInfo, TestCase } from "@/types";
 
 type TextFieldKey = "stem" | "reference_answer" | "criterion" | "solution_code";
@@ -33,6 +34,7 @@ export function QuestionPreparationDetailPage() {
   const { taskId, questionId } = useParams();
   const stableTaskId = taskId ?? "";
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { locale } = useI18n();
   const taskQuery = useTask(taskId);
@@ -43,6 +45,7 @@ export function QuestionPreparationDetailPage() {
   const urlQuery = searchParams.get("q") ?? "";
   const [query, setQuery] = useState(urlQuery);
   const composingRef = useRef(false);
+  const positionedPathRef = useRef<string | null>(null);
 
   const problems = useMemo(
     () => sortProblems(Object.values(taskQuery.data?.problem_data ?? {}), locale),
@@ -51,8 +54,8 @@ export function QuestionPreparationDetailPage() {
   const filtered = useMemo(() => filterProblems(problems, query), [problems, query]);
   const readOnly = Boolean(taskQuery.data && taskQuery.data.status !== "problems_ready");
   const hasDirty = dirtyKeys.size > 0;
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => hasDirty && (
-    currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => (
+    hasDirty && currentLocation.pathname !== nextLocation.pathname
   ));
 
   useEffect(() => {
@@ -70,26 +73,47 @@ export function QuestionPreparationDetailPage() {
     if (!filtered.length) return;
     const target = filtered.find((problem) => problem.q_id === questionId) ?? filtered[0];
     setActiveQuestionId(target.q_id);
-    const frame = window.requestAnimationFrame(() => {
-      document.getElementById(questionAnchorId(target.q_id))?.scrollIntoView({ block: "start" });
+    const pathKey = `${location.pathname}${location.hash}`;
+    if (positionedPathRef.current === pathKey) return;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        positionedPathRef.current = pathKey;
+        const requestedAnchor = decodeURIComponent(location.hash.replace(/^#/, ""));
+        if (requestedAnchor === questionAnchorId(target.q_id)) scrollQuestionIntoView(target.q_id, "auto");
+        else window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      });
     });
-    return () => window.cancelAnimationFrame(frame);
-  }, [filtered, questionId]);
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [filtered, location.hash, location.pathname, questionId]);
 
   useEffect(() => {
     if (!filtered.length) return;
-    const observer = new IntersectionObserver((entries) => {
-      const visible = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((a, b) => Math.abs(a.boundingClientRect.top) - Math.abs(b.boundingClientRect.top))[0];
-      const qId = visible?.target.getAttribute("data-question-id");
-      if (qId) setActiveQuestionId(qId);
-    }, { rootMargin: "-150px 0px -55% 0px", threshold: [0, 0.05] });
-    filtered.forEach((problem) => {
-      const element = document.getElementById(questionAnchorId(problem.q_id));
-      if (element) observer.observe(element);
-    });
-    return () => observer.disconnect();
+    let frame = 0;
+    const updateActiveQuestion = () => {
+      frame = 0;
+      let active = filtered[0]?.q_id ?? "";
+      for (const problem of filtered) {
+        const element = document.getElementById(questionAnchorId(problem.q_id));
+        if (!element || element.getBoundingClientRect().top > 112) break;
+        active = problem.q_id;
+      }
+      if (active) setActiveQuestionId(active);
+    };
+    const scheduleUpdate = () => {
+      if (!frame) frame = window.requestAnimationFrame(updateActiveQuestion);
+    };
+    updateActiveQuestion();
+    window.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    return () => {
+      window.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, [filtered]);
 
   if (!taskId) {
@@ -116,7 +140,7 @@ export function QuestionPreparationDetailPage() {
 
   function scrollToQuestion(targetId: string) {
     setActiveQuestionId(targetId);
-    document.getElementById(questionAnchorId(targetId))?.scrollIntoView({ behavior: "smooth", block: "start" });
+    scrollQuestionIntoView(targetId, "smooth");
   }
 
   async function saveText(problem: ProblemInfo, field: TextFieldKey, value: string) {
@@ -173,11 +197,13 @@ export function QuestionPreparationDetailPage() {
         <Search aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
           value={query}
+          inputMode="search"
           onCompositionStart={() => { composingRef.current = true; }}
           onCompositionEnd={(event) => {
             composingRef.current = false;
-            setQuery(event.currentTarget.value);
-            updateQuery(event.currentTarget.value);
+            const value = event.currentTarget.value;
+            setQuery(value);
+            window.setTimeout(() => updateQuery(value), 0);
           }}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -197,18 +223,25 @@ export function QuestionPreparationDetailPage() {
       ) : filtered.length === 0 ? (
         <EmptyState title={tx(locale, "没有匹配的题目", "No matching questions")} description={tx(locale, "清空或调整筛选条件。", "Clear or adjust the filter.")} />
       ) : (
-        <div className="mt-5 grid items-start gap-4 lg:grid-cols-[96px_minmax(0,1fr)]">
-          <aside className="sticky top-4 z-20 hidden max-h-[calc(100vh-32px)] overflow-y-auto rounded-[10px] border bg-card p-2 lg:block" aria-label={tx(locale, "题号目录", "Question index")}>
-            {filtered.map((problem) => {
-              const active = problem.q_id === activeQuestionId;
-              const riskCount = openRiskCount(problem);
-              return (
-                <button key={problem.q_id} type="button" onClick={() => scrollToQuestion(problem.q_id)} className={cn("mb-1 flex min-h-11 w-full items-center justify-between rounded-[7px] px-3 text-left text-sm font-semibold transition last:mb-0", active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
-                  <span className="truncate">{problem.number || problem.q_id}</span>
-                  {riskCount ? <span className={cn("ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px]", active ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700")}>{riskCount}</span> : null}
-                </button>
-              );
-            })}
+        <div className="mt-5 grid items-start gap-4 lg:grid-cols-[132px_minmax(0,1fr)]">
+          <aside className="sticky top-[86px] z-20 hidden max-h-[calc(100vh-102px)] overflow-hidden rounded-[10px] border bg-card lg:flex lg:flex-col" aria-label={tx(locale, "题目导航", "Question navigation")}>
+            <div className="shrink-0 border-b px-3 py-3">
+              <p className="text-xs font-bold text-foreground">{tx(locale, "题目导航", "Questions")}</p>
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{tx(locale, `共 ${filtered.length} 题 · 点击定位`, `${filtered.length} questions · select to locate`)}</p>
+            </div>
+            <div className="min-h-0 overflow-y-auto p-2 overscroll-contain">
+              {filtered.map((problem) => {
+                const active = problem.q_id === activeQuestionId;
+                const riskCount = openRiskCount(problem);
+                const number = problem.number || problem.q_id;
+                return (
+                  <button key={problem.q_id} type="button" aria-current={active ? "true" : undefined} onClick={() => scrollToQuestion(problem.q_id)} className={cn("mb-1 flex min-h-10 w-full items-center justify-between rounded-[7px] px-2.5 text-left text-xs font-semibold transition last:mb-0", active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+                    <span className="truncate">{tx(locale, `第 ${number} 题`, `Q${number}`)}</span>
+                    {riskCount ? <span className={cn("ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px]", active ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700")}>{riskCount}</span> : null}
+                  </button>
+                );
+              })}
+            </div>
           </aside>
 
           <main className="min-w-0 space-y-5">
@@ -277,7 +310,7 @@ function QuestionPackageCard({ problem, index, total, previous, next, readOnly, 
   const programming = isProgrammingProblem(problem);
   const risks = (problem.preparation_issues ?? []).filter((issue) => issue.status === "open");
   return (
-    <article id={questionAnchorId(problem.q_id)} data-question-id={problem.q_id} className="scroll-mt-4 overflow-hidden rounded-[10px] border bg-card">
+    <article id={questionAnchorId(problem.q_id)} data-question-id={problem.q_id} className="scroll-mt-[86px] overflow-hidden rounded-[10px] border bg-card">
       <header className="flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -511,7 +544,8 @@ function filterProblems(problems: ProblemInfo[], rawQuery: string) {
     if (["编程", "编程题", "programming"].includes(token)) return isProgrammingProblem(problem);
     if (["低置信", "low-confidence"].includes(token)) return (problem.preparation_issues ?? []).some((issue) => issue.status === "open" && issue.code === "low_confidence");
     if (["冲突", "conflict"].includes(token)) return (problem.preparation_issues ?? []).some((issue) => issue.status === "open" && issue.code.includes("conflict"));
-    return [problem.number, problem.q_id, problem.type, problem.stem, problem.reference_answer, problem.criterion].join(" ").toLocaleLowerCase().includes(token);
+    const sourceText = [problem.number, problem.q_id, problem.type, problem.stem, problem.reference_answer, problem.criterion].join(" ");
+    return `${sourceText} ${questionSearchAliases(sourceText)}`.toLocaleLowerCase().includes(token);
   }));
 }
 
@@ -531,6 +565,14 @@ function riskShortLabel(code: string, locale: string) {
 
 function questionAnchorId(qId: string) {
   return `question-${qId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function scrollQuestionIntoView(qId: string, behavior: ScrollBehavior) {
+  const element = document.getElementById(questionAnchorId(qId));
+  if (!element) return;
+  const stickyHeaderOffset = 86;
+  const top = window.scrollY + element.getBoundingClientRect().top - stickyHeaderOffset;
+  window.scrollTo({ top: Math.max(0, top), left: 0, behavior });
 }
 
 function tx(locale: string, zh: string, en: string) {

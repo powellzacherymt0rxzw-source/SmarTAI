@@ -54,4 +54,17 @@
 - Left-rail navigation, previous/next scrolling, per-field edit state, rendered LaTeX, programming-only OJ samples, and confirm-all entry.
 - Console checked on final risk and continuous-review states: 0 errors, 0 warnings.
 
+## 2026-07-27 regression comparison
+
+- New rendered evidence:
+  - `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/20260727-q03-matrix.png`
+  - `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/20260727-student-continuous-review.png`
+- New combined comparison inputs:
+  - `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/20260727-q03-comparison.png`
+  - `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/20260727-student-comparison.png`
+- Q03 intentionally evolves Figma 06 from coverage percentages to the user-required complete material matrix. The comparison retains the same header, title scale, step rail, large metric cards, full-width search, restrained table, radii, borders, whitespace, and status palette. No clipped table column or nested legacy card pattern is visible at `1280 × 720`.
+- Student answer review intentionally evolves the prior single-question screen into the Q03 continuous pattern. The comparison confirms a labeled, independently scrolling left question rail; a complete question header with previous/next controls; and one flat content card without the former duplicated top/bottom question switch bars.
+- Interaction regression: Q2 deep-link aligns both the card and sticky rail at `86px`; selecting a different student keeps Q2; Chinese “积分” is committed without pinyin residue and filters by an explainable alias; persisted task state keeps completed workflow links reachable.
+- No new P0/P1/P2 visual or interaction mismatch was found in this regression scope. Native Safari IME composition was addressed in code and the final-value/filter behavior was verified in the bound local browser; device-level 200% zoom and VoiceOver remain user checks.
+
 final result: passed
