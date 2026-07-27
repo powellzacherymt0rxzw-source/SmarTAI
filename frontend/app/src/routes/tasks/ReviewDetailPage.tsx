@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   Save,
   Search,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -36,7 +37,7 @@ import {
   type ReviewSearchItem,
   type ReviewSearchMatch,
 } from "@/lib/reviewDetail";
-import { getTaskDestination } from "@/lib/taskFlow";
+import { getSafeTaskReturnTo, getTaskDestination } from "@/lib/taskFlow";
 import type { Correction } from "@/types";
 
 /** R02: focused, auditable teacher review across independent student/question dimensions. */
@@ -58,6 +59,9 @@ export function ReviewDetailPage() {
   const answer = student && question ? student.answerByQuestion.get(question.id) : null;
   const studentQuery = searchParams.get("student") ?? "";
   const questionQuery = searchParams.get("question") ?? "";
+  const overviewHref = taskId
+    ? getSafeTaskReturnTo(taskId, searchParams.get("returnTo")) ?? `/tasks/${encodeURIComponent(taskId)}/review`
+    : "/history";
   const students = useMemo(() => matchReviewItems(studentSearchItems(model.students), studentQuery), [model.students, studentQuery]);
   const questions = useMemo(() => matchReviewItems(questionSearchItems(model.questions), questionQuery), [model.questions, questionQuery]);
   const visibleQuestions = useMemo(
@@ -188,7 +192,7 @@ export function ReviewDetailPage() {
             : tx(locale, `复核详情：${student?.name ?? "—"} · ${question?.label ?? "—"}`, `Review Detail: ${student?.name ?? "—"} · ${question?.label ?? "—"}`)}
         </h1>
         {taskId ? (
-          <Link to={`/tasks/${taskId}/review`} className="inline-flex h-9 shrink-0 self-end items-center gap-1.5 rounded-[8px] border bg-card px-3 text-xs font-semibold text-foreground hover:bg-muted sm:self-auto">
+          <Link to={overviewHref} className="inline-flex h-9 shrink-0 self-end items-center gap-1.5 rounded-[8px] border bg-card px-3 text-xs font-semibold text-foreground hover:bg-muted sm:self-auto">
             <ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />
             {tx(locale, "返回复核总览", "Back to Review Overview")}
           </Link>
@@ -203,7 +207,7 @@ export function ReviewDetailPage() {
       ) : failed ? (
         <PageState title={tx(locale, "无法加载复核详情", "Could not load review detail")} action={tx(locale, "重试", "Retry")} onAction={() => void Promise.all([taskQuery.refetch(), resultQuery.refetch()])} />
       ) : !student || (!allQuestions && (!question || !correction)) ? (
-        <PageState title={tx(locale, "找不到对应的学生或题目", "Student or question not found")} href={`/tasks/${taskId}/review`} action={tx(locale, "返回总览", "Back to Overview")} />
+        <PageState title={tx(locale, "找不到对应的学生或题目", "Student or question not found")} href={overviewHref} action={tx(locale, "返回总览", "Back to Overview")} />
       ) : (
         <>
           <DimensionBar
@@ -357,7 +361,19 @@ function DimensionBar({ className, locale, dimension, value, current, matches, p
   onAll?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [draftValue, setDraftValue] = useState(value);
+  const composingRef = useRef(false);
   const student = dimension === "student";
+
+  useEffect(() => {
+    if (!composingRef.current) setDraftValue(value);
+  }, [value]);
+
+  function commitQuery(nextValue: string) {
+    setDraftValue(nextValue);
+    onQuery(nextValue);
+  }
+
   return (
     <section className={cn("relative grid min-h-[50px] gap-2 rounded-[10px] border bg-card px-3 py-2 md:grid-cols-[132px_minmax(170px,0.7fr)_minmax(300px,1.5fr)_190px] md:items-center", className)} aria-label={student ? tx(locale, "学生导航", "Student navigation") : tx(locale, "题目导航", "Question navigation")}>
       <NavButton disabled={!previous || allMode} onClick={() => previous && onSelect(previous.id)} icon={student ? ArrowLeft : ArrowUp} label={student ? tx(locale, "上一位", "Previous") : tx(locale, "上一题", "Previous Q")} shortcut={student ? "←" : "↑"} />
@@ -368,15 +384,40 @@ function DimensionBar({ className, locale, dimension, value, current, matches, p
       <div className="relative">
         <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
-          value={value}
+          value={draftValue}
+          inputMode="search"
           onFocus={() => setOpen(true)}
-          onChange={(event) => { onQuery(event.target.value); setOpen(true); }}
+          onCompositionStart={() => { composingRef.current = true; }}
+          onCompositionEnd={(event) => {
+            composingRef.current = false;
+            const nextValue = event.currentTarget.value;
+            setDraftValue(nextValue);
+            window.setTimeout(() => onQuery(nextValue), 0);
+          }}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            setDraftValue(nextValue);
+            if (!composingRef.current) onQuery(nextValue);
+            setOpen(true);
+          }}
           onBlur={() => window.setTimeout(() => setOpen(false), 120)}
           placeholder={student ? tx(locale, "姓名、学号，或“低置信”", "Name, ID, or “low confidence”") : tx(locale, "题号、题型、题干，或“积分题”", "Number, type, stem, or “integration”")}
           className="h-8 w-full rounded-[7px] border bg-background pl-9 pr-9 text-xs text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
         />
-        <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        {open && value.trim() ? (
+        {draftValue ? (
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => { commitQuery(""); setOpen(false); }}
+            className="absolute right-1.5 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={tx(locale, student ? "清空学生筛选" : "清空题目筛选", student ? "Clear student filter" : "Clear question filter")}
+          >
+            <X aria-hidden="true" className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        )}
+        {open && draftValue.trim() ? (
           <div className="absolute left-0 right-0 top-9 z-30 max-h-60 overflow-y-auto rounded-[8px] border bg-card p-1.5 shadow-lg">
             {matches.length ? matches.slice(0, 12).map((match) => (
               <button key={match.item.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { onSelect(match.item.id); setOpen(false); }} className="flex w-full items-center gap-3 rounded-[6px] px-2.5 py-2 text-left hover:bg-muted">

@@ -897,6 +897,14 @@
 - [x] R01-SEARCH-01 中文 composition 门禁、URL 条件、清空与详情返回上下文完成；正式完成后仍可回看真实热力图，但主动作只进入最终结果。
 - [x] QA-HISTORY-01 隔离 `finalized` fixture 的第 5/6/7 步与 C03 深链均保持目标 URL；浏览器控制台 `0 errors`。工程 `npm run lint`（visible-scope 67 文件 + TypeScript）通过，未调用 provider。
 
+### 9.9 R02 双维筛选与返回上下文复验（2026-07-27）
+
+- [x] R02-IME-01 学生与题目搜索分别使用 composition 草稿，中文选词完成后才应用筛选；不会遗留拼音、连带删除中文或写出重复 URL 参数。
+- [x] R02-FILTER-01 两维各有独立清空按钮；清空题目条件不会改变当前学生、学生条件或 R01 `returnTo`。
+- [x] R02-RETURN-01 R01 热力格/队列进入详情时携带 task-scoped 安全返回地址；`R01?q=Alice → R02 → 清空题目条件 → 返回` 精确恢复原筛选。
+- [x] R02-VISUAL-01 保持 Figma 15 的两行导航、全宽作答、AI/教师双列和评分标准首屏层级；1440×900 最新截图无新增说明卡或页面级横向溢出。
+- [x] R02-QA-01 isolated finalized fixture 浏览器控制台 `0 errors`；visible-scope 67 文件、TypeScript 与 production build（`930 modules transformed`）通过，未调用 provider 或复核写接口。
+
 ---
 
 ## 10. 本轮产品决定确认记录
