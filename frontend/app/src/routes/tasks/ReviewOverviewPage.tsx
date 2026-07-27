@@ -1,8 +1,10 @@
-import { AlertTriangle, ArrowRight, CheckCircle2, LoaderCircle, Search } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, LoaderCircle, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useConfirmTaskFinalization, useTask, useTaskFinalization, useTaskResult, useTeacherComments } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
+import { MatrixQueueWorkspace } from "@/components/tasks/MatrixQueueWorkspace";
+import { MatrixStatusCell, type MatrixStatusTone } from "@/components/tasks/MatrixStatusCell";
 import { buildResultsModel, effectiveCorrectionScore, formatConfidence, formatPercent, type QuestionSummary, type ResultsModel, type StudentSummary } from "@/components/tasks/resultsModel";
 import { collectResultReviewItems, type ReviewItem } from "@/components/tasks/resultsReviewModel";
 import { useI18n } from "@/i18n/I18nProvider";
@@ -132,42 +134,11 @@ export function ReviewOverviewPage() {
         <PageState title={copy(locale, "empty")} href="/history" action={copy(locale, "viewHistory")} />
       ) : (
         <>
-          <div className="mt-5 grid grid-cols-2 gap-4 xl:flex xl:h-[90px] xl:gap-5">
+          <div className="mt-5 grid grid-cols-2 gap-4 xl:grid-cols-4 xl:gap-5">
             <MetricCard value={formatMetricPercent(model.classAveragePercent)} label={copy(locale, "average")} tone="primary" />
             <MetricCard value={String(model.lowConfidenceCount)} label={copy(locale, "lowConfidence")} tone="warning" />
             <MetricCard value={String(disagreementCount)} label={copy(locale, "disagreement")} tone="primary" />
             <MetricCard value={`${confirmedKeys.size}/${correctionCount}`} label={copy(locale, "annotated")} tone="accent" />
-            {historyView ? (
-              <Link
-                to={`/tasks/${taskId}/results`}
-                className="col-span-2 inline-flex h-10 items-center justify-center gap-2 self-center rounded-[8px] bg-primary px-5 text-center text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 xl:-ml-[30px] xl:w-[240px] xl:shrink-0"
-              >
-                {locale === "en-US" ? "View Final Results" : "查看最终结果"}
-                <ArrowRight aria-hidden="true" className="h-4 w-4" />
-              </Link>
-            ) : remainingReviewCount > 0 && targetHref ? (
-              <Link
-                to={targetHref}
-                className="col-span-2 inline-flex h-10 items-center justify-center gap-2 self-center rounded-[8px] bg-primary px-5 text-center text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 xl:-ml-[30px] xl:w-[240px] xl:shrink-0"
-              >
-                {copy(locale, "startReview")}
-                <ArrowRight aria-hidden="true" className="h-4 w-4" />
-              </Link>
-            ) : (
-              <button
-                type="button"
-                disabled={!readyForConfirmation || confirmFinalization.isPending}
-                onClick={confirmReviewComplete}
-                className="col-span-2 inline-flex h-10 items-center justify-center gap-2 self-center rounded-[8px] bg-primary px-5 text-center text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 xl:-ml-[30px] xl:w-[240px] xl:shrink-0"
-              >
-                {confirmFinalization.isPending
-                  ? (locale === "en-US" ? "Confirming…" : "正在确认…")
-                  : (locale === "en-US" ? "Confirm review complete" : "确认复核完成")}
-                {confirmFinalization.isPending
-                  ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />
-                  : <CheckCircle2 aria-hidden="true" className="h-4 w-4" />}
-              </button>
-            )}
           </div>
 
           {!historyView && confirmFinalization.isError ? (
@@ -221,26 +192,73 @@ export function ReviewOverviewPage() {
             </p>
           ) : null}
 
-          <div className={cn("grid gap-[30px] pb-8 lg:grid-cols-[minmax(0,820px)_minmax(300px,438px)]", query ? "mt-5" : "mt-7")}>
-            <ReviewHeatmap
-              locale={locale}
-              taskId={taskId}
-              model={model}
-              students={selection.students}
-              questions={selection.questions}
-              matchedCellKeys={selection.matchedCellKeys}
-              reviewItems={reviewItems}
-              annotatedKeys={annotatedKeys}
-              confirmedKeys={confirmedKeys}
-              returnTo={overviewReturnTo}
-            />
-            <ReviewQueue
-              locale={locale}
-              taskId={taskId}
-              items={pendingReviewItems.filter((item) => selection.matchedCellKeys.has(reviewCellKey(item.student.id, item.question.id))).slice(0, 4)}
-              returnTo={overviewReturnTo}
-            />
-          </div>
+          <MatrixQueueWorkspace
+            className={query ? "mt-5" : "mt-7"}
+            matrix={(
+              <ReviewHeatmap
+                locale={locale}
+                taskId={taskId}
+                model={model}
+                students={selection.students}
+                questions={selection.questions}
+                matchedCellKeys={selection.matchedCellKeys}
+                reviewItems={reviewItems}
+                annotatedKeys={annotatedKeys}
+                confirmedKeys={confirmedKeys}
+                returnTo={overviewReturnTo}
+              />
+            )}
+            queue={(
+              <ReviewQueue
+                locale={locale}
+                taskId={taskId}
+                items={pendingReviewItems.filter((item) => selection.matchedCellKeys.has(reviewCellKey(item.student.id, item.question.id)))}
+                returnTo={overviewReturnTo}
+              />
+            )}
+          />
+
+          <footer className="mt-4 flex min-h-[58px] flex-col gap-3 rounded-[10px] border bg-card px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between xl:px-5">
+            <p className="text-xs leading-5 text-muted-foreground">
+              {historyView
+                ? copy(locale, "historyHint")
+                : remainingReviewCount > 0
+                  ? copy(locale, "remainingHint").replace("{count}", String(remainingReviewCount))
+                  : copy(locale, "readyHint")}
+            </p>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              {targetHref ? (
+                <Link
+                  to={targetHref}
+                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto"
+                >
+                  {copy(locale, "viewDetails")}
+                </Link>
+              ) : null}
+              {historyView ? (
+                <Link
+                  to={`/tasks/${taskId}/results`}
+                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-auto"
+                >
+                  {copy(locale, "viewFinalResults")}
+                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  disabled={!readyForConfirmation || confirmFinalization.isPending}
+                  title={!readyForConfirmation ? copy(locale, "confirmDisabled") : undefined}
+                  onClick={confirmReviewComplete}
+                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] bg-primary px-4 text-sm font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                >
+                  {confirmFinalization.isPending ? copy(locale, "confirming") : copy(locale, "confirmReview")}
+                  {confirmFinalization.isPending
+                    ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" />
+                    : <CheckCircle2 aria-hidden="true" className="h-4 w-4" />}
+                </button>
+              )}
+            </div>
+          </footer>
         </>
       )}
     </div>
@@ -249,7 +267,7 @@ export function ReviewOverviewPage() {
 
 function MetricCard({ value, label, tone }: { value: string; label: string; tone: "primary" | "warning" | "accent" }) {
   return (
-    <section className="flex min-h-[90px] min-w-0 flex-1 flex-col justify-center rounded-[10px] border bg-card px-5 xl:w-[250px] xl:flex-none">
+    <section className="flex min-h-[90px] min-w-0 flex-col justify-center rounded-[10px] border bg-card px-5">
       <strong className={cn(
         "text-[28px] font-bold leading-8 tracking-[-0.02em]",
         tone === "primary" && "text-primary",
@@ -288,7 +306,7 @@ function ReviewHeatmap({
   const questionById = new Map(model.questions.map((question) => [question.id, question]));
 
   return (
-    <section className="h-[308px] min-w-0 overflow-hidden rounded-[10px] border bg-card" aria-labelledby="review-heatmap-title">
+    <section className="h-[330px] min-w-0 overflow-hidden rounded-[10px] border bg-card" aria-labelledby="review-heatmap-title">
       <h2 id="review-heatmap-title" className="sr-only">{copy(locale, "heatmap")}</h2>
       {!students.length || !questions.length ? (
         <div className="flex h-full flex-col items-center justify-center px-8 text-center">
@@ -297,33 +315,50 @@ function ReviewHeatmap({
         </div>
       ) : (
         <div className="h-full overflow-auto overscroll-contain">
-          <table className="min-w-[780px] border-separate border-spacing-x-2 border-spacing-y-2 px-2 py-1 text-left">
-            <thead className="sticky top-0 z-10 bg-card">
-              <tr>
-                <th className="w-[164px] min-w-[164px] px-1 py-1 text-[12px] font-semibold text-muted-foreground">
-                  <span className="sr-only">{locale === "en-US" ? "Student" : "学生"}</span>
+          <table
+            className="w-full border-collapse text-left text-[13px]"
+            style={{ minWidth: `${Math.max(740, 324 + questions.length * 60)}px` }}
+          >
+            <thead className="sticky top-0 z-20 bg-slate-100/95 text-[12px] font-semibold text-muted-foreground backdrop-blur-sm dark:bg-slate-800/95">
+              <tr className="h-[42px] border-b">
+                <th className="sticky left-0 z-30 w-[136px] bg-slate-100/95 px-4 dark:bg-slate-800/95">
+                  {copy(locale, "studentId")}
+                </th>
+                <th className="sticky left-[136px] z-30 w-[116px] bg-slate-100/95 px-3 dark:bg-slate-800/95">
+                  {copy(locale, "studentName")}
                 </th>
                 {questions.map((question) => (
-                  <th key={question.id} className="min-w-[64px] px-1 py-1 text-center text-[12px] font-semibold text-muted-foreground">
+                  <th key={question.id} className="w-[60px] px-1 text-center">
                     {question.label}
                   </th>
                 ))}
+                <th className="w-[72px] px-3 text-right">{copy(locale, "action")}</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y">
               {students.map((student) => {
                 const correctionByQuestion = new Map(student.corrections.map((correction) => [correction.q_id, correction]));
+                const entryQuestion = questions.find((question) => {
+                  const key = reviewCellKey(student.id, question.id);
+                  return reviewByKey.has(key) && !confirmedKeys.has(key);
+                }) ?? questions[0];
+                const entryHref = entryQuestion
+                  ? reviewDetailHref(taskId, student.id, entryQuestion.id, returnTo)
+                  : null;
                 return (
-                  <tr key={student.id}>
-                    <th className="max-w-[164px] truncate px-1 py-1 text-[12px] font-semibold text-foreground" title={`${student.id} ${student.name}`}>
-                      {student.id} {student.name !== student.id ? student.name : ""}
+                  <tr key={student.id} className="h-[52px] bg-card transition-colors hover:bg-muted/25">
+                    <th className="sticky left-0 z-10 w-[136px] max-w-[136px] truncate bg-card px-4 text-[12px] font-semibold text-foreground" title={student.id}>
+                      {student.id}
                     </th>
+                    <td className="sticky left-[136px] z-10 w-[116px] max-w-[116px] truncate bg-card px-3 text-[12px] text-muted-foreground" title={student.name}>
+                      {student.name !== student.id ? student.name : "—"}
+                    </td>
                     {questions.map((question) => {
                       const correction = correctionByQuestion.get(question.id);
                       const key = reviewCellKey(student.id, question.id);
-                      if (!correction || !matchedCellKeys.has(key)) return <td key={question.id} className="h-9 min-w-[64px]" />;
+                      if (!correction || !matchedCellKeys.has(key)) return <td key={question.id} className="h-[52px] w-[60px] px-1" />;
                       return (
-                        <td key={question.id} className="h-9 min-w-[64px] px-0.5">
+                        <td key={question.id} className="h-[52px] w-[60px] px-1">
                           <ReviewCell
                             locale={locale}
                             href={reviewDetailHref(taskId, student.id, question.id, returnTo)}
@@ -336,6 +371,16 @@ function ReviewHeatmap({
                         </td>
                       );
                     })}
+                    <td className="w-[72px] px-3 text-right">
+                      {entryHref ? (
+                        <Link
+                          to={entryHref}
+                          className="text-xs font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {copy(locale, "view")}
+                        </Link>
+                      ) : null}
+                    </td>
                   </tr>
                 );
               })}
@@ -351,47 +396,42 @@ function ReviewCell({ locale, href, correction, item, annotated, confirmed, ques
   const state = confirmed ? "confirmed" : annotated ? "commented" : item?.category === "low-confidence" ? "low" : item ? "review" : "ok";
   const label = copy(locale, state);
   const detail = `${question?.label ?? correction.q_id} · ${formatPercent(correction.max_score > 0 ? (effectiveCorrectionScore(correction) / correction.max_score) * 100 : null)} · ${formatConfidence(correction.confidence)}`;
-  return (
-    <Link
-      to={href}
-      aria-label={`${label} · ${detail}`}
-      title={`${label} · ${detail}`}
-      className={cn(
-        "flex h-9 min-w-[64px] items-center justify-center rounded-[7px] text-[11px] font-semibold outline-none transition hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring",
-        state === "ok" && "bg-teal-100 text-teal-600 dark:bg-teal-950/60 dark:text-teal-300",
-        state === "low" && "bg-amber-100 text-amber-500 dark:bg-amber-950/50 dark:text-amber-300",
-        state === "review" && "bg-red-100 text-red-500 dark:bg-red-950/45 dark:text-red-300",
-        (state === "commented" || state === "confirmed") && "bg-blue-100 text-primary dark:bg-blue-950/55",
-      )}
-    >
-      {label}
-    </Link>
-  );
+  const tone: MatrixStatusTone = state === "confirmed"
+    ? "reviewed"
+    : state === "commented"
+      ? "note"
+      : state === "low"
+        ? "warning"
+        : state === "review"
+          ? "error"
+          : "ok";
+  return <MatrixStatusCell to={href} label={`${label} · ${detail}`} tone={tone} />;
 }
 
 function ReviewQueue({ locale, taskId, items, returnTo }: { locale: Locale; taskId: string; items: ReviewItem[]; returnTo: string }) {
   return (
-    <section className="h-[308px] overflow-hidden rounded-[10px] border bg-card px-7 py-6" aria-labelledby="review-queue-title">
-      <h2 id="review-queue-title" className="text-[18px] font-bold leading-6 text-foreground">{copy(locale, "queue")}</h2>
+    <section className="h-[330px] overflow-hidden rounded-[10px] border bg-card px-4 py-5" aria-labelledby="review-queue-title">
+      <h2 id="review-queue-title" className="text-[16px] font-bold leading-6 text-foreground">{copy(locale, "queue")}</h2>
       {!items.length ? (
-        <div className="flex h-[220px] flex-col items-center justify-center text-center">
+        <div className="flex h-[248px] flex-col items-center justify-center text-center">
           <CheckCircle2 aria-hidden="true" className="h-7 w-7 text-teal-500" />
-          <p className="mt-3 max-w-[300px] text-[13px] leading-5 text-muted-foreground">{copy(locale, "noQueue")}</p>
+          <p className="mt-3 max-w-[220px] text-[12px] leading-5 text-muted-foreground">{copy(locale, "noQueue")}</p>
         </div>
       ) : (
-        <ol className="mt-3 h-[224px] space-y-1 overflow-y-auto overscroll-contain pr-1">
+        <ol className="mt-3 h-[250px] space-y-1 overflow-y-auto overscroll-contain pr-1">
           {items.map((item) => (
             <li key={reviewCellKey(item.student.id, item.question.id)}>
               <Link
                 to={reviewDetailHref(taskId, item.student.id, item.question.id, returnTo)}
-                className="flex min-h-[48px] items-center gap-3 rounded-[8px] px-1.5 text-[13px] outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex min-h-[54px] items-center gap-2 rounded-[8px] px-2 py-1.5 text-[12px] outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-                  {item.student.name} · {item.question.label} · {queueReason(locale, item)}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold text-foreground" title={`${item.student.id} ${item.student.name}`}>
+                    {item.student.name} · {item.question.label}
+                  </span>
+                  <span className="mt-0.5 block truncate text-muted-foreground">{queueReason(locale, item)}</span>
                 </span>
-                <span className="inline-flex h-8 min-w-[72px] shrink-0 items-center justify-center rounded-[8px] border bg-card px-3 font-semibold text-foreground">
-                  {copy(locale, "review")}
-                </span>
+                <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />
               </Link>
             </li>
           ))}

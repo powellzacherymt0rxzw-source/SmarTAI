@@ -1,7 +1,7 @@
 import type { Locale } from "@/i18n/messages";
 
 const copy = {
-  title: ["结果总览", "Results Overview"],
+  title: ["复核批改", "Grading Review"],
   average: ["平均得分率", "Average score"],
   lowConfidence: ["低置信题次", "Low-confidence responses"],
   disagreement: ["专家分歧大", "High expert disagreement"],
@@ -11,7 +11,7 @@ const copy = {
   searchPlaceholder: ["智能筛选：低置信、低于 60 分、专家分歧、学生姓名或 Q2…", "Smart filter: low confidence, below 60, disagreement, student, or Q2…"],
   searchLabel: ["智能筛选批改结果", "Smart-filter grading results"],
   heatmap: ["学生 × 题目复核热力图", "Student × problem review heatmap"],
-  queue: ["复核队列", "Review queue"],
+  queue: ["待复核队列", "Review queue"],
   review: ["复核", "Review"],
   low: ["低", "Low"],
   ok: ["OK", "OK"],
@@ -32,6 +32,18 @@ const copy = {
   anomalyReason: ["分数异常", "Score anomaly"],
   reviewReason: ["需要人工确认", "Needs teacher review"],
   filtered: ["筛选后 {students} 位学生 · {questions} 道题 · {cells} 个题次", "Filtered to {students} students · {questions} problems · {cells} responses"],
+  studentId: ["学号", "Student ID"],
+  studentName: ["姓名", "Name"],
+  action: ["操作", "Action"],
+  view: ["查看", "View"],
+  viewDetails: ["查看批改详情", "View grading details"],
+  confirmReview: ["确认复核完成", "Confirm review complete"],
+  confirming: ["正在确认…", "Confirming…"],
+  confirmDisabled: ["请先处理待复核题次，再确认复核完成。", "Resolve the review queue before confirming completion."],
+  viewFinalResults: ["查看最终结果", "View final results"],
+  remainingHint: ["还有 {count} 个题次需要复核；可从矩阵或右侧队列直接进入。", "{count} responses still need review. Open one from the matrix or queue."],
+  readyHint: ["所有待复核题次均已处理，可以确认并生成正式结果。", "All flagged responses are resolved. You can confirm and generate final results."],
+  historyHint: ["当前为已完成任务的只读复核记录，可查看批改详情或进入最终结果。", "This is a read-only review record. Open grading details or final results."],
 } as const;
 
 export type ReviewOverviewCopyKey = keyof typeof copy;

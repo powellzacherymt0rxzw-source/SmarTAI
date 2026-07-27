@@ -1,8 +1,10 @@
-import { AlertCircle, ChevronRight, RotateCcw, Search } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronRight, RotateCcw, Search } from "lucide-react";
 import { useDeferredValue, useMemo } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useTask } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
+import { MatrixQueueWorkspace } from "@/components/tasks/MatrixQueueWorkspace";
+import { MatrixStatusCell, type MatrixStatusTone } from "@/components/tasks/MatrixStatusCell";
 import { useI18n } from "@/i18n/I18nProvider";
 import type { MessageKey } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
@@ -31,6 +33,15 @@ const EXPLANATION_KEYS: Record<SubmissionReviewSelection["explanation"], Message
   identity: "submissionReviewFilterIdentityHint",
   no_match: "submissionReviewFilterNoMatchHint",
 };
+
+interface SubmissionQueueItem {
+  key: string;
+  href: string;
+  studentId: string;
+  studentName: string;
+  questionLabel: string;
+  reasonKey: MessageKey;
+}
 
 export function SubmissionReviewOverviewPage() {
   const { taskId } = useParams();
@@ -74,6 +85,10 @@ export function SubmissionReviewOverviewPage() {
   const detailQuestion = detailStudent
     ? firstReviewQuestion(detailStudent, selection.questions)
     : null;
+  const returnSearch = searchParams.toString();
+  const queueItems = taskId
+    ? buildSubmissionQueueItems(selection.students, selection.questions, taskId, returnSearch)
+    : [];
 
   return (
     <div className="w-full max-w-[1300px]">
@@ -166,36 +181,52 @@ export function SubmissionReviewOverviewPage() {
           ) : null}
         </div>
 
-        <div className="mt-4 min-w-0 overflow-hidden rounded-[10px] border bg-card">
+        <div className="mt-4 min-w-0">
           {taskQuery.isLoading ? (
-            <MatrixState title={t("submissionReviewLoading")} busy />
+            <section className="overflow-hidden rounded-[10px] border bg-card">
+              <MatrixState title={t("submissionReviewLoading")} busy />
+            </section>
           ) : taskQuery.isError ? (
-            <MatrixState
-              title={t("submissionReviewLoadError")}
-              action={t("submissionReviewRetry")}
-              onAction={() => void taskQuery.refetch()}
-            />
+            <section className="overflow-hidden rounded-[10px] border bg-card">
+              <MatrixState
+                title={t("submissionReviewLoadError")}
+                action={t("submissionReviewRetry")}
+                onAction={() => void taskQuery.refetch()}
+              />
+            </section>
           ) : !taskId ? (
-            <MatrixState title={t("submissionReviewTaskMissing")} />
+            <section className="overflow-hidden rounded-[10px] border bg-card">
+              <MatrixState title={t("submissionReviewTaskMissing")} />
+            </section>
           ) : students.length === 0 || questions.length === 0 ? (
-            <MatrixState
-              title={t("submissionReviewEmptyTitle")}
-              description={t("submissionReviewEmptyDescription")}
-              href={`/tasks/${taskId}/submissions/upload`}
-              action={t("submissionReviewUploadAgain")}
-            />
+            <section className="overflow-hidden rounded-[10px] border bg-card">
+              <MatrixState
+                title={t("submissionReviewEmptyTitle")}
+                description={t("submissionReviewEmptyDescription")}
+                href={`/tasks/${taskId}/submissions/upload`}
+                action={t("submissionReviewUploadAgain")}
+              />
+            </section>
           ) : (
-            <SubmissionMatrix
-              students={selection.students}
-              questions={selection.questions}
-              taskId={taskId}
-              returnSearch={searchParams.toString()}
-              t={t}
-            />
-          )}
+            <>
+              <MatrixQueueWorkspace
+                matrix={(
+                  <section className="h-[330px] min-w-0 overflow-hidden rounded-[10px] border bg-card" aria-label={t("submissionReviewMatrixLabel")}>
+                    <SubmissionMatrix
+                      students={selection.students}
+                      questions={selection.questions}
+                      taskId={taskId}
+                      returnSearch={returnSearch}
+                      t={t}
+                    />
+                  </section>
+                )}
+                queue={(
+                  <SubmissionReviewQueue items={queueItems} t={t} />
+                )}
+              />
 
-          {!taskQuery.isLoading && !taskQuery.isError && taskId && students.length > 0 && questions.length > 0 ? (
-            <footer className="flex min-h-[58px] flex-col gap-2 border-t px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between xl:px-5">
+              <footer className="mt-4 flex min-h-[58px] flex-col gap-2 rounded-[10px] border bg-card px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between xl:px-5">
               <p className="text-xs text-muted-foreground">
                 {t("submissionReviewShowingPrefix")}{selection.students.length}
                 {t("submissionReviewShowingMiddle")}{students.length}
@@ -205,7 +236,7 @@ export function SubmissionReviewOverviewPage() {
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                 {detailStudent && detailQuestion ? (
                   <Link
-                    to={studentReviewPath(taskId, detailStudent.stu_id, detailQuestion.id, searchParams.toString())}
+                    to={studentReviewPath(taskId, detailStudent.stu_id, detailQuestion.id, returnSearch)}
                     className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[7px] border bg-card px-4 text-sm font-semibold text-foreground outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto"
                   >
                     {t(attentionStudent ? "submissionReviewOpenStudent" : "submissionReviewOpenDetails")}
@@ -219,8 +250,9 @@ export function SubmissionReviewOverviewPage() {
                   <ChevronRight aria-hidden="true" className="h-4 w-4" />
                 </Link>
               </div>
-            </footer>
-          ) : null}
+              </footer>
+            </>
+          )}
         </div>
       </section>
     </div>
@@ -251,25 +283,25 @@ function SubmissionMatrix({
   }
 
   return (
-    <div className="max-h-[calc(100vh-540px)] min-h-[250px] w-full overflow-auto overscroll-contain">
+    <div className="h-full w-full overflow-auto overscroll-contain">
       <table
         className="w-full border-collapse text-left text-[13px]"
-        style={{ minWidth: `${Math.max(1020, 360 + questions.length * 112)}px` }}
+        style={{ minWidth: `${Math.max(740, 324 + questions.length * 60)}px` }}
       >
         <thead className="sticky top-0 z-20 bg-slate-100/95 text-[12px] font-semibold text-muted-foreground backdrop-blur-sm dark:bg-slate-800/95">
           <tr className="h-[42px] border-b">
-            <th className="sticky left-0 z-30 w-[150px] bg-slate-100/95 px-5 dark:bg-slate-800/95">
+            <th className="sticky left-0 z-30 w-[136px] bg-slate-100/95 px-4 dark:bg-slate-800/95">
               {t("submissionReviewColumnId")}
             </th>
-            <th className="sticky left-[150px] z-30 w-[150px] bg-slate-100/95 px-3 dark:bg-slate-800/95">
+            <th className="sticky left-[136px] z-30 w-[116px] bg-slate-100/95 px-3 dark:bg-slate-800/95">
               {t("submissionReviewColumnName")}
             </th>
             {questions.map((question) => (
-              <th key={question.id} className="w-[112px] px-3 text-center" title={question.type || question.label}>
+              <th key={question.id} className="w-[60px] px-1 text-center" title={question.type || question.label}>
                 {question.label}
               </th>
             ))}
-            <th className="w-[90px] px-5 text-right">{t("submissionReviewColumnAction")}</th>
+            <th className="w-[72px] px-3 text-right">{t("submissionReviewColumnAction")}</th>
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -281,10 +313,10 @@ function SubmissionMatrix({
               : studentPath(taskId, student.stu_id);
             return (
               <tr key={student.stu_id} className="h-[52px] bg-card transition-colors hover:bg-muted/25">
-                <td className="sticky left-0 z-10 bg-card px-5 font-semibold text-foreground">
+                <td className="sticky left-0 z-10 w-[136px] max-w-[136px] bg-card px-4 font-semibold text-foreground">
                   <Link
                     to={entryHref}
-                    className="inline-flex max-w-[130px] items-center gap-2 truncate outline-none hover:text-primary focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+                    className="inline-flex max-w-[112px] items-center gap-2 truncate outline-none hover:text-primary focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
                     title={student.stu_id}
                   >
                     {student.identity_status === "needs_review" ? (
@@ -293,11 +325,11 @@ function SubmissionMatrix({
                     <span className="truncate">{student.stu_id}</span>
                   </Link>
                 </td>
-                <td className="sticky left-[150px] z-10 max-w-[150px] truncate bg-card px-3 text-muted-foreground" title={student.stu_name || student.stu_id}>
+                <td className="sticky left-[136px] z-10 w-[116px] max-w-[116px] truncate bg-card px-3 text-muted-foreground" title={student.stu_name || student.stu_id}>
                   {student.stu_name || student.stu_id}
                 </td>
                 {questions.map((question) => (
-                  <td key={question.id} className="px-3 text-center">
+                  <td key={question.id} className="w-[60px] px-1 text-center">
                     <AnswerStatusLink
                       answer={answers.get(question.id)}
                       to={studentReviewPath(taskId, student.stu_id, question.id, returnSearch)}
@@ -305,7 +337,7 @@ function SubmissionMatrix({
                     />
                   </td>
                 ))}
-                <td className="px-5 text-right">
+                <td className="w-[72px] px-3 text-right">
                   <Link
                     to={entryHref}
                     className="text-xs font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
@@ -339,23 +371,59 @@ function AnswerStatusLink({
     empty: "submissionReviewCellEmpty",
     missing: "submissionReviewCellMissing",
   };
-  const title = answer?.flag?.length ? answer.flag.join(" · ") : t(labels[state]);
+  const stateLabel = t(labels[state]);
+  const label = answer?.flag?.length ? `${stateLabel} · ${answer.flag.join(" · ")}` : stateLabel;
+  const tone: MatrixStatusTone = state === "recognized"
+    ? "ok"
+    : state === "reviewed"
+      ? "reviewed"
+      : state === "flagged"
+        ? "warning"
+        : "error";
 
+  return <MatrixStatusCell to={to} label={label} tone={tone} />;
+}
+
+function SubmissionReviewQueue({
+  items,
+  t,
+}: {
+  items: SubmissionQueueItem[];
+  t: (key: MessageKey) => string;
+}) {
   return (
-    <Link
-      to={to}
-      title={title}
-      aria-label={title}
-      className={cn(
-        "inline-flex h-7 min-w-[82px] items-center justify-center rounded-full px-3 text-[11px] font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-ring",
-        state === "recognized" && "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-200",
-        state === "reviewed" && "bg-blue-100 text-primary hover:bg-blue-200 dark:bg-blue-950/70 dark:text-blue-200",
-        state === "flagged" && "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-950/70 dark:text-amber-200",
-        (state === "empty" || state === "missing") && "bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-950/60 dark:text-red-200",
+    <section className="h-[330px] overflow-hidden rounded-[10px] border bg-card px-4 py-5" aria-labelledby="submission-review-queue-title">
+      <h2 id="submission-review-queue-title" className="text-[16px] font-bold leading-6 text-foreground">
+        {t("submissionReviewQueueTitle")}
+      </h2>
+      {!items.length ? (
+        <div className="flex h-[248px] flex-col items-center justify-center text-center">
+          <CheckCircle2 aria-hidden="true" className="h-7 w-7 text-teal-500" />
+          <p className="mt-3 max-w-[220px] text-[12px] leading-5 text-muted-foreground">
+            {t("submissionReviewQueueEmpty")}
+          </p>
+        </div>
+      ) : (
+        <ol className="mt-3 h-[250px] space-y-1 overflow-y-auto overscroll-contain pr-1">
+          {items.map((item) => (
+            <li key={item.key}>
+              <Link
+                to={item.href}
+                className="flex min-h-[54px] items-center gap-2 rounded-[8px] px-2 py-1.5 text-[12px] outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold text-foreground" title={`${item.studentId} ${item.studentName}`}>
+                    {item.studentName} · {item.questionLabel}
+                  </span>
+                  <span className="mt-0.5 block truncate text-muted-foreground">{t(item.reasonKey)}</span>
+                </span>
+                <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </Link>
+            </li>
+          ))}
+        </ol>
       )}
-    >
-      {t(labels[state])}
-    </Link>
+    </section>
   );
 }
 
@@ -449,4 +517,48 @@ function firstReviewQuestion(student: StudentSubmission, questions: SubmissionQu
   return questions.find((question) => !["recognized", "reviewed"].includes(getAnswerState(answers.get(question.id))))
     ?? questions[0]
     ?? null;
+}
+
+function buildSubmissionQueueItems(
+  students: StudentSubmission[],
+  questions: SubmissionQuestion[],
+  taskId: string,
+  returnSearch: string,
+): SubmissionQueueItem[] {
+  const items: SubmissionQueueItem[] = [];
+  const reasonKeys: Record<Exclude<SubmissionAnswerState, "recognized" | "reviewed">, MessageKey> = {
+    flagged: "submissionReviewCellFlagged",
+    empty: "submissionReviewCellEmpty",
+    missing: "submissionReviewCellMissing",
+  };
+
+  for (const student of students) {
+    const firstQuestion = firstReviewQuestion(student, questions) ?? questions[0];
+    if (student.identity_status === "needs_review" && firstQuestion) {
+      items.push({
+        key: `${student.stu_id}:identity`,
+        href: studentReviewPath(taskId, student.stu_id, firstQuestion.id, returnSearch),
+        studentId: student.stu_id,
+        studentName: student.stu_name || student.stu_id,
+        questionLabel: "ID",
+        reasonKey: "submissionReviewQueueIdentity",
+      });
+    }
+
+    const answers = answerMap(student);
+    for (const question of questions) {
+      const state = getAnswerState(answers.get(question.id));
+      if (state === "recognized" || state === "reviewed") continue;
+      items.push({
+        key: `${student.stu_id}:${question.id}`,
+        href: studentReviewPath(taskId, student.stu_id, question.id, returnSearch),
+        studentId: student.stu_id,
+        studentName: student.stu_name || student.stu_id,
+        questionLabel: question.label,
+        reasonKey: reasonKeys[state],
+      });
+    }
+  }
+
+  return items;
 }

@@ -318,7 +318,7 @@ export function GradingPreflightPage() {
                   to={`/tasks/${taskId}/review`}
                   className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-6 text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-[180px]"
                 >
-                  {locale === "en-US" ? "View Review" : "查看复核分析"}
+                  {locale === "en-US" ? "View Grading Review" : "查看复核批改"}
                   <ChevronRight aria-hidden="true" className="h-4 w-4" />
                 </Link>
               </>

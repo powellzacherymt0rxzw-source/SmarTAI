@@ -80,3 +80,34 @@
 - Engineering evidence: visible-scope audit and TypeScript passed; Vite production build passed; task-KB/RAG regression `16 passed`; combined C01/course-material/S04/S05/Q02-Q03 regression `41 passed`.
 
 final result: passed
+
+## 2026-07-27 S05 / R01 matrix-and-queue alignment
+
+### Source and rendered evidence
+
+- User-marked R01 source: `/var/folders/_p/v8vvlf6x441989_5zxzsl3y40000gn/T/codex-clipboard-8f7a1264-f079-4473-a4f4-3b856beb79b9.png`.
+- Verified R01 implementation: `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/R01-review-matrix-aligned-full.jpg`.
+- Verified S05 implementation: `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/S05-submission-matrix-aligned.jpg`.
+- Browser state: real local teacher account and existing task `T_39aca252a1`; no provider call and no mutation was performed.
+
+### Comparison findings
+
+- Both pages now use the same elastic matrix plus 280px queue anatomy and the same bottom action rail. The queue is materially narrower than the source while the matrix remains the dominant surface.
+- The matrix explicitly separates 学号 and 姓名 and ends every row with 查看. Question columns are 60px and their state surface fills the cell, leaving enough room for roughly ten questions before internal horizontal scrolling.
+- Status semantics are visual and accessible: green check = normal, blue circled check = reviewed, amber warning = attention, red cross = error, sky note = teacher comment. Text remains available through `aria-label`, `title`, and screen-reader content.
+- R01 keeps 查看批改详情 to the left of the bottom-right primary action. Completed historical tasks correctly replace the mutation with 查看最终结果; an editable task will show 确认复核完成 in the same position.
+- S05 and R01 queues contain only real pending items and share the same compact link-row rhythm; an empty queue does not invent warnings.
+- The workflow label is consistently 复核批改 / Review Grading, followed by 结果分析 / Results Analysis.
+- Typography, restrained color count, border radius, page width, status colors, and whitespace remain within the established Figma 14/product-shell language.
+- No actionable P0/P1/P2 mismatch remains in this scope.
+
+### Interaction, accessibility, and engineering checks
+
+- S05 rendered 4 students × 3 questions. All four rows have 查看; all 12 status links expose complete accessible labels; the reviewed state is visibly distinct from normal recognition.
+- R01 rendered the same 4 × 3 result matrix with full row actions and canonical student/question review links.
+- Both pages have no page-level horizontal overflow; additional question columns scroll inside the matrix instead of expanding the document.
+- Clean in-app browser tabs reported `0` console errors and `0` warnings for both routes.
+- `npm run lint` passed, including visible-scope audit and TypeScript.
+- `npm run build` passed with `937 modules transformed`.
+
+final result: passed

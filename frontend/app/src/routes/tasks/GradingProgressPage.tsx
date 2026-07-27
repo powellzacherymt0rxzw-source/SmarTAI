@@ -167,7 +167,7 @@ export function GradingProgressPage() {
                     {completedView ? (locale === "en-US" ? "Completed" : "已完成") : copy(locale, "backgroundChip")}
                   </span>
                   <Link to={completedView ? `/tasks/${taskId}/review` : "/"} className="inline-flex h-10 w-full items-center justify-center rounded-[8px] border bg-card px-5 text-[13px] font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-[150px] sm:text-[14px]">
-                    {completedView ? (locale === "en-US" ? "View Review" : "查看复核分析") : copy(locale, "backWorkspace")}
+                    {completedView ? (locale === "en-US" ? "View Grading Review" : "查看复核批改") : copy(locale, "backWorkspace")}
                   </Link>
                 </div>
               </section>
