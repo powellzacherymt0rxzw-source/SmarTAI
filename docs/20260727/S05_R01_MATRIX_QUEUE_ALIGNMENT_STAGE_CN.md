@@ -58,6 +58,7 @@
 - S05 同一任务：4 名学生 × 3 道题，正常与已复核两种状态实际渲染；底部“查看作答详情 / 进入批改设置”与 R01 页脚同构。
 - 两页均无页面级横向溢出；题目扩展时由矩阵内部承担滚动。
 - 视觉证据：
+  - `R01-review-matrix-comparison.jpg`（用户标注参考与当前实现并排对照）
   - `R01-review-matrix-aligned-full.jpg`
   - `S05-submission-matrix-aligned.jpg`
   - 位于 Codex 临时可视化目录 `019f4bff-e585-7e73-b58f-eee15957dfee/`。

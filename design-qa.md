@@ -86,6 +86,7 @@ final result: passed
 ### Source and rendered evidence
 
 - User-marked R01 source: `/var/folders/_p/v8vvlf6x441989_5zxzsl3y40000gn/T/codex-clipboard-8f7a1264-f079-4473-a4f4-3b856beb79b9.png`.
+- Combined source/implementation comparison: `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/R01-review-matrix-comparison.jpg`.
 - Verified R01 implementation: `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/R01-review-matrix-aligned-full.jpg`.
 - Verified S05 implementation: `/Users/annie/.codex/visualizations/2026/07/10/019f4bff-e585-7e73-b58f-eee15957dfee/S05-submission-matrix-aligned.jpg`.
 - Browser state: real local teacher account and existing task `T_39aca252a1`; no provider call and no mutation was performed.
