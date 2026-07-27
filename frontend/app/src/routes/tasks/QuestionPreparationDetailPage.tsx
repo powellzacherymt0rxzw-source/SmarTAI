@@ -200,7 +200,7 @@ export function QuestionPreparationDetailPage() {
       <NewTaskStepper currentStep={2} />
 
       <label className="relative mt-6 block">
-        <span className="sr-only">{tx(locale, "智能筛选题目", "Filter questions")}</span>
+        <span className="sr-only">{tx(locale, "SmarTAI 智能筛选题目", "SmarTAI Smart problem filter")}</span>
         <Search aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
           value={query}
@@ -216,7 +216,7 @@ export function QuestionPreparationDetailPage() {
             setQuery(event.target.value);
             if (!composingRef.current) updateQuery(event.target.value);
           }}
-          placeholder={tx(locale, "输入题号、题型、题目内容，或“编程题 / 低置信 / 冲突”", "Search number, type, content, or “programming / low confidence / conflict”")}
+          placeholder={tx(locale, "SmarTAI 智能搜索：题号、题型、题目内容，或“编程题 / 低置信 / 冲突”", "SmarTAI Smart Search: number, type, content, or “programming / low confidence / conflict”")}
           className="h-12 w-full rounded-[10px] border bg-card pl-11 pr-4 text-[13px] outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
         />
       </label>
@@ -415,7 +415,7 @@ function EditableTextField({ fieldKey, label, value, problem, field, readOnly, s
         </div>
       ) : (
         <div className={cn("mt-3 min-h-[92px] rounded-[8px] bg-slate-50 px-4 py-3 text-sm leading-6 dark:bg-slate-950/20", compact && "min-h-[72px]")}>
-          {value.trim() ? (field === "solution_code" ? <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs leading-6 text-foreground">{value}</pre> : <MarkdownMath>{value}</MarkdownMath>) : <p className="text-sm text-muted-foreground">{tx(locale, "AI 正在生成或本次处理未成功，请在风险总览查看。", "Generation is pending or failed; check the risk overview.")}</p>}
+          {value.trim() ? (field === "solution_code" ? <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs leading-6 text-foreground">{value}</pre> : <MarkdownMath>{value}</MarkdownMath>) : <p className="text-sm text-muted-foreground">{tx(locale, "SmarTAI 正在生成或本次处理未成功，请在风险总览查看。", "SmarTAI generation is pending or failed; check the risk overview.")}</p>}
         </div>
       )}
     </section>
@@ -565,8 +565,8 @@ function openRiskCount(problem: ProblemInfo) {
 }
 
 function riskShortLabel(code: string, locale: string) {
-  const zh: Record<string, string> = { low_confidence: "低置信匹配", source_conflict: "来源冲突", ai_source_conflict: "AI 与原文件冲突", parse_anomaly: "解析异常", generation_failed: "生成失败", invalid_test_case: "测试样例无效", reference_solution_failed_case: "参考解未通过测试", rubric_step_reference_conflict: "评分步骤未对应" };
-  const en: Record<string, string> = { low_confidence: "Low confidence", source_conflict: "Source conflict", ai_source_conflict: "AI/source conflict", parse_anomaly: "Parse anomaly", generation_failed: "Generation failed", invalid_test_case: "Invalid test case", reference_solution_failed_case: "Reference solution failed", rubric_step_reference_conflict: "Rubric alignment issue" };
+  const zh: Record<string, string> = { low_confidence: "低置信匹配", source_conflict: "来源冲突", ai_source_conflict: "SmarTAI 与原文件冲突", parse_anomaly: "解析异常", generation_failed: "生成失败", invalid_test_case: "测试样例无效", reference_solution_failed_case: "参考解未通过测试", rubric_step_reference_conflict: "评分步骤未对应" };
+  const en: Record<string, string> = { low_confidence: "Low confidence", source_conflict: "Source conflict", ai_source_conflict: "SmarTAI/source conflict", parse_anomaly: "Parse anomaly", generation_failed: "Generation failed", invalid_test_case: "Invalid test case", reference_solution_failed_case: "Reference solution failed", rubric_step_reference_conflict: "Rubric alignment issue" };
   return locale === "zh-CN" ? zh[code] ?? code : en[code] ?? code;
 }
 

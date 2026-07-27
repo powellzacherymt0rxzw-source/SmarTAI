@@ -91,7 +91,7 @@ export function LoginPage() {
         </div>
 
         <h1 className="mt-5 text-[27px] font-semibold tracking-[-0.025em]">
-          {zh ? "AI 批改工作台" : "AI Grading Workspace"}
+          {zh ? "SmarTAI 智能批改工作台" : "SmarTAI Intelligent Grading Workspace"}
         </h1>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {zh

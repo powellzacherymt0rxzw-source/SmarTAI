@@ -233,7 +233,7 @@ function QuestionFilterBar({ locale, value, matches, onQuery, onSelect }: {
               setOpen(true);
             }}
             onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-            placeholder={tx(locale, "输入题号、题型、题干，或“积分题”", "Number, type, stem, or “integration”")}
+            placeholder={tx(locale, "SmarTAI 智能搜索：题号、题型、题干，或“积分题”", "SmarTAI Smart Search: number, type, stem, or “integration”")}
             className="h-10 w-full rounded-[8px] border bg-card pl-10 pr-10 text-xs text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
           />
           {draftValue ? <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraftValue(""); onQuery(""); setOpen(false); }} aria-label={tx(locale, "清空题目筛选", "Clear question filter")} className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><X aria-hidden="true" className="h-3.5 w-3.5" /></button> : null}
@@ -296,7 +296,7 @@ function DimensionBar({ className, locale, dimension, value, current, matches, a
             setOpen(true);
           }}
           onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-          placeholder={isStudent ? tx(locale, "输入姓名、学号或“低置信”", "Name, ID, or low confidence") : tx(locale, "输入题号、题型、题干或“积分题”", "Number, type, stem, or integration")}
+          placeholder={isStudent ? tx(locale, "SmarTAI 智能搜索：姓名、学号或“低置信”", "SmarTAI Smart Search: name, ID, or low confidence") : tx(locale, "SmarTAI 智能搜索：题号、题型、题干或“积分题”", "SmarTAI Smart Search: number, type, stem, or integration")}
           className="h-8 w-full rounded-[7px] border bg-card pl-9 pr-8 text-[11px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
         />
         {draftValue ? <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraftValue(""); onQuery(""); setOpen(false); }} aria-label={tx(locale, "清空当前维度筛选", "Clear this dimension filter")} className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><X aria-hidden="true" className="h-3.5 w-3.5" /></button> : null}
@@ -339,7 +339,7 @@ function QuestionResultCard({ locale, taskId, student, question, studentReturn, 
 
       <div className="mt-3 grid gap-3 xl:grid-cols-2">
         <ContentPanel title={tx(locale, "学生作答", "Student answer")}><MarkdownMath className="text-[13px] leading-6 text-foreground">{answer?.content || tx(locale, "未识别到该题作答。", "No answer was recognized for this question.")}</MarkdownMath></ContentPanel>
-        <ContentPanel title={tx(locale, "AI 判定与依据", "AI decision & rationale")} meta={`${formatScore(correction.score)} / ${formatScore(correction.max_score)}`}><MarkdownMath className="text-[12px] leading-5 text-muted-foreground">{correction.comment || tx(locale, "AI 未返回文字依据。", "The AI returned no written rationale.")}</MarkdownMath><div className="mt-3 grid grid-cols-3 gap-2"><SmallSignal label={tx(locale, "置信度", "Confidence")} value={formatConfidence(correction.confidence)} /><SmallSignal label={tx(locale, "专家数", "Experts")} value={String(correction.expert_results?.length ?? 0)} /><SmallSignal label={tx(locale, "合成方式", "Synthesis")} value={formatSynthesis(correction.synthesis_method, locale)} /></div></ContentPanel>
+        <ContentPanel title={tx(locale, "SmarTAI 批改结果", "SmarTAI grading result")} meta={`${formatScore(correction.score)} / ${formatScore(correction.max_score)}`}><MarkdownMath className="text-[12px] leading-5 text-muted-foreground">{correction.comment || tx(locale, "SmarTAI 未返回文字依据。", "SmarTAI returned no written rationale.")}</MarkdownMath><div className="mt-3 grid grid-cols-3 gap-2"><SmallSignal label={tx(locale, "置信度", "Confidence")} value={formatConfidence(correction.confidence)} /><SmallSignal label={tx(locale, "专家数", "Experts")} value={String(correction.expert_results?.length ?? 0)} /><SmallSignal label={tx(locale, "合成方式", "Synthesis")} value={formatSynthesis(correction.synthesis_method, locale)} /></div></ContentPanel>
         <ContentPanel title={tx(locale, "教师最终结果", "Teacher final result")} meta={`${formatScore(finalScore)} / ${formatScore(correction.max_score)}`}><p className="text-[12px] leading-5 text-foreground">{correction.teacher_comment?.trim() || tx(locale, "教师未另加评语；最终分沿用确认后的结果。", "No separate teacher comment; the confirmed score remains final.")}</p><p className="mt-3 text-[10px] text-muted-foreground">{tx(locale, `状态：${reviewStatusText(locale, correction)}`, `Status: ${reviewStatusText(locale, correction)}`)}</p></ContentPanel>
         <ContentPanel title={tx(locale, "题干与评分标准", "Question & rubric")}><MarkdownMath className="text-[12px] leading-5 text-foreground">{question.stem || tx(locale, "未提供题干。", "No question stem was provided.")}</MarkdownMath><div className="my-3 border-t" /><MarkdownMath className="text-[12px] leading-5 text-muted-foreground">{question.criterion || tx(locale, "未提供评分标准。", "No rubric was provided.")}</MarkdownMath></ContentPanel>
       </div>

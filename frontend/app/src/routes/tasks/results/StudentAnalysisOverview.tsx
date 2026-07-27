@@ -137,11 +137,11 @@ export function StudentAnalysisOverview({ locale, taskId, model }: { locale: Loc
                 setDraftQuery(value);
                 if (!composingRef.current) updateParam("q", value, "");
               }}
-              placeholder={tx(locale, "例如：PB2011 不及格 低置信 待复核 低分优先", "Example: PB2011 failed low confidence pending review low score first")}
-              aria-label={tx(locale, "自然语言筛选学生", "Filter students with natural language")}
+              placeholder={tx(locale, "SmarTAI 智能搜索：例如 PB2011 不及格 低置信 待复核 低分优先", "SmarTAI Smart Search: PB2011 failed low confidence pending review low score first")}
+              aria-label={tx(locale, "SmarTAI 自然语言筛选学生", "SmarTAI natural-language student filter")}
               className="h-11 w-full rounded-[9px] border bg-background pl-10 pr-10 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
             />
-            {draftQuery ? <button type="button" onClick={() => { setDraftQuery(""); updateParam("q", "", ""); }} aria-label={tx(locale, "清除自然语言筛选", "Clear natural-language filter")} className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><X aria-hidden="true" className="h-4 w-4" /></button> : null}
+            {draftQuery ? <button type="button" onClick={() => { setDraftQuery(""); updateParam("q", "", ""); }} aria-label={tx(locale, "清除 SmarTAI 自然语言筛选", "Clear SmarTAI natural-language filter")} className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><X aria-hidden="true" className="h-4 w-4" /></button> : null}
           </label>
           <div className="mt-2 flex min-h-7 flex-wrap items-center gap-2">
             {semanticPlan.conditions.length ? semanticPlan.conditions.map((condition) => (
@@ -268,7 +268,7 @@ function ReviewBadge({ locale, row, compact = false }: { locale: Locale; row: St
 }
 
 function EmptyResult({ locale }: { locale: Locale }) {
-  return <div className="border-t px-5 py-12 text-center"><p className="text-[14px] font-bold text-foreground">{tx(locale, "没有匹配的学生", "No students matched")}</p><p className="mt-1 text-[12px] text-muted-foreground">{tx(locale, "移除一个条件，或清除自然语言筛选后重试。", "Remove a condition or clear the natural-language filter.")}</p></div>;
+  return <div className="border-t px-5 py-12 text-center"><p className="text-[14px] font-bold text-foreground">{tx(locale, "没有匹配的学生", "No students matched")}</p><p className="mt-1 text-[12px] text-muted-foreground">{tx(locale, "移除一个条件，或清除 SmarTAI 智能筛选后重试。", "Remove a condition or clear the SmarTAI Smart Filter.")}</p></div>;
 }
 
 function buildStudentRow(student: StudentSummary): StudentAnalysisRow {

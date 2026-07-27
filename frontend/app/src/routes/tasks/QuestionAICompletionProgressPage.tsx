@@ -184,11 +184,11 @@ function completionStepState(index: number, completedSteps: number): "done" | "a
 function localizeEvent(event: ProgressEvent, locale: Locale) {
   if (locale === "en-US") return event.message;
   const known: Record<string, string> = {
-    "AI completion started": "AI 补全已开始",
+    "AI completion started": "SmarTAI 补全已开始",
     "Generating missing problem materials": "正在生成缺失的题目资料",
     "Validating generated problem materials": "正在校验生成的题目资料",
     "Applying generated materials to still-empty slots": "正在写回仍为空的资料槽位",
-    "AI completion finished": "AI 补全已完成",
+    "AI completion finished": "SmarTAI 补全已完成",
   };
   return known[event.message] ?? event.message;
 }

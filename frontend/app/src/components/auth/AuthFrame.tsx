@@ -14,7 +14,7 @@ export function AuthFrame({ children }: { children: ReactNode }) {
           <div className="flex items-baseline gap-3">
             <span className="text-[22px] font-bold tracking-[-0.03em] text-primary">SmarTAI</span>
             <span className="hidden text-xs font-medium text-muted-foreground sm:inline">
-              {zh ? "AI 批改工作台" : "AI Grading Workspace"}
+              {zh ? "SmarTAI 智能批改工作台" : "SmarTAI Intelligent Grading Workspace"}
             </span>
           </div>
           <button

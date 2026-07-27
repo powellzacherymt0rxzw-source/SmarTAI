@@ -597,13 +597,13 @@ function sourceSummary(source: SourceDraft, locale: string) {
 function roleMeta(role: PreparationSourceRole, locale: string) {
   const zh = {
     problem: { title: "题目文件（必填）", shortTitle: "题目", description: "上传题目正文，或从课程资料库选择题目来源。" },
-    reference_answer: { title: "标答 / 解答（可选）", shortTitle: "标答", description: "可只提供最终答案；AI 会补全可审核的解题过程。" },
+    reference_answer: { title: "标答 / 解答（可选）", shortTitle: "标答", description: "可只提供最终答案；SmarTAI 会补全可审核的解题过程。" },
     rubric: { title: "评分标准（可选）", shortTitle: "评分标准", description: "评分步骤会与标答步骤一并呈现，便于一次审核。" },
     programming_tests: { title: "编程题测试资料（可选）", shortTitle: "测试样例", description: "仅编程题使用，支持输入、期望输出、解释与隐藏测试。" },
   } as const;
   const en = {
     problem: { title: "Problem Files (Required)", shortTitle: "Problems", description: "Upload problem statements or choose them from the course library." },
-    reference_answer: { title: "Answers / Solutions (Optional)", shortTitle: "Answers", description: "A final answer is enough; AI will expand it into a reviewable solution." },
+    reference_answer: { title: "Answers / Solutions (Optional)", shortTitle: "Answers", description: "A final answer is enough; SmarTAI will expand it into a reviewable solution." },
     rubric: { title: "Grading Rubrics (Optional)", shortTitle: "Rubrics", description: "Rubric items are reviewed alongside the matching answer steps." },
     programming_tests: { title: "Programming Tests (Optional)", shortTitle: "Test Cases", description: "Programming problems only: inputs, expected outputs, explanations and hidden tests." },
   } as const;

@@ -122,7 +122,7 @@ export function VisualizationAnalysisPage({ locale, taskId, version, model }: { 
     <section className="rounded-[10px] border bg-card">
       <div className="px-5 pt-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><h2 className="text-[20px] font-bold tracking-[-0.01em] text-foreground">{tx(locale, "可视化分析", "Visual analysis")}</h2><p className="mt-1 text-[13px] text-muted-foreground">{tx(locale, "默认图表直接基于正式结果；自然语言图表只在主动提交后调用模型。", "Default charts use the formal result directly; natural-language charts call a model only after explicit submission.")}</p></div>
+          <div><h2 className="text-[20px] font-bold tracking-[-0.01em] text-foreground">{tx(locale, "可视化分析", "Visual analysis")}</h2><p className="mt-1 text-[13px] text-muted-foreground">{tx(locale, "先用 SmarTAI 自然语言生成你关心的图表，也可继续查看下方默认分析。", "Start with SmarTAI natural-language charts, or continue to the default analysis below.")}</p></div>
           <div className="flex items-center gap-2"><select value={scope} onChange={(event) => updateScope(event.target.value)} aria-label={tx(locale, "选择图表数据范围", "Select chart data scope")} className="h-9 rounded-[8px] border bg-background px-3 text-[11px] font-semibold text-foreground outline-none focus:border-primary"><option value="all">{tx(locale, "全部学生", "All students")}</option><option value="pass">{tx(locale, "仅及格", "Passed only")}</option><option value="fail">{tx(locale, "仅未及格", "Failed only")}</option><option value="review">{tx(locale, "含必审信号", "With review signals")}</option></select><button type="button" onClick={() => window.print()} className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border bg-card px-3 text-[11px] font-semibold text-foreground hover:bg-muted"><Printer aria-hidden="true" className="h-3.5 w-3.5" />{tx(locale, "打印 / 存为 PDF", "Print / save PDF")}</button></div>
         </div>
 
@@ -134,6 +134,48 @@ export function VisualizationAnalysisPage({ locale, taskId, version, model }: { 
           <SummaryMetric label={tx(locale, "及格率（≥60%）", "Pass rate (≥60%)")} value={formatPercent(validPercents.length ? (passCount / validPercents.length) * 100 : null)} tone="accent" />
           <SummaryMetric label={tx(locale, "含必审信号", "With review signals")} value={String(students.filter(studentNeedsReview).length)} tone="danger" />
         </div>
+      </div>
+
+      <div className="mt-4 border-t p-5">
+        <section className="relative overflow-hidden rounded-[10px] border border-primary/25 bg-gradient-to-br from-blue-50/90 via-card to-card px-4 py-4 dark:from-blue-950/25">
+          <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-16 h-40 w-40 rounded-full bg-primary/5 blur-2xl" />
+          <div className="relative flex flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-primary text-primary-foreground shadow-sm">
+                <Sparkles aria-hidden="true" className="h-4 w-4" />
+              </span>
+              <div>
+                <h3 className="text-[16px] font-bold tracking-[-0.01em] text-foreground">{tx(locale, "SmarTAI 自然语言生成更多图表", "Generate more charts with SmarTAI")}</h3>
+                <p className="mt-1 max-w-4xl text-[11px] leading-5 text-muted-foreground">{tx(locale, "直接描述希望比较的对象、指标和图表形式。每次提交只调用当前模型一次；支持柱状图、散点图、饼图、直方图或箱线图，单次最多 4 组、每组 50 个点。", "Describe what to compare, which metrics matter, and the chart form. Each submission calls the current model once and supports bar, scatter, pie, histogram, or box charts, with up to 4 series and 50 points per series.")}</p>
+              </div>
+            </div>
+            <span className="rounded-full border border-blue-200 bg-white/80 px-2.5 py-1 text-[10px] font-semibold text-primary dark:border-blue-900 dark:bg-blue-950/40">{tx(locale, "按需调用模型", "Model called on demand")}</span>
+          </div>
+          <div className="relative mt-3 flex flex-wrap gap-2">{[tx(locale, "比较各题得分率与低置信题次", "Compare question score rates and low-confidence counts"), tx(locale, "画出总分率与平均置信度散点图", "Scatter total score rate against mean confidence"), tx(locale, "显示及格与未及格人数", "Show passed versus failed counts")].map((suggestion) => <button key={suggestion} type="button" onClick={() => updatePrompt(suggestion)} className="rounded-full border border-transparent bg-white/80 px-2.5 py-1 text-[10px] font-medium text-muted-foreground shadow-sm hover:border-primary/20 hover:text-primary dark:bg-slate-900/60">{suggestion}</button>)}</div>
+          <form onSubmit={submitChart} className="relative mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]">
+            <textarea value={prompt} onChange={(event) => updatePrompt(event.target.value)} rows={2} maxLength={500} disabled={chartQuery.isPending} aria-label={tx(locale, "SmarTAI 自然语言图表请求", "SmarTAI natural-language chart request")} className="min-h-20 resize-y rounded-[8px] border bg-background px-3 py-2 text-[12px] leading-5 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
+            <button type="submit" disabled={chartQuery.isPending || !prompt.trim()} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[8px] bg-primary px-4 text-[11px] font-semibold text-primary-foreground disabled:opacity-50 lg:self-end">{chartQuery.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : <BarChart3 aria-hidden="true" className="h-4 w-4" />}{chartQuery.isPending ? tx(locale, "SmarTAI 生成中…", "SmarTAI is generating…") : tx(locale, "让 SmarTAI 生成", "Generate with SmarTAI")}</button>
+          </form>
+          {recoveryInfo ? (
+            <RecoverableActionState
+              info={recoveryInfo}
+              locale={locale}
+              compact
+              className="relative mt-3"
+              primaryAction={recoveryInfo.actionKind === "byok" ? undefined : {
+                label: recoveryInfo.actionLabel,
+                onClick: () => runChart(prompt.trim()),
+                busy: chartQuery.isPending,
+              }}
+              secondaryAction={recoveryInfo.actionKind === "byok"
+                ? { label: tx(locale, "关闭提示", "Dismiss"), onClick: () => chartQuery.reset() }
+                : { label: tx(locale, "查看模型配置", "View model settings"), href: `/settings/byok?returnTo=${encodeURIComponent(`${root}/visualizations`)}` }}
+            />
+          ) : null}
+          {preview ? <GeneratedResult locale={locale} id="generated-preview" result={preview} version={version} onSave={savePreview} /> : <div className="relative mt-3 rounded-[8px] border border-dashed border-primary/20 bg-white/50 px-4 py-5 text-center text-[11px] text-muted-foreground dark:bg-slate-950/15">{tx(locale, "尚未生成自定义图表；下方五张默认图表始终可用且不消耗模型额度。", "No custom chart has been generated; the five default charts below remain available without model usage.")}</div>}
+        </section>
+
+        {savedCharts.length ? <section className="mt-4"><div className="flex items-end justify-between gap-3"><div><h3 className="text-[15px] font-bold text-foreground">{tx(locale, "本次浏览已保存", "Saved for this visit")}</h3><p className="mt-1 text-[10px] text-muted-foreground">{tx(locale, "这些图表只保留到刷新或离开本页；需要长期保存时请下载 PNG 或报告。", "These charts last until you refresh or leave this page. Download a PNG or report to keep them.")}</p></div><span className="text-[10px] text-muted-foreground">{savedCharts.length}</span></div><div className="mt-3 grid gap-4 xl:grid-cols-2">{savedCharts.map((item) => <GeneratedResult key={item.id} locale={locale} id={item.id} result={item.result} version={version} prompt={item.prompt} onDelete={() => setSavedCharts((items) => items.filter((candidate) => candidate.id !== item.id))} />)}</div></section> : null}
       </div>
 
       <div className="mt-4 grid gap-4 border-t p-5 xl:grid-cols-2">
@@ -158,32 +200,6 @@ export function VisualizationAnalysisPage({ locale, taskId, version, model }: { 
         </ChartCard>
       </div>
 
-      <div className="border-t p-5">
-        <section className="rounded-[9px] border px-4 py-4">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="flex items-center gap-2 text-[15px] font-bold text-foreground"><Sparkles aria-hidden="true" className="h-4 w-4 text-primary" />{tx(locale, "自然语言生成更多图表", "Generate another chart with natural language")}</h3><p className="mt-1 text-[11px] text-muted-foreground">{tx(locale, "每次提交只调用当前模型一次；可生成柱状图、散点图、饼图、直方图或箱线图，单次最多 4 组、每组 50 个点。", "Each submission calls the current model once. It can create bar, scatter, pie, histogram, or box charts, with up to 4 series and 50 points per series.")}</p></div><span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-700">{tx(locale, "不会自动调用", "Never automatic")}</span></div>
-          <div className="mt-3 flex flex-wrap gap-2">{[tx(locale, "比较各题得分率与低置信题次", "Compare question score rates and low-confidence counts"), tx(locale, "画出总分率与平均置信度散点图", "Scatter total score rate against mean confidence"), tx(locale, "显示及格与未及格人数", "Show passed versus failed counts")].map((suggestion) => <button key={suggestion} type="button" onClick={() => updatePrompt(suggestion)} className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground">{suggestion}</button>)}</div>
-          <form onSubmit={submitChart} className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]"><textarea value={prompt} onChange={(event) => updatePrompt(event.target.value)} rows={2} maxLength={500} disabled={chartQuery.isPending} aria-label={tx(locale, "自然语言图表请求", "Natural-language chart request")} className="min-h-20 resize-y rounded-[8px] border bg-background px-3 py-2 text-[12px] leading-5 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" /><button type="submit" disabled={chartQuery.isPending || !prompt.trim()} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[8px] bg-primary px-4 text-[11px] font-semibold text-primary-foreground disabled:opacity-50 lg:self-end">{chartQuery.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : <BarChart3 aria-hidden="true" className="h-4 w-4" />}{chartQuery.isPending ? tx(locale, "生成中…", "Generating…") : tx(locale, "确认生成", "Generate")}</button></form>
-          {recoveryInfo ? (
-            <RecoverableActionState
-              info={recoveryInfo}
-              locale={locale}
-              compact
-              className="mt-3"
-              primaryAction={recoveryInfo.actionKind === "byok" ? undefined : {
-                label: recoveryInfo.actionLabel,
-                onClick: () => runChart(prompt.trim()),
-                busy: chartQuery.isPending,
-              }}
-              secondaryAction={recoveryInfo.actionKind === "byok"
-                ? { label: tx(locale, "关闭提示", "Dismiss"), onClick: () => chartQuery.reset() }
-                : { label: tx(locale, "查看模型配置", "View model settings"), href: `/settings/byok?returnTo=${encodeURIComponent(`${root}/visualizations`)}` }}
-            />
-          ) : null}
-          {preview ? <GeneratedResult locale={locale} id="generated-preview" result={preview} version={version} onSave={savePreview} /> : <div className="mt-3 rounded-[8px] border border-dashed px-4 py-6 text-center text-[11px] text-muted-foreground">{tx(locale, "尚未生成自定义图表；上方五张默认图表始终可用且不消耗模型额度。", "No custom chart generated yet; the five default charts remain available without model usage.")}</div>}
-        </section>
-
-        {savedCharts.length ? <section className="mt-4"><div className="flex items-end justify-between gap-3"><div><h3 className="text-[15px] font-bold text-foreground">{tx(locale, "本次浏览已保存", "Saved for this visit")}</h3><p className="mt-1 text-[10px] text-muted-foreground">{tx(locale, "这些图表只保留到刷新或离开本页；需要长期保存时请下载 PNG 或报告。", "These charts last until you refresh or leave this page. Download a PNG or report to keep them.")}</p></div><span className="text-[10px] text-muted-foreground">{savedCharts.length}</span></div><div className="mt-3 grid gap-4 xl:grid-cols-2">{savedCharts.map((item) => <GeneratedResult key={item.id} locale={locale} id={item.id} result={item.result} version={version} prompt={item.prompt} onDelete={() => setSavedCharts((items) => items.filter((candidate) => candidate.id !== item.id))} />)}</div></section> : null}
-      </div>
     </section>
   );
 }

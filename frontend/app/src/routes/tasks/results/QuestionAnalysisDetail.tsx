@@ -158,8 +158,8 @@ export function QuestionAnalysisDetail({
             setDraftQuery(value);
             if (!composingRef.current) updateQuery(value);
           }}
-          placeholder={tx(locale, "输入题号、题干、题型或知识点，例如“积分题”", "Search number, stem, type, or knowledge point")}
-          aria-label={tx(locale, "智能查找题目", "Find a question")}
+          placeholder={tx(locale, "SmarTAI 智能搜索：题号、题干、题型或知识点，例如“积分题”", "SmarTAI Smart Search: number, stem, type, or knowledge point")}
+          aria-label={tx(locale, "SmarTAI 智能查找题目", "SmarTAI Smart question finder")}
           className="h-12 w-full rounded-[10px] border bg-background pl-11 pr-11 text-[13px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
         />
         {draftQuery ? <button type="button" onClick={() => { setDraftQuery(""); updateQuery(""); }} aria-label={tx(locale, "清空题目筛选", "Clear question filter")} className="absolute right-2.5 top-2.5 inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><X aria-hidden="true" className="h-4 w-4" /></button> : null}
@@ -471,7 +471,7 @@ function fieldSource(problem: ProblemInfo | undefined, field: "stem" | "criterio
     const imported = problem.material_provenance?.[field as keyof typeof problem.material_provenance];
     if (imported?.source_filename) return tx(locale, `资料导入 · ${imported.source_filename}`, `Imported · ${imported.source_filename}`);
     const generated = problem.ai_completion_provenance?.[field as keyof typeof problem.ai_completion_provenance];
-    if (generated) return tx(locale, "AI 补全 · 教师已确认版本", "AI completion · teacher-confirmed version");
+    if (generated) return tx(locale, "SmarTAI 补全 · 教师已确认版本", "SmarTAI completion · teacher-confirmed version");
   }
   const value = field === "stem" ? problem.stem : field === "criterion" ? problem.criterion : field === "reference_answer" ? problem.reference_answer : problem.test_cases;
   if (Array.isArray(value) ? value.length > 0 : Boolean(value)) return tx(locale, "题目识别 / 教师维护", "Recognition / teacher maintained");

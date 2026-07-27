@@ -484,7 +484,7 @@ function StudentNavigation({ className, locale, value, current, matches, previou
       </div>
       <div className="relative col-span-2 min-w-0 sm:col-span-2 xl:col-span-1">
         <label className="relative block">
-          <span className="sr-only">{tx(locale, "搜索学生", "Search students")}</span>
+          <span className="sr-only">{tx(locale, "SmarTAI 智能搜索学生", "SmarTAI Smart Search for students")}</span>
           <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             value={draftValue}
@@ -504,7 +504,7 @@ function StudentNavigation({ className, locale, value, current, matches, previou
               setOpen(true);
             }}
             onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-            placeholder={tx(locale, "输入姓名、学号或“待复核”", "Search name, ID, or pending review")}
+            placeholder={tx(locale, "SmarTAI 智能搜索：姓名、学号或“待复核”", "SmarTAI Smart Search: name, ID, or pending review")}
             className="h-10 w-full rounded-[7px] border-0 bg-slate-50 pl-9 pr-9 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/20 dark:bg-slate-900/50"
           />
           {draftValue ? (
@@ -555,7 +555,7 @@ function QuestionSearch({ className, locale, value, matches, onQuery, onSelect }
   return (
     <section className={cn("relative rounded-[10px] border bg-card p-2", className)} aria-label={tx(locale, "题目筛选", "Question filter")}>
       <label className="relative block">
-        <span className="sr-only">{tx(locale, "搜索题目", "Search questions")}</span>
+        <span className="sr-only">{tx(locale, "SmarTAI 智能搜索题目", "SmarTAI Smart Search for questions")}</span>
         <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
           value={draftValue}
@@ -575,7 +575,7 @@ function QuestionSearch({ className, locale, value, matches, onQuery, onSelect }
             setOpen(true);
           }}
           onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-          placeholder={tx(locale, "输入题号、题型、题干或“低置信”", "Search number, type, stem, or low confidence")}
+          placeholder={tx(locale, "SmarTAI 智能搜索：题号、题型、题干或“低置信”", "SmarTAI Smart Search: number, type, stem, or low confidence")}
           className="h-10 w-full rounded-[7px] border-0 bg-slate-50 pl-9 pr-9 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/20 dark:bg-slate-900/50"
         />
         {draftValue ? <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { setDraftValue(""); onQuery(""); setOpen(false); }} className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={tx(locale, "清空题目筛选", "Clear question filter")}><X aria-hidden="true" className="h-3.5 w-3.5" /></button> : null}
