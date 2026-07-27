@@ -543,8 +543,8 @@
 - [~] S03 作答校对总览只显示学生 x 题目矩阵、筛选和分流。工程与浏览器验收完成：2026-07-27；所有学号、单元格和“查看”入口统一进入同一个学生连续校对 route，并用 query 精确定位题目，不再分流到两套页面。
 - [~] S04/S05 已合并为一套学生作答连续校对页。canonical route 为 `/tasks/:id/students/:sid?question=:qid`；单学生指标、身份修正、学生直选、题目搜索、左侧独立滚动题号栏、全部题目连续渲染、LaTeX 浏览/源码编辑、键盘导航和真实答案 CAS 均保留。旧 `/questions/:qid` route 与旧总览组件已删除，等待用户视觉确认。
 - [~] C01 批改配置合同保留，默认简单、高级折叠；主流程于 2026-07-27 合并到 S01 第二阶段。独立 route 仅作兼容/直达编辑，任务级无密钥配置、真实批改消费链和共享池安全边界不变；等待用户视觉确认。
-- [~] C02 批改前确认只读汇总，不成为第二个配置页。工程与浏览器验收完成：2026-07-24；Figma 12 精确几何、真实任务/设置摘要、可回跳风险、幂等启动、S03 入口及双尺寸 PNG 已完成，等待用户视觉确认。
-- [~] C03 批改进度独立页。工程与浏览器验收完成：2026-07-24；Figma 13 精确几何、事实题次/ETA/队列、后台恢复、错误重试、graded→review 迁移及双尺寸 PNG 已完成，等待用户视觉确认。
+- [~] C02 批改前确认只读汇总，不成为第二个配置页。工程与浏览器验收完成：2026-07-24；2026-07-27 按最终八步流程复验并修复设置保存/返回误入上传作答的问题，task-scoped 回链和外部地址拒绝均通过。Figma 12 几何、真实任务/设置摘要、可回跳风险、幂等启动及桌面/移动证据保留，等待用户视觉确认。
+- [~] C03 批改进度独立页。工程与浏览器验收完成：2026-07-24；2026-07-27 修复第 6 步在 grading 状态绕回 C02 的回路，错误入口统一为带回链的“调整批改设置”，窄桌面流程条不再露出粗滚动条。Figma 13 几何、事实题次/ETA/队列、后台恢复及双尺寸证据保留，等待用户视觉确认。
 - [~] R01 待复核结果总览采用 Figma 14 的热力图、指标和复核队列。工程与浏览器验收完成：2026-07-24；Figma 14 精确几何、真实结果/批注、可解释筛选、短队列、精确复核入口及双尺寸 PNG 已完成，等待用户视觉确认。
 - [~] R02 复核详情采用 Figma 15 的内容层级，但重做双维导航。工程与浏览器验收完成：2026-07-24；两维独立 exact/related 筛选、方向键、单题/全部题目视图、真实教师分数/评语覆盖层及 R01 回流已完成，等待用户视觉确认。
 
@@ -614,6 +614,7 @@
 - 真实启动：沿用 `POST /tasks/:id/grade` 幂等合同；只在 `submissions_ready + configured + readiness.ready + enabled selection + 非空题目/学生` 时开放。启动进入 C03 canonical route，`grading` destination 同步修正。
 - 工程证据：visible-scope audit 扫描 `72` 个文件，lint、TypeScript、Vite production build（`477 modules`）与 `git diff --check` 通过。
 - 浏览器证据：`C02-pre-grading-confirmation-desktop-viewport.png`、`C02-pre-grading-confirmation-mobile.png`；桌面像素几何与 Figma 一致、`scrollHeight=900`，移动 `scrollWidth=390`；启动真实进入 `/grading/progress`，控制台 `0 errors / 0 warnings`，未调用真实 provider。
+- 2026-07-27 流程复验：设置入口携带当前 C02 `returnTo`，返回和无改动保存均准确回到 `/grading/preflight`；外部回链被拒绝。`1280×720` 最新图无横向溢出，模型启停文案改为真实门禁口径。
 - 当前状态：代码、启动合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。下一阶段 C03 必须用 Figma 13 替换临时进度容器。
 
 ### 7.7 C-03 批改进度阶段工程记录（2026-07-24）
@@ -625,6 +626,7 @@
 - 路由闭环：`grading` 全部进入 C03，grading error 也在 C03 重试；`graded` 进入 `/review`。S02 和遗留上传页的旧结果跳转同步纠正。
 - 工程证据：C03/Q02-Q03 回归 `5 passed`；visible-scope audit 扫描 `73` 个文件、lint、TypeScript、Vite production build（`479 modules`）与 `git diff --check` 通过。
 - 浏览器证据：`C03-grading-progress-desktop.png`、`C03-grading-progress-mobile.png`；桌面关键坐标完全匹配 Figma，移动 `scrollWidth=390`；错误态重试通过，干净控制台 `0 errors / 0 warnings`，未调用真实 provider。
+- 2026-07-27 流程复验：grading 状态下第 6 步直接保持 `/grading/progress`；错误设置入口携带 C03 `returnTo`。30×11 fixture 继续显示 `184/12/134/0` 与 `56%`，`1280×720` 无横向溢出或控制台错误。
 - 当前状态：代码、进度合同、工程和浏览器验收完成，等待用户视觉确认，故保持 `[~]`。下一阶段 R01 必须用 Figma 14 替换 `/review` 临时兼容容器。
 
 ### 7.8 R-01 结果总览与复核热力图阶段工程记录（2026-07-24）
@@ -874,6 +876,18 @@
 - [x] S05-BUG-02 Safari 学生候选点击修复；从 Kate/Q2 切换到 Bob/Q2 后 URL、目录高亮与正文锚点都保持 Q2。
 - [x] SEARCH-BUG-01 Q03 和 S05 中文输入使用 composition 门禁；“积分”查询无拼音残留，并通过可解释别名命中积分题。
 - [x] QA-BUG-01 视觉对照 `20260727-q03-comparison.png`、`20260727-student-comparison.png` 已联合检查；69 文件 visible-scope/lint/TypeScript 与 Vite production build（`931 modules`）通过，`git diff --check` 通过。
+
+### 9.7 当前前端剩余清单与 C02/C03 复验（2026-07-27）
+
+- [x] 主流程页面搭建：Figma 01–17 与文档补充的题目、作答、批改、复核、正式结果子页均已有 canonical 实现；当前没有尚未搭起框架的主流程页面。
+- [x] C02/C03 最新流程兼容：设置保存/返回、模型与 BYOK 回链、第 6 步 grading 直达、外部回链拒绝及窄桌面流程条均完成；最新隔离浏览器控制台 `0 errors / 0 warnings`，未调用真实 provider。
+- [ ] QA-04：补完学期边界、标签去重、课程为空和智能匹配歧义的组合测试；主要落在新建任务与历史任务。
+- [ ] QA-06：补完自然语言筛选的解释/清空/无匹配、大班级、限流与错误恢复；当前前端只有可解释确定性匹配，真正语义检索依赖统一 SmartQuery 后端合同。
+- [ ] QA-07：补完结果图表类型、数据版本、空数据、单学生/单题和各类导出测试；页面与入口已存在，不代表这些边界均已终验。
+- [~] QA-08：BYOK 前端新增/修改/启停/删除、掩码、官方外链和缺失门禁已完成；仍待真实 provider 的低成本成功/限流验证与持久化重启测试，后两项不是纯前端工作。
+- [~] QA-09 / QA-10 / QA-12：现有双尺寸工程截图不等于用户逐页确认；仍需按页面完成主观 Figma 对照、原生 200%/VoiceOver 或 NVDA 抽查及最终逐页签收。在此之前继续禁止宣称“前端全部完成”。
+- 后端依赖但会影响前端最终体验：统一题目资料来源/置信度/冲突字段，SmartQuery 大数据与语义匹配，OCR/视觉识别，数据库/对象存储持久化，以及真实 provider 端到端成功与失败恢复。前端不得用假数据或额外按钮掩盖这些缺口。
+- 本轮工程证据：C01/C03 定向合同回归 `15 passed`，visible-scope audit `67` 个文件、TypeScript、Vite production build（`930 modules transformed`）、task-scoped 回链浏览器交互和 `git diff --check` 通过；详细记录见 C02/C03 阶段文档。
 
 ---
 

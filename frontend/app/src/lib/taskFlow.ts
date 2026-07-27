@@ -118,6 +118,18 @@ export function getTaskDestination(task: TaskDestinationInput): string {
   }
 }
 
+export function getTaskGradingSetupHref(taskId: string, returnTo?: string): string {
+  const base = `/tasks/${encodeURIComponent(taskId)}/grading-setup`;
+  return returnTo ? `${base}?returnTo=${encodeURIComponent(returnTo)}` : base;
+}
+
+export function getSafeTaskReturnTo(taskId: string, value?: string | null): string | null {
+  if (!value) return null;
+  const taskPrefix = `/tasks/${encodeURIComponent(taskId)}/`;
+  if (!value.startsWith(taskPrefix) || value.startsWith("//")) return null;
+  return value;
+}
+
 export function formatTaskTime(
   timestamp: number | undefined,
   includeYear = false,

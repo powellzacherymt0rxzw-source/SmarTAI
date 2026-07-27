@@ -46,7 +46,7 @@ export function NewTaskStepper({ currentStep = 0, reachableStep = currentStep, r
   }, [currentStep]);
 
   return (
-    <nav ref={navRef} aria-label={t("newTaskWorkflow")} className="mt-[14px] overflow-x-auto pb-1">
+    <nav ref={navRef} aria-label={t("newTaskWorkflow")} className="mt-[14px] overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <ol className="flex min-w-[1220px] items-center">
         {STEP_KEYS.map((key, index) => (
           <li
@@ -56,7 +56,7 @@ export function NewTaskStepper({ currentStep = 0, reachableStep = currentStep, r
           >
             {index <= effectiveReachableStep && (taskId || index === 0) ? (
               <Link
-                to={stepHref(taskId, index, location.pathname, location.search)}
+                to={stepHref(taskId, index, location.pathname, location.search, taskQuery.data)}
                 state={returnState}
                 aria-current={index === currentStep ? "step" : undefined}
                 className="group flex shrink-0 items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -80,12 +80,22 @@ export function NewTaskStepper({ currentStep = 0, reachableStep = currentStep, r
   );
 }
 
-function stepHref(taskId: string | undefined, index: number, pathname: string, search: string) {
+function stepHref(
+  taskId: string | undefined,
+  index: number,
+  pathname: string,
+  search: string,
+  task?: Parameters<typeof getTaskReachableStep>[0],
+) {
   if (!taskId) return "/tasks/new";
   if (index === 0) {
     if (pathname.endsWith("/edit")) return `${pathname}${search}`;
     const returnTo = `${pathname}${search}`;
     return `/tasks/${encodeURIComponent(taskId)}/edit?returnTo=${encodeURIComponent(returnTo)}`;
+  }
+  if (index === 5 && pathname.endsWith("/grading/progress")) return `${pathname}${search}`;
+  if (index === 5 && (task?.status === "grading" || (task?.status === "error" && task.grading_job_id))) {
+    return `/tasks/${encodeURIComponent(taskId)}/grading/progress`;
   }
   return `/tasks/${encodeURIComponent(taskId)}/${STEP_PATHS[index]}`;
 }

@@ -8,7 +8,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import { gradingPreflightText as copy } from "@/lib/gradingPreflightCopy";
-import { getTaskDestination } from "@/lib/taskFlow";
+import { getTaskDestination, getTaskGradingSetupHref } from "@/lib/taskFlow";
 import type { GradingFeedbackLength, GradingSetup, ProblemInfo, StudentSubmission } from "@/types";
 
 /** C02: one read-only checkpoint before the idempotent grading mutation. */
@@ -141,7 +141,7 @@ export function GradingPreflightPage() {
               <h2 id="preflight-experts" className="text-[18px] font-bold leading-6 text-foreground">
                 {copy(locale, "expertCombination")}
               </h2>
-              <Link to={`/tasks/${taskId}/grading-setup`} className="text-[12px] font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring">
+              <Link to={getTaskGradingSetupHref(taskId, `/tasks/${taskId}/grading/preflight`)} className="text-[12px] font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring">
                 {copy(locale, "editSetup")}
               </Link>
             </div>

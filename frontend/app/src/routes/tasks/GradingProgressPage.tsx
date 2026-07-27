@@ -9,7 +9,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import { gradingProgressText as copy } from "@/lib/gradingProgressCopy";
-import { getTaskDestination } from "@/lib/taskFlow";
+import { getTaskDestination, getTaskGradingSetupHref } from "@/lib/taskFlow";
 import type { JobProgress, TaskStatus } from "@/types";
 
 /** C03: factual, resumable grading progress without exposing student identifiers. */
@@ -283,7 +283,7 @@ function ErrorProgressCard({
           {busy ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
           {copy(locale, busy ? "retrying" : "retry")}
         </button>
-        <Link to={`/tasks/${taskId}/grading-setup`} className="inline-flex h-10 items-center justify-center rounded-[8px] border bg-card px-5 text-sm font-semibold hover:bg-muted">
+        <Link to={getTaskGradingSetupHref(taskId, `/tasks/${taskId}/grading/progress`)} className="inline-flex h-10 items-center justify-center rounded-[8px] border bg-card px-5 text-sm font-semibold hover:bg-muted">
           {copy(locale, "editExperts")}
         </Link>
         <button type="button" disabled={busy} onClick={onRefresh} className="inline-flex h-10 items-center justify-center gap-2 rounded-[8px] border bg-card px-5 text-sm font-semibold hover:bg-muted disabled:opacity-50">

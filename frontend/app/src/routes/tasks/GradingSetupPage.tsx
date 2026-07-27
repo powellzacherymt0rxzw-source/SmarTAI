@@ -12,7 +12,7 @@ import {
   Upload,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useBeforeUnload, useBlocker, useNavigate, useParams } from "react-router-dom";
+import { Link, useBeforeUnload, useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { normalizeAPIError } from "@/api/client";
 import {
   useCourseMaterials,
@@ -28,6 +28,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import { gradingSetupText, type GradingSetupCopyKey } from "@/lib/gradingSetupCopy";
+import { getSafeTaskReturnTo, getTaskGradingSetupHref } from "@/lib/taskFlow";
 import type {
   GradingAggregationMethod,
   GradingFeedbackLanguage,
@@ -57,6 +58,7 @@ export function GradingSetupPage({
 }: GradingSetupPageProps = {}) {
   const { taskId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { locale } = useI18n();
   const setupQuery = useGradingSetup(taskId);
   const saveSetup = useSaveGradingSetup();
@@ -72,6 +74,14 @@ export function GradingSetupPage({
   const [selectionNoticeKey, setSelectionNoticeKey] = useState<GradingSetupCopyKey | null>(null);
 
   const response = setupQuery.data;
+  const returnTo = taskId && !embedded
+    ? getSafeTaskReturnTo(taskId, searchParams.get("returnTo"))
+    : null;
+  const setupHref = taskId ? getTaskGradingSetupHref(taskId, returnTo ?? undefined) : null;
+  const backHref = taskId ? returnTo ?? `/tasks/${taskId}/questions` : "/";
+  const byokReturnHref = taskId && embedded
+    ? `/tasks/${taskId}/submissions/upload?phase=settings`
+    : setupHref;
   const serverSetup = response?.grading_setup ?? response?.suggested_setup ?? null;
   const serverKey = response
     ? `${response.workflow_revision}:${response.grading_setup_fingerprint ?? "suggested"}:${response.available_experts.map((expert) => `${expert.provider_id}:${expert.enabled}:${expert.is_shared}`).sort().join("|")}`
@@ -207,7 +217,7 @@ export function GradingSetupPage({
         await onSaved();
         return;
       }
-      navigate(`/tasks/${taskId}/submissions/upload`);
+      navigate(returnTo ?? `/tasks/${taskId}/submissions/upload`);
     } catch (error) {
       const normalized = normalizeAPIError(error);
       const code = apiErrorCode(normalized);
@@ -258,7 +268,14 @@ export function GradingSetupPage({
             action={<button type="button" onClick={() => void setupQuery.refetch()} className="h-9 rounded-[7px] border bg-card px-4 text-sm font-semibold hover:bg-muted">{gradingSetupText(locale, "retry")}</button>}
           />
         ) : response && !setup ? (
-          <ModelRequiredState locale={locale} taskId={taskId} embedded={embedded} />
+          <ModelRequiredState
+            locale={locale}
+            taskId={taskId}
+            embedded={embedded}
+            setupHref={setupHref ?? `/tasks/${taskId}/grading-setup`}
+            backHref={backHref}
+            hasReturnTo={Boolean(returnTo)}
+          />
         ) : response && setup ? (
           <form className="flex h-full min-h-0 flex-col" onSubmit={(event) => { event.preventDefault(); void handleSubmit(); }}>
             <fieldset
@@ -306,7 +323,7 @@ export function GradingSetupPage({
                 <div role="alert" className="mt-2 flex items-center justify-between gap-3 text-[11px] leading-4 text-danger">
                   <span>{blockingMessage}</span>
                   {blockingIssue === "provider_required" ? (
-                    <Link to={`/settings/byok?returnTo=${encodeURIComponent(`/tasks/${taskId}/grading-setup`)}`} className="inline-flex h-7 shrink-0 items-center rounded-[6px] bg-primary px-2.5 font-semibold text-primary-foreground hover:opacity-90">
+                    <Link to={`/settings/byok?returnTo=${encodeURIComponent(byokReturnHref ?? `/tasks/${taskId}/grading-setup`)}`} className="inline-flex h-7 shrink-0 items-center rounded-[6px] bg-primary px-2.5 font-semibold text-primary-foreground hover:opacity-90">
                       {gradingSetupText(locale, "configureModels")}
                     </Link>
                   ) : isReadOnly ? (
@@ -336,9 +353,9 @@ export function GradingSetupPage({
                   {gradingSetupText(locale, "backToUpload")}
                 </button>
               ) : (
-                <Link to={`/tasks/${taskId}/questions`} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] border bg-card px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto">
+                <Link to={backHref} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] border bg-card px-4 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-auto">
                   <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-                  {gradingSetupText(locale, "backToQuestions")}
+                  {gradingSetupText(locale, returnTo ? "backToPrevious" : "backToQuestions")}
                 </Link>
               )}
               <button type="submit" disabled={actionDisabled} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[270px]">
@@ -832,10 +849,17 @@ function SelectField({ label, value, disabled = false, description, onChange, ch
   );
 }
 
-function ModelRequiredState({ locale, taskId, embedded }: { locale: Locale; taskId: string; embedded: boolean }) {
-  const returnTo = embedded
+function ModelRequiredState({ locale, taskId, embedded, setupHref, backHref, hasReturnTo }: {
+  locale: Locale;
+  taskId: string;
+  embedded: boolean;
+  setupHref: string;
+  backHref: string;
+  hasReturnTo: boolean;
+}) {
+  const byokReturnTo = embedded
     ? `/tasks/${taskId}/submissions/upload?phase=settings`
-    : `/tasks/${taskId}/grading-setup`;
+    : setupHref;
   return (
     <div className="flex min-h-[450px] flex-col justify-center">
       <div className="rounded-[10px] border border-amber-200 bg-amber-50/70 px-5 py-5 dark:border-amber-900 dark:bg-amber-950/20 sm:flex sm:items-center sm:justify-between sm:gap-5">
@@ -843,12 +867,12 @@ function ModelRequiredState({ locale, taskId, embedded }: { locale: Locale; task
           <div className="flex items-center gap-2"><Settings2 aria-hidden="true" className="h-5 w-5 text-warning" /><h2 className="text-[17px] font-bold text-foreground">{gradingSetupText(locale, "noModelsTitle")}</h2></div>
           <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{gradingSetupText(locale, "noModelsDescription")}</p>
         </div>
-        <Link to={`/settings/byok?returnTo=${encodeURIComponent(returnTo)}`} className="mt-4 inline-flex h-10 shrink-0 items-center justify-center rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring sm:mt-0">
+        <Link to={`/settings/byok?returnTo=${encodeURIComponent(byokReturnTo)}`} className="mt-4 inline-flex h-10 shrink-0 items-center justify-center rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring sm:mt-0">
           {gradingSetupText(locale, "configureModels")}
         </Link>
       </div>
-      <Link to={`/tasks/${taskId}/questions`} className="mt-5 inline-flex w-fit items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground">
-        <ArrowLeft aria-hidden="true" className="h-4 w-4" />{gradingSetupText(locale, "backToQuestions")}
+      <Link to={backHref} className="mt-5 inline-flex w-fit items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground">
+        <ArrowLeft aria-hidden="true" className="h-4 w-4" />{gradingSetupText(locale, hasReturnTo ? "backToPrevious" : "backToQuestions")}
       </Link>
     </div>
   );
