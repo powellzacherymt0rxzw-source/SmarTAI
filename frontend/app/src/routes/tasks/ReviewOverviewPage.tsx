@@ -1,6 +1,6 @@
 import { AlertTriangle, ArrowRight, CheckCircle2, LoaderCircle, Search } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useConfirmTaskFinalization, useTask, useTaskFinalization, useTaskResult, useTeacherComments } from "@/api/hooks/tasks";
 import { NewTaskStepper } from "@/components/new-task/NewTaskStepper";
 import { buildResultsModel, effectiveCorrectionScore, formatConfidence, formatPercent, type QuestionSummary, type ResultsModel, type StudentSummary } from "@/components/tasks/resultsModel";
@@ -10,21 +10,25 @@ import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import { isExpertDisagreement, reviewCellKey, selectReviewOverview } from "@/lib/reviewOverview";
 import { reviewOverviewText as copy } from "@/lib/reviewOverviewCopy";
-import { getTaskDestination } from "@/lib/taskFlow";
+import { getTaskDestination, hasTaskReachedStep } from "@/lib/taskFlow";
 import type { Correction } from "@/types";
 
 /** R01: compact Figma-14 review overview backed only by persisted grading results. */
 export function ReviewOverviewPage() {
   const { taskId } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { locale } = useI18n();
   const taskQuery = useTask(taskId);
   const resultQuery = useTaskResult(taskId);
   const commentsQuery = useTeacherComments(taskId);
   const finalizationQuery = useTaskFinalization(taskId);
   const confirmFinalization = useConfirmTaskFinalization();
-  const [draftQuery, setDraftQuery] = useState("");
-  const [query, setQuery] = useState("");
+  const urlQuery = searchParams.get("q") ?? "";
+  const [draftQuery, setDraftQuery] = useState(urlQuery);
+  const [query, setQuery] = useState(urlQuery.trim());
+  const composingRef = useRef(false);
+  const searchParamsRef = useRef(searchParams);
   const task = taskQuery.data;
   const model = useMemo(() => buildResultsModel(task, resultQuery.data), [resultQuery.data, task]);
   const reviewItems = useMemo(() => collectResultReviewItems(model, model.students), [model]);
@@ -47,18 +51,31 @@ export function ReviewOverviewPage() {
     [annotatedKeys, model, query, reviewItems],
   );
 
-  if (taskId && task?.status === "grading") return <Navigate replace to={`/tasks/${taskId}/grading/progress`} />;
-  if (taskId && task && task.status !== "graded") return <Navigate replace to={getTaskDestination(task)} />;
+  useEffect(() => {
+    searchParamsRef.current = searchParams;
+    if (composingRef.current) return;
+    setDraftQuery(urlQuery);
+    setQuery(urlQuery.trim());
+  }, [searchParams, urlQuery]);
+
+  if (taskId && task && !hasTaskReachedStep(task, 6)) {
+    if (task.status === "grading") return <Navigate replace to={`/tasks/${taskId}/grading/progress`} />;
+    return <Navigate replace to={getTaskDestination(task)} />;
+  }
 
   const isLoading = taskQuery.isLoading || resultQuery.isLoading;
   const isError = taskQuery.isError || resultQuery.isError;
   const pendingReviewItems = reviewItems.filter((item) => !confirmedKeys.has(reviewCellKey(item.student.id, item.question.id)));
+  const historyView = Boolean(task && task.status !== "graded");
+  const overviewReturnTo = taskId
+    ? `/tasks/${encodeURIComponent(taskId)}/review${searchParams.toString() ? `?${searchParams.toString()}` : ""}`
+    : "";
   const firstTarget = pendingReviewItems[0]
     ?? (model.students[0] && model.questions[0]
       ? { student: model.students[0], question: model.questions[0] } as Pick<ReviewItem, "student" | "question">
       : null);
   const targetHref = taskId && firstTarget
-    ? reviewDetailHref(taskId, firstTarget.student.id, firstTarget.question.id)
+    ? reviewDetailHref(taskId, firstTarget.student.id, firstTarget.question.id, overviewReturnTo)
     : null;
   const correctionCount = model.students.reduce((total, student) => total + student.corrections.length, 0);
   const disagreementCount = model.students.reduce(
@@ -80,7 +97,17 @@ export function ReviewOverviewPage() {
 
   function submitFilter(event: FormEvent) {
     event.preventDefault();
-    setQuery(draftQuery.trim());
+    commitFilter(draftQuery);
+  }
+
+  function commitFilter(value: string) {
+    const normalized = value.trim();
+    setQuery(normalized);
+    const next = new URLSearchParams(searchParamsRef.current);
+    if (normalized) next.set("q", normalized);
+    else next.delete("q");
+    searchParamsRef.current = next;
+    setSearchParams(next, { replace: true });
   }
 
   return (
@@ -110,7 +137,15 @@ export function ReviewOverviewPage() {
             <MetricCard value={String(model.lowConfidenceCount)} label={copy(locale, "lowConfidence")} tone="warning" />
             <MetricCard value={String(disagreementCount)} label={copy(locale, "disagreement")} tone="primary" />
             <MetricCard value={`${confirmedKeys.size}/${correctionCount}`} label={copy(locale, "annotated")} tone="accent" />
-            {remainingReviewCount > 0 && targetHref ? (
+            {historyView ? (
+              <Link
+                to={`/tasks/${taskId}/results`}
+                className="col-span-2 inline-flex h-10 items-center justify-center gap-2 self-center rounded-[8px] bg-primary px-5 text-center text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 xl:-ml-[30px] xl:w-[240px] xl:shrink-0"
+              >
+                {locale === "en-US" ? "View Final Results" : "查看最终结果"}
+                <ArrowRight aria-hidden="true" className="h-4 w-4" />
+              </Link>
+            ) : remainingReviewCount > 0 && targetHref ? (
               <Link
                 to={targetHref}
                 className="col-span-2 inline-flex h-10 items-center justify-center gap-2 self-center rounded-[8px] bg-primary px-5 text-center text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 xl:-ml-[30px] xl:w-[240px] xl:shrink-0"
@@ -135,7 +170,7 @@ export function ReviewOverviewPage() {
             )}
           </div>
 
-          {confirmFinalization.isError ? (
+          {!historyView && confirmFinalization.isError ? (
             <p role="alert" className="mt-3 text-sm font-medium text-destructive">
               {locale === "en-US" ? "The task changed. Refresh the review state and try again." : "任务状态已变化，请刷新复核状态后重试。"}
             </p>
@@ -147,9 +182,18 @@ export function ReviewOverviewPage() {
               <Search aria-hidden="true" className="pointer-events-none absolute left-5 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={draftQuery}
+                inputMode="search"
+                onCompositionStart={() => { composingRef.current = true; }}
+                onCompositionEnd={(event) => {
+                  composingRef.current = false;
+                  const value = event.currentTarget.value;
+                  setDraftQuery(value);
+                  window.setTimeout(() => commitFilter(value), 0);
+                }}
                 onChange={(event) => {
-                  setDraftQuery(event.target.value);
-                  setQuery(event.target.value.trim());
+                  const value = event.target.value;
+                  setDraftQuery(value);
+                  if (!composingRef.current) commitFilter(value);
                 }}
                 placeholder={copy(locale, "searchPlaceholder")}
                 className="h-12 w-full rounded-[10px] border bg-card pl-14 pr-28 text-[14px] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
@@ -157,7 +201,7 @@ export function ReviewOverviewPage() {
               {query ? (
                 <button
                   type="button"
-                  onClick={() => { setDraftQuery(""); setQuery(""); }}
+                  onClick={() => { setDraftQuery(""); commitFilter(""); }}
                   className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/5"
                 >
                   {copy(locale, "clear")}
@@ -188,11 +232,13 @@ export function ReviewOverviewPage() {
               reviewItems={reviewItems}
               annotatedKeys={annotatedKeys}
               confirmedKeys={confirmedKeys}
+              returnTo={overviewReturnTo}
             />
             <ReviewQueue
               locale={locale}
               taskId={taskId}
               items={pendingReviewItems.filter((item) => selection.matchedCellKeys.has(reviewCellKey(item.student.id, item.question.id))).slice(0, 4)}
+              returnTo={overviewReturnTo}
             />
           </div>
         </>
@@ -225,6 +271,7 @@ function ReviewHeatmap({
   reviewItems,
   annotatedKeys,
   confirmedKeys,
+  returnTo,
 }: {
   locale: Locale;
   taskId: string;
@@ -235,6 +282,7 @@ function ReviewHeatmap({
   reviewItems: ReviewItem[];
   annotatedKeys: Set<string>;
   confirmedKeys: Set<string>;
+  returnTo: string;
 }) {
   const reviewByKey = new Map(reviewItems.map((item) => [reviewCellKey(item.student.id, item.question.id), item]));
   const questionById = new Map(model.questions.map((question) => [question.id, question]));
@@ -278,7 +326,7 @@ function ReviewHeatmap({
                         <td key={question.id} className="h-9 min-w-[64px] px-0.5">
                           <ReviewCell
                             locale={locale}
-                            href={reviewDetailHref(taskId, student.id, question.id)}
+                            href={reviewDetailHref(taskId, student.id, question.id, returnTo)}
                             correction={correction}
                             item={reviewByKey.get(key)}
                             annotated={annotatedKeys.has(key)}
@@ -321,7 +369,7 @@ function ReviewCell({ locale, href, correction, item, annotated, confirmed, ques
   );
 }
 
-function ReviewQueue({ locale, taskId, items }: { locale: Locale; taskId: string; items: ReviewItem[] }) {
+function ReviewQueue({ locale, taskId, items, returnTo }: { locale: Locale; taskId: string; items: ReviewItem[]; returnTo: string }) {
   return (
     <section className="h-[308px] overflow-hidden rounded-[10px] border bg-card px-7 py-6" aria-labelledby="review-queue-title">
       <h2 id="review-queue-title" className="text-[18px] font-bold leading-6 text-foreground">{copy(locale, "queue")}</h2>
@@ -335,7 +383,7 @@ function ReviewQueue({ locale, taskId, items }: { locale: Locale; taskId: string
           {items.map((item) => (
             <li key={reviewCellKey(item.student.id, item.question.id)}>
               <Link
-                to={reviewDetailHref(taskId, item.student.id, item.question.id)}
+                to={reviewDetailHref(taskId, item.student.id, item.question.id, returnTo)}
                 className="flex min-h-[48px] items-center gap-3 rounded-[8px] px-1.5 text-[13px] outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <span className="min-w-0 flex-1 truncate font-medium text-foreground">
@@ -376,8 +424,9 @@ function queueReason(locale: Locale, item: ReviewItem): string {
   return copy(locale, "reviewReason");
 }
 
-function reviewDetailHref(taskId: string, studentId: string, questionId: string): string {
-  return `/tasks/${encodeURIComponent(taskId)}/review/${encodeURIComponent(studentId)}/${encodeURIComponent(questionId)}`;
+function reviewDetailHref(taskId: string, studentId: string, questionId: string, returnTo?: string): string {
+  const base = `/tasks/${encodeURIComponent(taskId)}/review/${encodeURIComponent(studentId)}/${encodeURIComponent(questionId)}`;
+  return returnTo ? `${base}?returnTo=${encodeURIComponent(returnTo)}` : base;
 }
 
 function formatMetricPercent(value: number | null): string {

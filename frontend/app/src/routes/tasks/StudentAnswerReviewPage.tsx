@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Check,
   CheckCircle2,
+  ChevronRight,
   FileText,
   Keyboard,
   LoaderCircle,
@@ -42,7 +43,7 @@ import {
   type SubmissionAnswerState,
   type SubmissionQuestion,
 } from "@/lib/submissionReview";
-import { getTaskDestination } from "@/lib/taskFlow";
+import { getTaskDestination, hasTaskReachedStep } from "@/lib/taskFlow";
 import type { StudentAnswerInfo, StudentSubmission } from "@/types";
 
 type PickerItem = {
@@ -76,6 +77,7 @@ export function StudentAnswerReviewPage() {
   const navigate = useNavigate();
   const { locale, t } = useI18n();
   const taskQuery = useTask(taskId);
+  const readOnly = Boolean(taskQuery.data && taskQuery.data.status !== "submissions_ready");
   const answerMutation = useUpdateStudentAnswer();
   const identityMutation = useUpdateStudentIdentity();
   const [drafts, setDrafts] = useState<Record<string, AnswerDraft>>({});
@@ -282,7 +284,7 @@ export function StudentAnswerReviewPage() {
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [isDirty]);
 
-  if (taskQuery.isSuccess && taskId && taskQuery.data.status !== "submissions_ready") {
+  if (taskQuery.isSuccess && taskId && !hasTaskReachedStep(taskQuery.data, 4)) {
     return <Navigate replace to={getTaskDestination(taskQuery.data)} />;
   }
 
@@ -335,7 +337,7 @@ export function StudentAnswerReviewPage() {
   }
 
   async function saveAnswer(question: SubmissionQuestion, moveNext: boolean) {
-    if (!taskId || !student || !taskQuery.data) return;
+    if (!taskId || !student || !taskQuery.data || readOnly) return;
     const draft = drafts[question.id];
     if (!draft) return;
     setSavingQuestionId(question.id);
@@ -371,6 +373,7 @@ export function StudentAnswerReviewPage() {
   }
 
   function startEditing(question: SubmissionQuestion) {
+    if (readOnly) return;
     const answer = answers.get(question.id);
     setDrafts((current) => ({
       ...current,
@@ -399,7 +402,7 @@ export function StudentAnswerReviewPage() {
   }
 
   async function saveIdentity() {
-    if (!taskId || !student || !taskQuery.data) return;
+    if (!taskId || !student || !taskQuery.data || readOnly) return;
     const nextId = identityId.trim();
     const nextName = identityName.trim();
     if (!nextId || !nextName) {
@@ -447,6 +450,12 @@ export function StudentAnswerReviewPage() {
         </Link>
       </div>
       <NewTaskStepper currentStep={4} />
+
+      {readOnly ? (
+        <div className="mt-4 rounded-[9px] border bg-card px-4 py-3 text-[12px] leading-5 text-muted-foreground">
+          {tx(locale, "当前为已进入后续阶段的历史回看；学生身份与识别作答保持只读。", "This task has moved to a later stage. Student identity and recognized answers are read-only here.")}
+        </div>
+      ) : null}
 
       {taskQuery.isLoading ? (
         <PageState title={t("answerReviewLoading")} busy />
@@ -497,7 +506,9 @@ export function StudentAnswerReviewPage() {
             onPrevious={() => goToStudent(studentNeighbors.previous)}
             onNext={() => goToStudent(studentNeighbors.next)}
             identityOpen={identityOpen}
+            readOnly={readOnly}
             onToggleIdentity={() => {
+              if (readOnly) return;
               setIdentityOpen((open) => !open);
               setIdentityError(null);
             }}
@@ -626,6 +637,7 @@ export function StudentAnswerReviewPage() {
                     saving={savingQuestionId === question.id}
                     saveError={saveErrors[question.id]}
                     editing={editingQuestionIds.has(question.id)}
+                    readOnly={readOnly}
                     onDraftChange={(patch) => updateDraft(question.id, patch)}
                     onSave={(moveNext) => void saveAnswer(question, moveNext)}
                     onEdit={() => startEditing(question)}
@@ -655,19 +667,38 @@ export function StudentAnswerReviewPage() {
               </div>
             </div>
           )}
+
+          <div className="mt-6 flex flex-col-reverse gap-2 pb-8 sm:flex-row sm:items-center sm:justify-end">
+            <Link
+              to={backHref}
+              onClick={(event) => { if (!confirmLeave()) event.preventDefault(); }}
+              className="inline-flex h-10 items-center justify-center rounded-[8px] border bg-card px-5 text-sm font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {t("answerReviewBackMatrix")}
+            </Link>
+            <Link
+              to={`/tasks/${encodeURIComponent(taskId)}/grading/preflight`}
+              onClick={(event) => { if (!confirmLeave()) event.preventDefault(); }}
+              className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[8px] bg-primary px-5 text-sm font-semibold text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              {tx(locale, "进入执行批改", "Continue to Grading")}
+              <ChevronRight aria-hidden="true" className="h-4 w-4" />
+            </Link>
+          </div>
         </section>
       )}
     </div>
   );
 }
 
-function StudentNavigation({ student, previous, next, onPrevious, onNext, identityOpen, onToggleIdentity, children, t }: {
+function StudentNavigation({ student, previous, next, onPrevious, onNext, identityOpen, readOnly, onToggleIdentity, children, t }: {
   student: StudentSubmission;
   previous: StudentSubmission | null;
   next: StudentSubmission | null;
   onPrevious: () => void;
   onNext: () => void;
   identityOpen: boolean;
+  readOnly: boolean;
   onToggleIdentity: () => void;
   children: ReactNode;
   t: (key: MessageKey) => string;
@@ -689,7 +720,7 @@ function StudentNavigation({ student, previous, next, onPrevious, onNext, identi
         <span className="min-w-0 truncate">{next?.stu_name || t("answerReviewNextStudent")}</span>
         <ArrowRight aria-hidden="true" className="h-4 w-4" />
       </Button>
-      <Button type="button" variant="secondary" className="h-10 px-3" onClick={onToggleIdentity}>
+      <Button type="button" variant="secondary" className="h-10 px-3" disabled={readOnly} onClick={onToggleIdentity}>
         {identityOpen ? <X aria-hidden="true" className="h-4 w-4" /> : <Pencil aria-hidden="true" className="h-4 w-4" />}
         {t(identityOpen ? "studentSubmissionCloseIdentity" : "studentSubmissionEditIdentity")}
       </Button>
@@ -802,7 +833,7 @@ function SmartPicker({ label, placeholder, query, matches, currentId, onDraftCha
   );
 }
 
-function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, next, dirty, saving, saveError, editing, onDraftChange, onSave, onEdit, onCancel, onNavigate, locale, t }: {
+function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, next, dirty, saving, saveError, editing, readOnly, onDraftChange, onSave, onEdit, onCancel, onNavigate, locale, t }: {
   question: SubmissionQuestion;
   answer?: StudentAnswerInfo;
   draft: AnswerDraft;
@@ -813,6 +844,7 @@ function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, n
   saving: boolean;
   saveError?: string;
   editing: boolean;
+  readOnly: boolean;
   onDraftChange: (patch: Partial<AnswerDraft>) => void;
   onSave: (moveNext: boolean) => void;
   onEdit: () => void;
@@ -861,7 +893,7 @@ function AnswerReviewCard({ question, answer, draft, sourceFilename, previous, n
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               {sourceFilename ? <span className="inline-flex max-w-[300px] items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={sourceFilename}><FileText aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />{sourceFilename}</span> : null}
-              {!editing ? (
+              {!editing && !readOnly ? (
                 <Button type="button" variant="secondary" className="h-8 px-3" onClick={onEdit}>
                   <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
                   {tx(locale, "修改", "Edit")}

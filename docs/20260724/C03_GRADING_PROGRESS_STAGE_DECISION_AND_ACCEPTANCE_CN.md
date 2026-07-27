@@ -39,7 +39,7 @@
 ## 4. 路由与错误恢复
 
 - `grading` 的工作台、历史任务、任务入口和旧兼容页统一进入 C03。
-- `graded` 统一进入待复核 `/tasks/:id/review`；本阶段先保留旧结果容器作为 route 兼容，下一阶段 R01 会完整替换。
+- 工作台、历史任务和任务默认入口在 `graded` 后统一进入待复核 `/tasks/:id/review`；教师从第 8 步显式回点第 6 步时，`/grading/progress` 保留已完成进度快照，不与默认 destination 冲突。
 - grading job 失败仍回到 C03，而不是混入 `/results`。
 - error 页明确说明任务数据保留，提供“重试批改”“调整批改设置”“刷新状态”；重试继续调用幂等 `POST /tasks/:id/grade`。
 - 若 error 实际来自题目或作答识别，C03 根据 `last_failed_job_id` 返回对应 canonical 恢复页，不误发批改重试。
@@ -80,3 +80,9 @@ PNG 只保存在 Codex 临时可视化目录，不进入产品仓库。
 - 隔离 fixture `T_c03check` 浏览器复验：30 名匿名学生 × 11 题、184 完成、12 运行、134 等待、0 错误，页面显示 `56%`；`1280×720` 下 `scrollWidth=1280`、完整页高 `829`，控制台 `0 errors / 0 warnings`。
 - 最新 PNG：`20260727-c02-c03/C03-progress-latest-flow-1280x720.png` 与完整页图，仍只保存在 Codex 临时可视化目录。既有 `1440×900` / `390×844` 几何证据继续有效。
 - 工程复验：C01/C03 定向合同回归 `15 passed`；visible-scope audit 扫描 `67` 个可见源文件，TypeScript、Vite production build（`930 modules transformed`）和 `git diff --check` 通过；未调用真实 provider。
+
+## 8. 2026-07-27 完成态进度快照
+
+- `graded / review_confirmed / generating_analysis / finalized` 显式访问 C03 时不再被送走；页面按任务题目数 × 学生数显示 `100%`、全部完成、运行/等待为零，并标记为历史进度快照。
+- 页面 `aria-busy` 在完成态关闭，主动作改为“查看复核分析”，恢复提示改为历史快照说明；不会继续轮询式假装仍在执行，也不会暴露学生标识。
+- 完成态 fixture 实测 `48/48` 题次、`100%`，URL 保持 `/grading/progress`，控制台 `0 errors`。

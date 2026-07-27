@@ -19,7 +19,7 @@ import {
   type SubmissionReviewSelection,
   type SubmissionReviewSort,
 } from "@/lib/submissionReview";
-import { getTaskDestination } from "@/lib/taskFlow";
+import { getTaskDestination, hasTaskReachedStep } from "@/lib/taskFlow";
 import type { StudentAnswerInfo, StudentSubmission } from "@/types";
 
 const EXPLANATION_KEYS: Record<SubmissionReviewSelection["explanation"], MessageKey> = {
@@ -57,8 +57,7 @@ export function SubmissionReviewOverviewPage() {
   );
 
   if (taskQuery.isSuccess && taskId) {
-    const { status } = taskQuery.data;
-    if (status !== "submissions_ready") {
+    if (!hasTaskReachedStep(taskQuery.data, 4)) {
       return <Navigate replace to={getTaskDestination(taskQuery.data)} />;
     }
   }

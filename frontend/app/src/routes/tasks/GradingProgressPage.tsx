@@ -9,7 +9,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import { gradingProgressText as copy } from "@/lib/gradingProgressCopy";
-import { getTaskDestination, getTaskGradingSetupHref } from "@/lib/taskFlow";
+import { getTaskDestination, getTaskGradingSetupHref, hasTaskReachedStep } from "@/lib/taskFlow";
 import type { JobProgress, TaskStatus } from "@/types";
 
 /** C03: factual, resumable grading progress without exposing student identifiers. */
@@ -24,10 +24,16 @@ export function GradingProgressPage() {
   const state = progressQuery.data;
   const status = (state?.status ?? task?.status) as TaskStatus | undefined;
   const progress = progressQuery.progress;
+  const completedView = Boolean(status && ["graded", "review_confirmed", "generating_analysis", "finalized"].includes(status));
 
   const queue = useMemo(
-    () => deriveQueue(progress, state?.problem_count ?? task?.problem_count ?? 0, state?.student_count ?? task?.student_count ?? 0),
-    [progress, state?.problem_count, state?.student_count, task?.problem_count, task?.student_count],
+    () => {
+      const derived = deriveQueue(progress, state?.problem_count ?? task?.problem_count ?? 0, state?.student_count ?? task?.student_count ?? 0);
+      return completedView
+        ? { ...derived, completed: derived.total, running: 0, queued: 0 }
+        : derived;
+    },
+    [completedView, progress, state?.problem_count, state?.student_count, task?.problem_count, task?.student_count],
   );
   const eta = useMemo(() => estimateRemaining(progress, queue.total, queue.completed, locale), [locale, progress, queue.completed, queue.total]);
   const latestError = progress?.error_detail
@@ -36,13 +42,10 @@ export function GradingProgressPage() {
     ?? task?.error
     ?? null;
 
-  if (taskId && status === "graded") {
-    return <Navigate replace to={`/tasks/${taskId}/review`} />;
-  }
   if (taskId && status === "submissions_ready") {
     return <Navigate replace to={`/tasks/${taskId}/grading/preflight`} />;
   }
-  if (taskId && task && status && !["grading", "error"].includes(status)) {
+  if (taskId && task && status && !hasTaskReachedStep(task, 5)) {
     return <Navigate replace to={getTaskDestination(task)} />;
   }
   if (taskId && status === "error" && task?.last_failed_job_id && task.last_failed_job_id !== task.grading_job_id) {
@@ -70,7 +73,7 @@ export function GradingProgressPage() {
   const hasReadableState = Boolean(status || task || state);
   const readFailed = !hasReadableState && (taskQuery.isError || progressQuery.isError);
   const isFinalizing = status === "grading" && progress?.phase === "done";
-  const percent = progress ? progressQuery.percent : null;
+  const percent = completedView ? 100 : progress ? progressQuery.percent : null;
   const retryError = retryGrading.error ? normalizeAPIError(retryGrading.error).message : null;
 
   return (
@@ -111,14 +114,18 @@ export function GradingProgressPage() {
             />
           ) : (
             <>
-              <section className="flex min-h-[220px] flex-col rounded-[10px] border bg-card px-5 pb-5 pt-7 sm:h-[220px] sm:px-10 sm:pb-5 sm:pt-8" aria-live="polite" aria-busy="true">
+              <section className="flex min-h-[220px] flex-col rounded-[10px] border bg-card px-5 pb-5 pt-7 sm:h-[220px] sm:px-10 sm:pb-5 sm:pt-8" aria-live="polite" aria-busy={completedView ? undefined : true}>
                 <h2 className="text-[22px] font-bold leading-8 tracking-[-0.01em] text-foreground sm:text-[24px]">
-                  {copy(locale, isFinalizing ? "finalizing" : "gradingAnswers")}
+                  {completedView
+                    ? (locale === "en-US" ? "Grading Completed" : "批改已完成")
+                    : copy(locale, isFinalizing ? "finalizing" : "gradingAnswers")}
                 </h2>
                 <p className="mt-1 text-[13px] leading-5 text-muted-foreground sm:text-[14px]">
                   {copy(locale, "completedPrefix")} {queue.completed} / {queue.total} {copy(locale, "unitSuffix")}
                   <span aria-hidden="true"> · </span>
-                  {copy(locale, "etaPrefix")} {isFinalizing ? copy(locale, "almostDone") : eta}
+                  {completedView
+                    ? (locale === "en-US" ? "Historical progress snapshot" : "历史进度快照")
+                    : `${copy(locale, "etaPrefix")} ${isFinalizing ? copy(locale, "almostDone") : eta}`}
                 </p>
 
                 <div className="mt-4 flex items-center gap-3">
@@ -144,10 +151,10 @@ export function GradingProgressPage() {
 
                 <div className="mt-auto flex flex-col gap-3 pt-5 sm:flex-row sm:items-center sm:justify-between sm:pt-0">
                   <span className="inline-flex min-h-7 w-fit items-center rounded-full bg-teal-100 px-3 text-[11px] font-semibold text-teal-700 dark:bg-teal-950/60 dark:text-teal-300 sm:text-[12px]">
-                    {copy(locale, "backgroundChip")}
+                    {completedView ? (locale === "en-US" ? "Completed" : "已完成") : copy(locale, "backgroundChip")}
                   </span>
-                  <Link to="/" className="inline-flex h-10 w-full items-center justify-center rounded-[8px] border bg-card px-5 text-[13px] font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-[150px] sm:text-[14px]">
-                    {copy(locale, "backWorkspace")}
+                  <Link to={completedView ? `/tasks/${taskId}/review` : "/"} className="inline-flex h-10 w-full items-center justify-center rounded-[8px] border bg-card px-5 text-[13px] font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:w-[150px] sm:text-[14px]">
+                    {completedView ? (locale === "en-US" ? "View Review" : "查看复核分析") : copy(locale, "backWorkspace")}
                   </Link>
                 </div>
               </section>
@@ -160,7 +167,9 @@ export function GradingProgressPage() {
                     <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
                     {latestError}
                   </span>
-                ) : copy(locale, "recoverableHint")}
+                ) : completedView
+                  ? (locale === "en-US" ? "This page preserves the completed grading queue for later review." : "这里保留已完成批改的队列快照，便于之后回看。")
+                  : copy(locale, "recoverableHint")}
               </section>
             </>
           )}

@@ -34,14 +34,14 @@
 3. 覆盖率胶囊全部可点击，分别返回题目总览或作答矩阵；“修改批改设置”返回 C01。
 4. 风险只依据真实缺失字段、作答 flag/空白、身份待确认及后端 `task_knowledge_empty` warning；无风险时显示通过状态。
 5. 主按钮调用既有幂等合同 `POST /tasks/:id/grade`：`started / already_running` 进入 C03，`already_done` 进入结果；错误不改写任务数据。
-6. 未保存任务级设置、所选 provider 不可用、readiness 阻断、题目/学生为空或状态不是 `submissions_ready` 时禁止启动，并给出可行动的原因。
+6. 未保存任务级设置、所选 provider 不可用、readiness 阻断、题目/学生为空或状态不是 `submissions_ready` 时不允许再次启动；尚未执行的任务给出可行动原因，已进入后续阶段的任务显示只读历史配置快照。
 7. S03 作答矩阵页底部新增明确的 C02 主入口；工作台/历史任务仍由统一 destination resolver 恢复真实状态。
 
 ## 4. 路由与阶段迁移
 
 - `submissions_ready`：S03 → C02。
 - `grading`：统一 destination 改为 `/tasks/:id/grading/progress`。
-- C02 遇到已经进入 `grading` 的任务直接去 C03；其他不合法状态使用统一 `getTaskDestination` 恢复。
+- C02 遇到正在 `grading` 或该 job 失败的任务直接去 C03；尚未到达第 6 步的任务使用统一 `getTaskDestination` 恢复。`graded / review_confirmed / generating_analysis / finalized` 可回看本次配置快照，但不会再次启动批改。
 - 2026-07-24 首次交付时曾短暂复用兼容进度容器；同日 C03 已按 Figma 13 完整替换，当前 C02 启动后只进入正式 `/grading/progress`。
 
 ## 5. 验收证据
@@ -80,3 +80,9 @@ PNG 只保存在 Codex 临时可视化目录，不进入产品仓库。
 - 隔离 fixture `T_c02check` 浏览器复验：`1280×720` 视口下 `scrollWidth=1280`、完整页高 `900`，无页面级横向溢出；设置入口、返回、无改动保存三条路径均回到 C02，控制台 `0 errors / 0 warnings`。
 - 最新 PNG：`20260727-c02-c03/C02-preflight-latest-flow-1280x720.png` 与完整页图，仍只保存在 Codex 临时可视化目录。既有 `1440×900` / `390×844` 几何证据继续有效，本轮未改变四块主区域尺寸。
 - 工程复验：C01/C03 定向合同回归 `15 passed`；visible-scope audit 扫描 `67` 个可见源文件，TypeScript、Vite production build（`930 modules transformed`）和 `git diff --check` 通过；未调用真实 provider。
+
+## 8. 2026-07-27 完成态回溯补充
+
+- 修复第 8 步完成态点击第 6 步后被旧页面守卫送回 `/results`：现在按“是否已经到达第 6 步”判定，完成态保留摘要、专家组合、评分策略和风险快照。
+- 历史模式隐藏“修改设置/开始批改”型动作，明确标注“历史配置快照”，底部只提供进入第 7 步复核分析的主动作，防止误触二次批改。
+- 隔离 fixture 从第 5 步详情底部“进入执行批改”真实到达 C02，随后通过顶部第 7 步进入 R01；控制台 `0 errors`，没有调用 provider。

@@ -8,7 +8,7 @@ import { useI18n } from "@/i18n/I18nProvider";
 import type { Locale } from "@/i18n/messages";
 import { cn } from "@/lib/cn";
 import { gradingPreflightText as copy } from "@/lib/gradingPreflightCopy";
-import { getTaskDestination, getTaskGradingSetupHref } from "@/lib/taskFlow";
+import { getTaskDestination, getTaskGradingSetupHref, hasTaskReachedStep } from "@/lib/taskFlow";
 import type { GradingFeedbackLength, GradingSetup, ProblemInfo, StudentSubmission } from "@/types";
 
 /** C02: one read-only checkpoint before the idempotent grading mutation. */
@@ -41,10 +41,13 @@ export function GradingPreflightPage() {
     () => buildRiskItems(summary, setupResponse?.readiness.warnings ?? [], locale),
     [locale, setupResponse?.readiness.warnings, summary],
   );
+  const historyView = Boolean(task && task.status !== "submissions_ready");
 
-  if (taskQuery.isSuccess && taskId && task && task.status !== "submissions_ready") {
-    if (task.status === "grading") return <Navigate replace to={`/tasks/${taskId}/grading/progress`} />;
-    return <Navigate replace to={getTaskDestination(task)} />;
+  if (taskQuery.isSuccess && taskId && task) {
+    if (task.status === "grading" || (task.status === "error" && task.grading_job_id)) {
+      return <Navigate replace to={`/tasks/${taskId}/grading/progress`} />;
+    }
+    if (!hasTaskReachedStep(task, 5)) return <Navigate replace to={getTaskDestination(task)} />;
   }
 
   const blockingIssues = setupResponse?.readiness.blocking_issues ?? [];
@@ -77,7 +80,7 @@ export function GradingPreflightPage() {
   const isLoading = taskQuery.isLoading || setupQuery.isLoading;
   const isError = taskQuery.isError || setupQuery.isError;
   const startError = startGrading.error ? normalizeAPIError(startGrading.error).message : null;
-  const disabledReason = getDisabledReason({
+  const disabledReason = historyView ? null : getDisabledReason({
     locale,
     configured: setupResponse?.configured ?? false,
     canStart,
@@ -141,9 +144,15 @@ export function GradingPreflightPage() {
               <h2 id="preflight-experts" className="text-[18px] font-bold leading-6 text-foreground">
                 {copy(locale, "expertCombination")}
               </h2>
-              <Link to={getTaskGradingSetupHref(taskId, `/tasks/${taskId}/grading/preflight`)} className="text-[12px] font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring">
-                {copy(locale, "editSetup")}
-              </Link>
+              {historyView ? (
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {locale === "en-US" ? "Historical configuration" : "历史配置快照"}
+                </span>
+              ) : (
+                <Link to={getTaskGradingSetupHref(taskId, `/tasks/${taskId}/grading/preflight`)} className="text-[12px] font-semibold text-primary outline-none hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring">
+                  {copy(locale, "editSetup")}
+                </Link>
+              )}
             </div>
             <div className="mt-5 flex flex-col gap-4 lg:flex-row lg:items-center">
               <div className="flex flex-wrap gap-3.5">
@@ -219,18 +228,35 @@ export function GradingPreflightPage() {
           </section>
 
           <div className="mt-[22px] flex flex-col items-stretch gap-2 pb-8 sm:items-end">
-            {disabledReason ? <p className="max-w-[520px] text-right text-[12px] leading-5 text-danger">{disabledReason}</p> : null}
-            {startError ? <p role="alert" className="max-w-[520px] text-right text-[12px] leading-5 text-danger">{startError || copy(locale, "startError")}</p> : null}
-            <button
-              type="button"
-              disabled={!canStart || startGrading.isPending}
-              onClick={() => void handleStart()}
-              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-6 text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[180px]"
-            >
-              {startGrading.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
-              {copy(locale, startGrading.isPending ? "starting" : "start")}
-              {!startGrading.isPending ? <ChevronRight aria-hidden="true" className="h-4 w-4" /> : null}
-            </button>
+            {historyView ? (
+              <>
+                <p className="max-w-[600px] text-right text-[12px] leading-5 text-muted-foreground">
+                  {locale === "en-US" ? "This is the configuration snapshot used for the completed grading run." : "这里保留本次已执行批改所使用的配置快照，不会再次启动批改。"}
+                </p>
+                <Link
+                  to={`/tasks/${taskId}/review`}
+                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-6 text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:w-[180px]"
+                >
+                  {locale === "en-US" ? "View Review" : "查看复核分析"}
+                  <ChevronRight aria-hidden="true" className="h-4 w-4" />
+                </Link>
+              </>
+            ) : (
+              <>
+                {disabledReason ? <p className="max-w-[520px] text-right text-[12px] leading-5 text-danger">{disabledReason}</p> : null}
+                {startError ? <p role="alert" className="max-w-[520px] text-right text-[12px] leading-5 text-danger">{startError || copy(locale, "startError")}</p> : null}
+                <button
+                  type="button"
+                  disabled={!canStart || startGrading.isPending}
+                  onClick={() => void handleStart()}
+                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-6 text-[14px] font-semibold text-primary-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-[180px]"
+                >
+                  {startGrading.isPending ? <LoaderCircle aria-hidden="true" className="h-4 w-4 animate-spin" /> : null}
+                  {copy(locale, startGrading.isPending ? "starting" : "start")}
+                  {!startGrading.isPending ? <ChevronRight aria-hidden="true" className="h-4 w-4" /> : null}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

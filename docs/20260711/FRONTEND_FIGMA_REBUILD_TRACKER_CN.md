@@ -889,6 +889,14 @@
 - 后端依赖但会影响前端最终体验：统一题目资料来源/置信度/冲突字段，SmartQuery 大数据与语义匹配，OCR/视觉识别，数据库/对象存储持久化，以及真实 provider 端到端成功与失败恢复。前端不得用假数据或额外按钮掩盖这些缺口。
 - 本轮工程证据：C01/C03 定向合同回归 `15 passed`，visible-scope audit `67` 个文件、TypeScript、Vite production build（`930 modules transformed`）、task-scoped 回链浏览器交互和 `git diff --check` 通过；详细记录见 C02/C03 阶段文档。
 
+### 9.8 R01 与完成态阶段回溯复验（2026-07-27）
+
+- [x] FLOW-BUG-02 第 8 步完成态可显式回看第 5“校对作答”、第 6“执行批改”和第 7“复核分析”；各页统一使用最远可达阶段，不再由旧状态守卫强制跳回 `/results`。
+- [x] S05-BUG-03 已进入后续阶段的作答详情保留连续题目、独立滚动目录和筛选，但身份/作答为只读；底部主按钮进入第 6 步，返回作答矩阵为次按钮。
+- [x] C02/C03-HISTORY-01 C02 展示历史配置快照且不可重复启动；C03 展示 `100%` 已完成队列快照并可进入复核分析。
+- [x] R01-SEARCH-01 中文 composition 门禁、URL 条件、清空与详情返回上下文完成；正式完成后仍可回看真实热力图，但主动作只进入最终结果。
+- [x] QA-HISTORY-01 隔离 `finalized` fixture 的第 5/6/7 步与 C03 深链均保持目标 URL；浏览器控制台 `0 errors`。工程 `npm run lint`（visible-scope 67 文件 + TypeScript）通过，未调用 provider。
+
 ---
 
 ## 10. 本轮产品决定确认记录

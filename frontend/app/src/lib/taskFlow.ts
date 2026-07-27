@@ -52,6 +52,10 @@ export function getTaskReachableStep(task?: TaskReachabilityInput | null): numbe
   }
 }
 
+export function hasTaskReachedStep(task: TaskReachabilityInput | null | undefined, step: number): boolean {
+  return getTaskReachableStep(task) >= step;
+}
+
 function allProblemsConfirmed(problemData?: Task["problem_data"]) {
   const problems = Object.values(problemData ?? {});
   return problems.length > 0 && problems.every((problem) => problem.review_status === "confirmed");
