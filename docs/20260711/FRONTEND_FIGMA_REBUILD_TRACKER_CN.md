@@ -978,6 +978,14 @@
 - [x] QA-20260728-01 前端 visible-scope/lint、TypeScript、production build与后端来源契约通过；浏览器在 `1920×1080` 验证题目单文件页和自然语言评分标准页均首屏完整、无横向溢出，未调用 provider。
 - 详细记录：`docs/20260728/Q01_C02_DETAIL_NAV_DENSITY_STAGE_CN.md`。
 
+### 9.16 BYOK 模型配置表格对齐纠偏（2026-07-28）
+
+- [x] BYOK-ALIGN-01 桌面模型表改为显式固定列轨道；“配置状态 / 连通性 / 调用限制”的表头与内容共用同一水平中心线，服务商信息保持左对齐，操作保持右对齐。
+- [x] BYOK-ALIGN-02 所有表头和数据单元格显式 `vertical-align: middle`；连通性徽标与最近验证时间作为一个整体纵向、横向居中，不再依赖浏览器默认基线。
+- [x] BYOK-QA-01 `1280×720` 浏览器实测五列表头与数据单元格的 `x / width` 完全一致，中间三列均为 `text-align: center`、全部单元格为 `vertical-align: middle`，页面无横向溢出且控制台 `0 errors / 0 warnings`。
+- [x] BYOK-QA-02 使用本地一次性假配置完成表格、刷新与截图验收后立即删除，未调用真实 provider，也未留下测试密钥或配置。
+- 视觉证据：`smartai-byok-aligned.png`，位于当前 Codex 临时可视化目录。
+
 ---
 
 ## 10. 本轮产品决定确认记录

@@ -313,14 +313,31 @@ export function ExpertsPage() {
         {experts.length > 0 ? (
           <>
             <div className="hidden overflow-x-auto sm:block">
-              <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+              <table className="w-full min-w-[980px] table-fixed border-collapse text-left text-sm">
+                <colgroup>
+                  <col className="w-[33%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[28%]" />
+                </colgroup>
                 <thead className="h-10 bg-slate-50 text-xs text-slate-500 dark:bg-slate-900/45 dark:text-slate-400">
                   <tr>
-                    <th className="px-5 font-medium">{zh ? "服务商与模型" : "Provider & model"}</th>
-                    <th className="px-3 font-medium">{zh ? "配置状态" : "Configuration"}</th>
-                    <th className="px-3 font-medium">{zh ? "连通性" : "Connectivity"}</th>
-                    <th className="px-3 font-medium">{zh ? "调用限制" : "Limits"}</th>
-                    <th className="px-5 text-right font-medium">{zh ? "操作" : "Actions"}</th>
+                    <th className="px-5 align-middle font-medium">
+                      {zh ? "服务商与模型" : "Provider & model"}
+                    </th>
+                    <th className="px-3 text-center align-middle font-medium">
+                      {zh ? "配置状态" : "Configuration"}
+                    </th>
+                    <th className="px-3 text-center align-middle font-medium">
+                      {zh ? "连通性" : "Connectivity"}
+                    </th>
+                    <th className="px-3 text-center align-middle font-medium">
+                      {zh ? "调用限制" : "Limits"}
+                    </th>
+                    <th className="px-5 text-right align-middle font-medium">
+                      {zh ? "操作" : "Actions"}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -425,7 +442,7 @@ function ExpertTableRow({
   const zh = locale === "zh-CN";
   return (
     <tr className="h-[76px] border-t first:border-t-0">
-      <td className="max-w-[330px] px-5">
+      <td className="max-w-[330px] px-5 align-middle">
         <div className="flex items-center gap-2">
           <span className="font-semibold">{expert.display_name || providerLabel(expert.provider_type)}</span>
           {expert.is_shared ? (
@@ -438,19 +455,19 @@ function ExpertTableRow({
           {expert.model}
         </p>
       </td>
-      <td className="px-3">
+      <td className="px-3 text-center align-middle">
         <EnabledBadge enabled={expert.enabled} locale={locale} />
       </td>
-      <td className="px-3">
+      <td className="px-3 text-center align-middle">
         <VerificationBadge expert={expert} locale={locale} />
       </td>
-      <td className="px-3 text-xs text-muted-foreground">
+      <td className="px-3 text-center align-middle text-xs text-muted-foreground">
         <span className="block">RPM {expert.rpm > 0 ? expert.rpm : "—"}</span>
         <span className="mt-1 block">
           {zh ? "并发" : "Concurrency"} {expert.max_concurrent}
         </span>
       </td>
-      <td className="px-5">
+      <td className="px-5 align-middle">
         <ExpertActions
           expert={expert}
           locale={locale}
@@ -519,7 +536,7 @@ function ExpertActions({
     );
   }
   return (
-    <div className="flex flex-wrap justify-end gap-1">
+    <div className="flex flex-wrap items-center justify-end gap-1">
       <RowAction label={zh ? "编辑" : "Edit"} onClick={onEdit} disabled={disabled}>
         <Pencil aria-hidden="true" size={14} />
       </RowAction>
@@ -619,7 +636,7 @@ function VerificationBadge({
   };
   const meta = statuses[status] ?? statuses.unverified;
   return (
-    <div>
+    <div className="flex min-h-[45px] flex-col items-center justify-center">
       <span className={cn("inline-flex rounded-full px-3 py-1 text-xs font-semibold", meta.className)}>
         {meta.label}
       </span>
