@@ -136,6 +136,21 @@ class ExpertRegistry:
                 return p
         return available[0]
 
+    def pick_vision(self, preferred: Optional[BaseProvider] = None) -> Optional[BaseProvider]:
+        """Return a provider that supports image input.
+
+        If the caller already picked a default provider and it supports vision,
+        keep using it. Otherwise fall back to the first enabled vision provider.
+        """
+        available = self.list_available()
+        if preferred is not None and getattr(preferred, "supports_vision", False):
+            if any(p.provider_id == preferred.provider_id for p in available):
+                return preferred
+        for p in available:
+            if getattr(p, "supports_vision", False):
+                return p
+        return None
+
 
 # ─── Module-level singleton ──────────────────────────────────────────────────
 # Global, but construction is lazy to avoid loading providers before env is ready.

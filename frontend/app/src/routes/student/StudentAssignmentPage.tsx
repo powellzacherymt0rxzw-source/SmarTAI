@@ -5,6 +5,7 @@ import {
   useMyStudentResult,
   useQuestions,
   useSubmitOnline,
+  useUploadSubmission,
 } from "@/api/hooks/education";
 import { Button } from "@/components/ui/Button";
 import { Card, SectionHeader } from "@/components/ui/Card";
@@ -22,8 +23,10 @@ export function StudentAssignmentPage() {
   const questions = useQuestions(assignmentId);
   const myResult = useMyStudentResult(assignmentId);
   const submit = useSubmitOnline();
+  const upload = useUploadSubmission();
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [submissionFile, setSubmissionFile] = useState<File | null>(null);
 
   function submitAnswers(e: React.FormEvent) {
     e.preventDefault();
@@ -38,6 +41,15 @@ export function StudentAssignmentPage() {
     submit.mutate({ assignmentId: id, answers: payload }, {});
   }
 
+  function uploadAnswers() {
+    const id = assignment.data?.id ?? assignmentId;
+    if (!id || !submissionFile) return;
+    upload.mutate(
+      { assignmentId: id, file: submissionFile },
+      { onSuccess: () => setSubmissionFile(null) },
+    );
+  }
+
   const open = assignment.data?.status === "published";
 
   return (
@@ -48,31 +60,60 @@ export function StudentAssignmentPage() {
       />
 
       {!open ? null : (
-        <form className="space-y-4" onSubmit={submitAnswers}>
-          {questions.isLoading ? (
-            <Card>加载中...</Card>
-          ) : !questions.data || questions.data.length === 0 ? (
-            <EmptyState title="暂无题目" description="作业尚无题目。" />
-          ) : (
-            questions.data.map((q, i) => (
-              <Card key={q.id}>
-                <div className="text-sm font-medium">
-                  {i + 1}. {q.q_id} <span className="text-muted-foreground">({q.max_score} 分)</span>
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">{q.stem || "（无题干）"}</p>
-                <textarea
-                  className="mt-3 min-h-24 w-full rounded-md border bg-background p-2 text-sm"
-                  value={answers[q.q_id] ?? ""}
-                  onChange={(e) => setAnswers((s) => ({ ...s, [q.q_id]: e.target.value }))}
-                  placeholder="你的作答"
-                />
-              </Card>
-            ))
-          )}
-          <Button type="submit" disabled={submit.isPending}>
-            提交作答
-          </Button>
-        </form>
+        <>
+          <form className="space-y-4" onSubmit={submitAnswers}>
+            {questions.isLoading ? (
+              <Card>加载中...</Card>
+            ) : !questions.data || questions.data.length === 0 ? (
+              <EmptyState title="暂无题目" description="作业尚无题目。" />
+            ) : (
+              questions.data.map((q, i) => (
+                <Card key={q.id}>
+                  <div className="text-sm font-medium">
+                    {i + 1}. {q.q_id} <span className="text-muted-foreground">({q.max_score} 分)</span>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">{q.stem || "（无题干）"}</p>
+                  <textarea
+                    className="mt-3 min-h-24 w-full rounded-md border bg-background p-2 text-sm"
+                    value={answers[q.q_id] ?? ""}
+                    onChange={(e) => setAnswers((s) => ({ ...s, [q.q_id]: e.target.value }))}
+                    placeholder="你的作答"
+                  />
+                </Card>
+              ))
+            )}
+            <Button type="submit" disabled={submit.isPending}>
+              提交作答
+            </Button>
+          </form>
+
+          <Card>
+            <label className="grid gap-2 text-sm font-medium">
+              上传手写作业
+              <input
+                type="file"
+                accept=".txt,.md,.csv,.pdf,.jpg,.jpeg,.png,.webp,.zip"
+                onChange={(event) => setSubmissionFile(event.target.files?.[0] ?? null)}
+                className="block w-full text-sm"
+              />
+            </label>
+            <p className="mt-2 text-xs text-muted-foreground">
+              图片或扫描 PDF 会先进行 OCR，再按当前作业题目拆分答案。
+            </p>
+            <Button
+              className="mt-3"
+              onClick={uploadAnswers}
+              disabled={upload.isPending || !submissionFile}
+            >
+              {upload.isPending ? "识别并提交中…" : "识别并提交"}
+            </Button>
+            {upload.data ? (
+              <p className="mt-2 text-sm text-muted-foreground">
+                已创建第 {upload.data.revision_number} 个提交版本。
+              </p>
+            ) : null}
+          </Card>
+        </>
       )}
 
       <Card className="p-0">

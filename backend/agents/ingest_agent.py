@@ -27,7 +27,6 @@ from backend.models import (
 )
 from backend.llm.providers import BaseProvider
 from backend.tools.structured_llm import extract_and_parse_json, ainvoke_with_retry
-from backend.tools.file_processing import extract_files_from_archive, decode_text_bytes
 
 if TYPE_CHECKING:
     from backend.progress.tracker import ProgressReporter

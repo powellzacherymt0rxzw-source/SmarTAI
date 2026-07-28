@@ -127,6 +127,16 @@ class Settings(BaseSettings):
     # How often the poller looks for queued runs to claim.
     grading_poll_seconds: int = int(os.getenv("SMARTAI_GRADING_POLL_SECONDS", "5"))
 
+    # ─── OCR / vision ingest ───────────────────────────────────────────────────
+    ocr_default_provider: Literal["llm_vision", "mathpix"] = "llm_vision"
+    ocr_max_pdf_pages: int = 30
+    ocr_max_image_bytes: int = 10 * 1024 * 1024
+    ocr_render_dpi_scale: float = 2.0
+    ocr_concurrency: int = 2
+    ocr_text_min_chars: int = 50
+    mathpix_app_id: str = os.getenv("MATHPIX_APP_ID", "")
+    mathpix_app_key: str = os.getenv("MATHPIX_APP_KEY", "")
+
     # ─── Frontend ──────────────────────────────────────────────────────────────
     frontend_urls: str = os.getenv(
         "FRONTEND_URLS",

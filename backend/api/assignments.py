@@ -10,14 +10,16 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from backend.auth import get_current_user, require_teacher
 from backend.api.errors import domain_error_response
 from backend.domain.errors import DomainError
+from backend.llm.registry import ExpertRegistry, get_scoped_expert_registry
 from backend.models import User
 from backend.services import assignments as assignment_service
+from backend.skills.ocr_ingest import LLMVisionOCRSkill
 
 router = APIRouter(prefix="/assignments", tags=["assignments"])
 
@@ -110,6 +112,38 @@ def add_question(assignment_id: str, req: AddQuestionRequest, current: User = De
     except DomainError as exc:
         return domain_error_response(exc)
     return _serialize_question(q)
+
+
+@router.post("/{assignment_id}/questions/import-file")
+async def import_questions_file(
+    assignment_id: str,
+    file: UploadFile = File(...),
+    current: User = Depends(require_teacher),
+    registry: ExpertRegistry = Depends(get_scoped_expert_registry),
+):
+    provider = registry.pick_default()
+    if provider is None:
+        raise HTTPException(
+            503, detail="No LLM provider configured. Add an API key first."
+        )
+    vision_provider = registry.pick_vision(provider)
+    ocr_skill = (
+        LLMVisionOCRSkill(vision_provider) if vision_provider is not None else None
+    )
+    content = await file.read()
+    try:
+        questions = await assignment_service.import_questions_from_upload(
+            assignment_id=assignment_id,
+            teacher_id=current.id,
+            filename=file.filename or "problems",
+            content=content,
+            content_type=file.content_type,
+            provider=provider,
+            ocr_skill=ocr_skill,
+        )
+    except DomainError as exc:
+        return domain_error_response(exc)
+    return [_serialize_question(question) for question in questions]
 
 
 @router.post("/{assignment_id}/questions/reorder")

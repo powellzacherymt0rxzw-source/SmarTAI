@@ -7,9 +7,19 @@ the intent readable and keeps the API thin.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from backend.agents.ingest_agent import extract_problems
 from backend.db import assignment_repository
+from backend.db.file_repository import save_file
 from backend.domain import education
-from backend.domain.errors import Forbidden, NotFound, ValidationError
+from backend.domain.errors import Forbidden, InvalidTransition, NotFound, ValidationError
+from backend.storage import get_storage
+from backend.tools.file_processing import extract_text_from_upload
+
+if TYPE_CHECKING:
+    from backend.llm.providers import BaseProvider
+    from backend.skills.ocr_ingest import OCRIngestSkill
 
 
 def create_assignment(*, teacher_id: str, course_id: str, name: str,
@@ -65,6 +75,78 @@ def add_question(*, assignment_id: str, teacher_id: str, q_id: str, order_index:
         criterion=criterion, max_score=max_score, reference_answer=reference_answer,
         test_cases=test_cases, source=source,
     )
+
+
+async def import_questions_from_upload(
+    *,
+    assignment_id: str,
+    teacher_id: str,
+    filename: str,
+    content: bytes,
+    content_type: str | None,
+    provider: "BaseProvider",
+    ocr_skill: "OCRIngestSkill | None" = None,
+) -> list[education.QuestionDTO]:
+    """Extract an uploaded problem sheet and persist normalized questions.
+
+    Authorization and editability are checked before OCR/LLM work. The original
+    file is retained against the assignment for later audit.
+    """
+    assignment = assignment_repository.get_assignment(
+        assignment_id=assignment_id, actor_id=teacher_id
+    )
+    if assignment.status not in education.EDITABLE_ASSIGNMENT_STATUSES:
+        raise InvalidTransition("assignment_not_editable")
+
+    text = await extract_text_from_upload(
+        content,
+        filename,
+        ocr_skill=ocr_skill,
+        purpose="problems",
+    )
+    extracted: dict[str, dict] = {}
+    await extract_problems(text, provider, extracted)
+    if not extracted:
+        raise ValidationError("No questions were extracted from the upload")
+
+    existing = assignment_repository.list_questions(
+        assignment_id=assignment_id, teacher_id=teacher_id
+    )
+    existing_qids = {question.q_id for question in existing}
+    duplicate_qids = sorted(existing_qids.intersection(extracted))
+    if duplicate_qids:
+        raise ValidationError(
+            "Question ids already exist: " + ", ".join(duplicate_qids)
+        )
+
+    created: list[education.QuestionDTO] = []
+    order_offset = len(existing)
+    for index, problem in enumerate(extracted.values()):
+        created.append(
+            add_question(
+                assignment_id=assignment_id,
+                teacher_id=teacher_id,
+                q_id=str(problem.get("q_id", "")).strip(),
+                order_index=order_offset + index,
+                number=str(problem.get("number", "")),
+                type=str(problem.get("type", "其他")),
+                stem=str(problem.get("stem", "")),
+                criterion=str(problem.get("criterion", "")),
+                max_score=float(problem.get("max_score", 10.0)),
+                source={"origin": "file_upload", "filename": filename},
+            )
+        )
+
+    save_file(
+        storage=get_storage(),
+        owner_id=teacher_id,
+        kind="problem",
+        original_name=filename,
+        content=content,
+        content_type=content_type,
+        assignment_id=assignment_id,
+    )
+    return created
 
 
 def reorder_questions(*, assignment_id: str, teacher_id: str,

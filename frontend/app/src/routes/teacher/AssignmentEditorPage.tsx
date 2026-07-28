@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useAddQuestion, useAssignment, usePublishAssignment, useQuestions } from "@/api/hooks/education";
+import {
+  useAddQuestion,
+  useAssignment,
+  useImportQuestionsFile,
+  usePublishAssignment,
+  useQuestions,
+} from "@/api/hooks/education";
 import { Button } from "@/components/ui/Button";
 import { Card, SectionHeader } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
@@ -19,12 +25,14 @@ export function AssignmentEditorPage() {
   const assignment = useAssignment(assignmentId);
   const questions = useQuestions(assignmentId);
   const addQuestion = useAddQuestion();
+  const importQuestionsFile = useImportQuestionsFile();
   const publish = usePublishAssignment();
 
   const [qId, setQId] = useState("");
   const [stem, setStem] = useState("");
   const [type, setType] = useState("short");
   const [maxScore, setMaxScore] = useState(10);
+  const [questionFile, setQuestionFile] = useState<File | null>(null);
   const [bulkPayload, setBulkPayload] = useState("");
   const [bulkError, setBulkError] = useState<string | null>(null);
 
@@ -45,6 +53,14 @@ export function AssignmentEditorPage() {
   function publishAssignment() {
     if (!assignmentId || !assignment.data) return;
     publish.mutate({ assignmentId, expectedVersion: assignment.data.version });
+  }
+
+  function importQuestionUpload() {
+    if (!assignmentId || !questionFile) return;
+    importQuestionsFile.mutate(
+      { assignmentId, file: questionFile },
+      { onSuccess: () => setQuestionFile(null) },
+    );
   }
 
   async function importQuestions() {
@@ -126,6 +142,38 @@ export function AssignmentEditorPage() {
           作业已发布，题目集已冻结。如需修改请新建作业版本。
         </Card>
       )}
+
+      {editable ? (
+        <Card>
+          <div className="grid gap-3">
+            <label className="grid gap-2 text-sm font-medium">
+              OCR 导入题目文件
+              <input
+                type="file"
+                accept=".txt,.md,.csv,.pdf,.jpg,.jpeg,.png,.webp"
+                onChange={(event) => setQuestionFile(event.target.files?.[0] ?? null)}
+                className="block w-full text-sm"
+              />
+            </label>
+            <p className="text-xs text-muted-foreground">
+              图片和扫描 PDF 会先进行 OCR，再自动拆分题目并保存原文件。
+            </p>
+            <div>
+              <Button
+                onClick={importQuestionUpload}
+                disabled={importQuestionsFile.isPending || !questionFile}
+              >
+                {importQuestionsFile.isPending ? "识别中…" : "识别并导入"}
+              </Button>
+            </div>
+            {importQuestionsFile.data ? (
+              <p className="text-sm text-muted-foreground">
+                已导入 {importQuestionsFile.data.length} 道题。
+              </p>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
 
       {editable ? (
         <Card>

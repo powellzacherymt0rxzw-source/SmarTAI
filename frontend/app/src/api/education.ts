@@ -82,6 +82,17 @@ export async function addQuestion(assignmentId: string, input: {
   return data;
 }
 
+export async function importQuestionsFile(assignmentId: string, file: File): Promise<Question[]> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await apiClient.post<Question[]>(
+    `/assignments/${assignmentId}/questions/import-file`,
+    form,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return data;
+}
+
 export async function publishAssignment(assignmentId: string, expectedVersion: number): Promise<Assignment> {
   const { data } = await apiClient.post<Assignment>(`/assignments/${assignmentId}/publish`, {
     expected_version: expectedVersion,
@@ -124,6 +135,21 @@ export async function uploadSubmission(assignmentId: string, file: File): Promis
   form.append("assignment_id", assignmentId);
   form.append("file", file);
   const { data } = await apiClient.post<SubmissionRevision>("/submissions/upload", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
+export async function teacherUploadSubmission(
+  assignmentId: string,
+  studentId: string,
+  file: File,
+): Promise<SubmissionRevision> {
+  const form = new FormData();
+  form.append("assignment_id", assignmentId);
+  form.append("student_id", studentId);
+  form.append("file", file);
+  const { data } = await apiClient.post<SubmissionRevision>("/submissions/teacher-upload", form, {
     headers: { "Content-Type": "multipart/form-data" },
   });
   return data;

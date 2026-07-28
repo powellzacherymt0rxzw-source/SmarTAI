@@ -95,6 +95,18 @@ export function useAddQuestion() {
   });
 }
 
+export function useImportQuestionsFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ assignmentId, file }: { assignmentId: string; file: File }) =>
+      edu.importQuestionsFile(assignmentId, file),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: assignmentKeys.questions(vars.assignmentId) });
+      qc.invalidateQueries({ queryKey: assignmentKeys.detail(vars.assignmentId) });
+    },
+  });
+}
+
 export function usePublishAssignment() {
   const qc = useQueryClient();
   return useMutation({
@@ -133,6 +145,24 @@ export function useUploadSubmission() {
   return useMutation({
     mutationFn: ({ assignmentId, file }: { assignmentId: string; file: File }) =>
       edu.uploadSubmission(assignmentId, file),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: submissionKeys.list(vars.assignmentId) });
+    },
+  });
+}
+
+export function useTeacherUploadSubmission() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      assignmentId,
+      studentId,
+      file,
+    }: {
+      assignmentId: string;
+      studentId: string;
+      file: File;
+    }) => edu.teacherUploadSubmission(assignmentId, studentId, file),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: submissionKeys.list(vars.assignmentId) });
     },

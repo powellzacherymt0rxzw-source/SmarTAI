@@ -11,9 +11,16 @@ vi.mock("@/api/hooks/education", () => ({
   useQuestions: vi.fn(),
   useMyStudentResult: vi.fn(),
   useSubmitOnline: vi.fn(),
+  useUploadSubmission: vi.fn(),
 }));
 
-const { useAssignment, useQuestions, useMyStudentResult, useSubmitOnline } = await import("@/api/hooks/education");
+const {
+  useAssignment,
+  useQuestions,
+  useMyStudentResult,
+  useSubmitOnline,
+  useUploadSubmission,
+} = await import("@/api/hooks/education");
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -64,6 +71,11 @@ function mock(opts: {
     isLoading: false,
   });
   (useSubmitOnline as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ mutate: vi.fn(), isPending: false });
+  (useUploadSubmission as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+    data: undefined,
+  });
 }
 
 describe("StudentAssignmentPage", () => {
@@ -93,6 +105,25 @@ describe("StudentAssignmentPage", () => {
     await waitFor(() => expect(submit).toHaveBeenCalled());
     expect(submit).toHaveBeenCalledWith(
       expect.objectContaining({ assignmentId: "a1", answers: expect.arrayContaining([expect.objectContaining({ q_id: "q1", content: "2" })]) }),
+      expect.any(Object),
+    );
+  });
+
+  it("uploads a handwritten submission for OCR", async () => {
+    mock({ assignment: published });
+    const upload = vi.fn();
+    (useUploadSubmission as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      mutate: upload,
+      isPending: false,
+      data: undefined,
+    });
+    const user = userEvent.setup();
+    renderPage();
+    const file = new File(["image"], "homework.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("上传手写作业"), file);
+    await user.click(screen.getByRole("button", { name: "识别并提交" }));
+    expect(upload).toHaveBeenCalledWith(
+      { assignmentId: "a1", file },
       expect.any(Object),
     );
   });

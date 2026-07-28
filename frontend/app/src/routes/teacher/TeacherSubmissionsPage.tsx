@@ -1,10 +1,15 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useAssignment, useSubmissions, useTeacherImport } from "@/api/hooks/education";
+import {
+  useAssignment,
+  useSubmissions,
+  useTeacherImport,
+  useTeacherUploadSubmission,
+} from "@/api/hooks/education";
 import { Button } from "@/components/ui/Button";
 import { Card, SectionHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Textarea } from "@/components/ui/Input";
+import { Input, Textarea } from "@/components/ui/Input";
 
 type ImportItem = {
   student_id: string;
@@ -17,7 +22,10 @@ export function TeacherSubmissionsPage() {
   const assignment = useAssignment(assignmentId);
   const submissions = useSubmissions(assignmentId);
   const importMutation = useTeacherImport();
+  const uploadMutation = useTeacherUploadSubmission();
   const [payload, setPayload] = useState("");
+  const [studentId, setStudentId] = useState("");
+  const [submissionFile, setSubmissionFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function importSubmissions() {
@@ -32,6 +40,23 @@ export function TeacherSubmissionsPage() {
     }
   }
 
+  function uploadSubmission() {
+    if (!assignmentId || !studentId.trim() || !submissionFile) return;
+    uploadMutation.mutate(
+      {
+        assignmentId,
+        studentId: studentId.trim(),
+        file: submissionFile,
+      },
+      {
+        onSuccess: () => {
+          setStudentId("");
+          setSubmissionFile(null);
+        },
+      },
+    );
+  }
+
   if (assignment.isLoading) return <Card>加载中...</Card>;
   if (!assignment.data) return <Card className="text-danger">作业不存在或无权访问。</Card>;
 
@@ -39,9 +64,45 @@ export function TeacherSubmissionsPage() {
     <div className="mx-auto max-w-5xl space-y-5">
       <SectionHeader
         title={`提交：${assignment.data.name}`}
-        description="查看当前修订并导入教师代提交。"
+        description="查看当前修订，上传手写作业或导入教师代提交。"
         action={<Link className="text-sm text-primary hover:underline" to={`/teacher/assignments/${assignmentId}/grading`}>批改与复核</Link>}
       />
+      <Card>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="grid gap-2 text-sm font-medium">
+            学生 ID
+            <Input
+              value={studentId}
+              onChange={(event) => setStudentId(event.target.value)}
+              placeholder="student-1"
+            />
+          </label>
+          <label className="grid gap-2 text-sm font-medium">
+            手写作业文件
+            <input
+              type="file"
+              accept=".txt,.md,.csv,.pdf,.jpg,.jpeg,.png,.webp,.zip"
+              onChange={(event) => setSubmissionFile(event.target.files?.[0] ?? null)}
+              className="block w-full text-sm"
+            />
+          </label>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          图片和扫描 PDF 会先 OCR；识别出的姓名或学号不会覆盖这里指定的学生 ID。
+        </p>
+        <Button
+          className="mt-3"
+          onClick={uploadSubmission}
+          disabled={uploadMutation.isPending || !studentId.trim() || !submissionFile}
+        >
+          {uploadMutation.isPending ? "识别并导入中…" : "识别并导入"}
+        </Button>
+        {uploadMutation.data ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            已创建第 {uploadMutation.data.revision_number} 个提交版本。
+          </p>
+        ) : null}
+      </Card>
       <Card>
         <label className="grid gap-2 text-sm font-medium">
           批量导入 JSON

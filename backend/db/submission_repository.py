@@ -56,6 +56,32 @@ def _submission_to_dto(record: SubmissionRecord, revision: SubmissionRevisionRec
     )
 
 
+def _require_open_assignment(session, assignment_id: str, student_id: str) -> AssignmentRecord:
+    """Authorize a student submission without creating any rows."""
+    assignment = session.scalar(
+        select(AssignmentRecord).where(AssignmentRecord.id == assignment_id)
+    )
+    if assignment is None:
+        raise NotFound("assignment")
+    enrolled = session.scalar(
+        select(CourseEnrollmentRecord).where(
+            CourseEnrollmentRecord.course_id == assignment.course_id,
+            CourseEnrollmentRecord.student_id == student_id,
+        )
+    )
+    if enrolled is None:
+        raise Forbidden("not_enrolled")
+    if assignment.status != education.AssignmentStatus.PUBLISHED.value:
+        raise AssignmentClosed("assignment_closed")
+    return assignment
+
+
+def validate_submission_access(assignment_id: str, *, student_id: str) -> None:
+    """Validate enrollment/open state before an expensive OCR or LLM call."""
+    with session_scope() as session:
+        _require_open_assignment(session, assignment_id, student_id)
+
+
 def create_submission(assignment_id: str, *, student_id: str) -> education.SubmissionDTO:
     """Create the (single) current submission for a student, gated by enrollment
     and by the assignment being open for submissions.
@@ -65,23 +91,7 @@ def create_submission(assignment_id: str, *, student_id: str) -> education.Submi
     """
     now = time.time()
     with session_scope() as session:
-        assignment = session.scalar(
-            select(AssignmentRecord).where(AssignmentRecord.id == assignment_id)
-        )
-        if assignment is None:
-            raise NotFound("assignment")
-        # Enrollment is the authorization source; an unenrolled student (or any
-        # non-student) may not open a submission.
-        enrolled = session.scalar(
-            select(CourseEnrollmentRecord).where(
-                CourseEnrollmentRecord.course_id == assignment.course_id,
-                CourseEnrollmentRecord.student_id == student_id,
-            )
-        )
-        if enrolled is None:
-            raise Forbidden("not_enrolled")
-        if assignment.status != education.AssignmentStatus.PUBLISHED.value:
-            raise AssignmentClosed("assignment_closed")
+        _require_open_assignment(session, assignment_id, student_id)
         existing = session.scalar(
             select(SubmissionRecord).where(
                 SubmissionRecord.assignment_id == assignment_id,
