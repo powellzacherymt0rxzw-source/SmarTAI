@@ -18,6 +18,7 @@ import {
   useExperts,
   useProblemSourceLibrary,
   useProblemSourcePreflight,
+  useQuestionPreparationCapabilities,
   useStartQuestionPreparation,
   useTask,
 } from "@/api/hooks";
@@ -72,6 +73,7 @@ export function AddProblemsPage() {
   const { locale } = useI18n();
   const restored = getRestoredDraft(location.state, taskId);
   const taskQuery = useTask(taskId);
+  const capabilitiesQuery = useQuestionPreparationCapabilities(taskId);
   const expertsQuery = useExperts();
   const preflight = useProblemSourcePreflight();
   const startPreparation = useStartQuestionPreparation();
@@ -287,6 +289,7 @@ export function AddProblemsPage() {
                 taskReady={taskQuery.isSuccess}
                 disabled={isBusy}
                 hasTaskCourse={Boolean(taskQuery.data?.course_id)}
+                acceptedExtensions={capabilitiesQuery.data?.source_roles[source.role]?.accepted_extensions}
                 locale={locale}
                 onUpdate={(patch) => updateSource(source.id, patch)}
                 onRemove={() => removeSource(source.id)}
@@ -316,6 +319,11 @@ export function AddProblemsPage() {
               {enabledExperts.length
                 ? tx(locale, `已启用 ${enabledExperts.length} 个模型；未上传的标答和评分标准会由 AI 生成。`, `${enabledExperts.length} model(s) enabled. Missing answers and rubrics will be generated.`)
                 : tx(locale, "尚未启用模型；点击主按钮可查看原因并前往 BYOK。", "No model is enabled. Use the main button to open BYOK guidance.")}
+            </p>
+            <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+              {capabilitiesQuery.data?.reader.ocr
+                ? tx(locale, "文件能力由当前识别服务动态提供。", "Available file readers are provided by the active recognition service.")
+                : tx(locale, "当前支持可复制文本的 PDF、TXT 与 Markdown；图片、扫描 PDF、OCR 和 DOCX 尚未接入。", "Currently supports selectable-text PDF, TXT and Markdown. Images, scanned PDFs, OCR and DOCX are not connected yet.")}
             </p>
           </div>
           <button
@@ -374,6 +382,7 @@ function SourceEditor({
   taskReady,
   disabled,
   hasTaskCourse,
+  acceptedExtensions,
   locale,
   onUpdate,
   onRemove,
@@ -384,6 +393,7 @@ function SourceEditor({
   taskReady: boolean;
   disabled: boolean;
   hasTaskCourse: boolean;
+  acceptedExtensions?: string[];
   locale: string;
   onUpdate: (patch: Partial<SourceDraft>) => void;
   onRemove: () => void;
@@ -398,7 +408,13 @@ function SourceEditor({
   );
   const libraryItems: ProblemLibraryMaterial[] = libraryQuery.data?.items ?? [];
   const libraryLoading = libraryQuery.isFetching;
-  const accept = source.role === "programming_tests" ? ".pdf,.txt,.md,.json" : ".pdf,.txt,.md";
+  const accept = (
+    acceptedExtensions?.length
+      ? acceptedExtensions
+      : source.role === "programming_tests"
+        ? [".pdf", ".txt", ".md", ".json"]
+        : [".pdf", ".txt", ".md"]
+  ).join(",");
 
   function selectFile(file?: File) {
     if (!file || disabled) return;

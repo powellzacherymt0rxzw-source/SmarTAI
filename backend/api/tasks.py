@@ -82,7 +82,11 @@ from backend.agents.ingest_agent import (
     generate_missing_question_materials,
 )
 from backend.agents.grading_agent import grade_batch
-from backend.agents.question_preparation_agent import prepare_question_packages
+from backend.agents.question_preparation_agent import (
+    QUESTION_PREPARATION_STAGE_SEQUENCE,
+    QUESTION_PREPARATION_WORKFLOW,
+    prepare_question_packages,
+)
 from backend.tools.file_processing import (
     decode_text_bytes, extract_files_from_archive, extract_text_from_pdf,
 )
@@ -510,6 +514,12 @@ def _grading_setup_payload(
     return payload
 _AI_COMPLETION_MAX_GENERATED_BYTES = 2 * 1024 * 1024
 _PROBLEM_SOURCE_EXTENSIONS = {".pdf", ".txt", ".md", ".json"}
+_QUESTION_PREPARATION_EXTENSIONS_BY_ROLE = {
+    "problem": [".pdf", ".txt", ".md"],
+    "reference_answer": [".pdf", ".txt", ".md"],
+    "rubric": [".pdf", ".txt", ".md"],
+    "programming_tests": [".pdf", ".txt", ".md", ".json"],
+}
 _PROBLEM_SOURCE_MAX_CHARACTERS = 400_000
 _PROBLEM_SOURCE_MAX_ESTIMATED_TOKENS = 120_000
 _INLINE_RUBRIC_MAX_CHARACTERS = 12_000
@@ -552,15 +562,33 @@ _HINT_QUESTION_PATTERNS = (
 
 async def _read_problem_source_upload(
     file: UploadFile,
+    *,
+    accepted_extensions: Optional[List[str]] = None,
 ) -> tuple[str, str, bytes, str, str]:
     """Validate and decode a Q-01 source without claiming OCR support."""
 
     filename = Path(file.filename or "").name.strip()
     extension = Path(filename).suffix.casefold()
-    if not filename or extension not in _PROBLEM_SOURCE_EXTENSIONS:
+    allowed_extensions = set(accepted_extensions or _PROBLEM_SOURCE_EXTENSIONS)
+    if not filename or extension not in allowed_extensions:
+        detail: Any
+        if accepted_extensions is None:
+            # Preserve the legacy course-material/import contract. The unified
+            # question-preparation endpoint opts into the structured capability
+            # error by passing its role-specific extension list.
+            detail = (
+                "Unsupported problem source type. Allowed: PDF, TXT, MD, JSON. "
+                "DOCX and OCR/images are not supported yet."
+            )
+        else:
+            detail = {
+                "code": "problem_source_unsupported",
+                "accepted_extensions": sorted(allowed_extensions),
+                "ocr_available": False,
+            }
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported problem source type. Allowed: PDF, TXT, MD, JSON. DOCX and OCR/images are not supported yet.",
+            detail=detail,
         )
     body = await file.read(_PROBLEM_SOURCE_MAX_BYTES + 1)
     if not body:
@@ -816,6 +844,7 @@ def _problem_extraction_gate_response(
     current_task: Optional[Task],
     *,
     expected_workflow_revision: int,
+    operation: str = "problem_extraction",
 ) -> Optional[Dict[str, Any]]:
     """Map a problem-extraction gate outcome to its public API contract."""
 
@@ -829,6 +858,8 @@ def _problem_extraction_gate_response(
             "job_id": current_task.extract_job_id,
             "task_id": current_task.task_id,
             "workflow_revision": current_task.workflow_revision,
+            "operation": operation,
+            "progress_contract_version": 1,
         }
     if outcome == "already_done":
         return {
@@ -838,6 +869,8 @@ def _problem_extraction_gate_response(
             "task_id": current_task.task_id,
             "problem_count": len(current_task.problem_data),
             "workflow_revision": current_task.workflow_revision,
+            "operation": operation,
+            "progress_contract_version": 1,
         }
     if outcome == "different_source_running":
         raise HTTPException(
@@ -1650,6 +1683,52 @@ def list_problem_source_library(
     }
 
 
+@router.get("/{task_id}/question-preparation/capabilities")
+def get_question_preparation_capabilities(
+    task_id: str,
+    current: User = Depends(require_teacher),
+    task_store: TaskStore = Depends(get_task_store),
+):
+    """Return the factual reader and progress contract used by Q01.
+
+    The frontend consumes this contract instead of implying support from a
+    file picker. When an OCR provider lands, the backend can extend the role
+    extensions and insert OCR/layout stages without another page redesign.
+    """
+
+    task = _get_or_404(task_store, task_id)
+    _check_owner(task, current)
+    return {
+        "contract_version": 1,
+        "operation": QUESTION_PREPARATION_WORKFLOW,
+        "stage_sequence": list(QUESTION_PREPARATION_STAGE_SEQUENCE),
+        "source_roles": {
+            role: {
+                "accepted_extensions": extensions,
+                "course_library": True,
+                "inline_text": role == "rubric",
+            }
+            for role, extensions in _QUESTION_PREPARATION_EXTENSIONS_BY_ROLE.items()
+        },
+        "reader": {
+            "selectable_text_pdf": True,
+            "plain_text": True,
+            "markdown": True,
+            "json_programming_tests": True,
+            "ocr": False,
+            "vision": False,
+            "scanned_pdf": False,
+            "images": False,
+            "docx": False,
+        },
+        "limits": {
+            "max_file_bytes": _PROBLEM_SOURCE_MAX_BYTES,
+            "max_text_characters": _PROBLEM_SOURCE_MAX_CHARACTERS,
+            "max_inline_rubric_characters": _INLINE_RUBRIC_MAX_CHARACTERS,
+        },
+    }
+
+
 @router.post("/{task_id}/problem-sources/preflight")
 @router.post("/{task_id}/question-preparation/sources/preflight")
 async def preflight_problem_source(
@@ -1706,7 +1785,10 @@ async def preflight_problem_source(
     saved_material: Optional[CourseMaterial] = None
     saved_material_created = False
     if file is not None:
-        filename, content_type, raw_bytes, text, content_sha256 = await _read_problem_source_upload(file)
+        filename, content_type, raw_bytes, text, content_sha256 = await _read_problem_source_upload(
+            file,
+            accepted_extensions=_QUESTION_PREPARATION_EXTENSIONS_BY_ROLE[role],
+        )
         source_kind: Literal["upload", "library", "inline_text"] = "upload"
         source_size_bytes = len(raw_bytes)
         if save_to_library:
@@ -3259,8 +3341,10 @@ async def _run_question_preparation(
             remove_reporter(superseded_job_id)
         from backend.api.analytics import clear_task_analytics_cache
         clear_task_analytics_cache(task_id)
-        await reporter.set_current_step(
-            "completed",
+        await reporter.set_stage_progress(
+            "committing_question_packages",
+            total_steps=len(QUESTION_PREPARATION_STAGE_SEQUENCE),
+            completed_steps=len(QUESTION_PREPARATION_STAGE_SEQUENCE),
             message="Question materials are ready for teacher review.",
         )
         await reporter.set_phase("done")
@@ -3355,6 +3439,7 @@ async def start_question_preparation(
         inspected_outcome,
         inspected_task,
         expected_workflow_revision=req.expected_workflow_revision,
+        operation=QUESTION_PREPARATION_WORKFLOW,
     )
     if inspected_response is not None:
         return inspected_response
@@ -3378,6 +3463,7 @@ async def start_question_preparation(
         outcome,
         current_task,
         expected_workflow_revision=req.expected_workflow_revision,
+        operation=QUESTION_PREPARATION_WORKFLOW,
     )
     if existing_response is not None:
         return existing_response
@@ -3414,6 +3500,8 @@ async def start_question_preparation(
         "request_fingerprint": fingerprint,
         "workflow_revision": current_task.workflow_revision,
         "source_count": len(drafts),
+        "operation": QUESTION_PREPARATION_WORKFLOW,
+        "progress_contract_version": 1,
     }
 
 
@@ -4428,7 +4516,10 @@ async def task_state(
     out["progress"] = progress
     out["active_job_id"] = active_job_id
     out["active_operation"] = (
-        "material_import" if t.material_import_job_id
+        QUESTION_PREPARATION_WORKFLOW if t.status == "extracting_problems"
+        else "submission_recognition" if t.status == "parsing_submissions"
+        else "grading" if t.status == "grading"
+        else "material_import" if t.material_import_job_id
         else "ai_completion" if t.ai_completion_job_id
         else None
     )

@@ -19,7 +19,7 @@ import asyncio
 from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from threading import RLock
-from typing import Optional, Deque
+from typing import Optional, Deque, Sequence
 
 from backend.config import settings
 from backend.models import JobProgress, ActiveUnit, ProgressEvent
@@ -36,6 +36,7 @@ class ProgressReporter:
     def __init__(self, job_id: str, total_students: int = 0, total_questions: int = 0):
         self.job_id = job_id
         self._progress = JobProgress(
+            job_id=job_id,
             total_students=total_students,
             total_questions=total_questions,
         )
@@ -55,6 +56,44 @@ class ProgressReporter:
         async with self._lock:
             self._progress.total_students = students
             self._progress.total_questions = questions
+
+    async def configure_workflow(
+        self,
+        workflow: str,
+        stage_sequence: Sequence[str],
+    ) -> None:
+        """Publish the stable workflow contract before reporting stage progress.
+
+        The sequence is owned by the outer orchestration job. Nested skills may
+        emit messages and factual counters, but must not replace this contract.
+        This keeps polling clients forward-compatible when the backend inserts
+        real stages such as OCR or layout analysis later.
+        """
+
+        normalized_workflow = workflow.strip()
+        normalized_stages = [stage.strip() for stage in stage_sequence]
+        if not normalized_workflow:
+            raise ValueError("workflow must not be empty")
+        if not normalized_stages or any(not stage for stage in normalized_stages):
+            raise ValueError("stage_sequence requires named stages")
+        if len(set(normalized_stages)) != len(normalized_stages):
+            raise ValueError("stage_sequence must not contain duplicates")
+
+        async with self._lock:
+            if self._progress.started_at is None:
+                self._progress.started_at = time.time()
+            if (
+                self._progress.workflow is not None
+                and self._progress.workflow != normalized_workflow
+            ):
+                raise ValueError("workflow cannot change after progress starts")
+            if (
+                self._progress.stage_sequence
+                and self._progress.stage_sequence != normalized_stages
+            ):
+                raise ValueError("stage_sequence cannot change after progress starts")
+            self._progress.workflow = normalized_workflow
+            self._progress.stage_sequence = normalized_stages
 
     async def increment_completed(self) -> None:
         async with self._lock:
@@ -83,6 +122,14 @@ class ProgressReporter:
             raise ValueError("current_step must not be empty")
 
         async with self._lock:
+            if self._progress.stage_sequence:
+                if current_step not in self._progress.stage_sequence:
+                    raise ValueError("current_step is not part of the configured workflow")
+                if total_steps != len(self._progress.stage_sequence):
+                    raise ValueError("total_steps must match the configured workflow")
+                previous_completed = self._progress.completed_steps
+                if previous_completed is not None and completed_steps < previous_completed:
+                    raise ValueError("completed_steps must not move backwards")
             if self._progress.started_at is None:
                 self._progress.started_at = time.time()
             self._progress.current_step = current_step

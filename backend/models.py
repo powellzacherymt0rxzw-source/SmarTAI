@@ -322,6 +322,14 @@ class ProgressEvent(BaseModel):
 
 class JobProgress(BaseModel):
     """Fine-grained progress for a grading job, polled by frontend."""
+    contract_version: int = Field(
+        default=1,
+        description="Backward-compatible progress snapshot contract version.",
+    )
+    job_id: Optional[str] = Field(
+        default=None,
+        description="Job identity repeated inside the snapshot to prevent stale-cache mixups.",
+    )
     phase: Literal[
         "pending",
         "ingesting",
@@ -342,6 +350,14 @@ class JobProgress(BaseModel):
     # or page counts. They remain None until a workflow explicitly reports
     # stage progress.
     started_at: Optional[float] = None
+    workflow: Optional[str] = Field(
+        default=None,
+        description="Stable operation identifier used by clients to select the correct progress UI.",
+    )
+    stage_sequence: List[str] = Field(
+        default_factory=list,
+        description="Backend-owned ordered stage codes for the active workflow.",
+    )
     current_step: Optional[str] = None
     total_steps: Optional[int] = None
     completed_steps: Optional[int] = None

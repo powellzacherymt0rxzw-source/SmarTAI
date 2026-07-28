@@ -6,7 +6,7 @@
 >
 > 视觉与页面结构以 `docs/20260710/figma/` 的 17 张导出图为基准；功能、状态和边界必须同时对照 2026-07-03 计划、2026-07-04 完整设计记录及其附录原话、2026-07-10 最新纠偏基线和 2026-07-11 用户补充。
 >
-> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 原阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02、A-00、K00/K01、G05、G06 与 G00 记录位于 `docs/20260724/`；2026-07-26 当前任务编辑/BYOK 纠正记录见 `docs/20260726/G07_TASK_METADATA_AND_BYOK_CORRECTION_STAGE_CN.md`。Q01–Q03 最新后端唯一实施契约见 `docs/20260726/Q01_Q03_UNIFIED_QUESTION_PREPARATION_BACKEND_PLAN_CN.md`，本轮工程记录见 `docs/20260726/Q01_Q03_UNIFIED_PREPARATION_IMPLEMENTATION_STAGE_CN.md`。2026-07-27 单一学生校对 URL、Q03 定位纠正和 C01 同页任务资料记录见 `docs/20260727/Q03_S01_S05_WORKFLOW_CORRECTION_STAGE_CN.md`；同日更新的“上传作答 → 校对作答 → 批改设置 → 5 秒任务摘要”唯一最新流程见 `docs/20260727/S01_S05_C01_C02_SUBMISSION_TO_GRADING_REALIGNMENT_STAGE_CN.md`；S05/R01 共用矩阵与待处理队列的最新覆盖见 `docs/20260727/S05_R01_MATRIX_QUEUE_ALIGNMENT_STAGE_CN.md`。
+> R1 进入代码前的逐页决定见 `docs/20260711/R1_PAGE_DECISION_CARDS_CN.md`；Q-01 原阶段决定与验收口径见 `docs/20260715/Q01_ADD_PROBLEMS_STAGE_DECISION_AND_ACCEPTANCE_CN.md`；S-01 至 S-04 的阶段记录位于 `docs/20260723/`；S-05、C-02、C-03、R-01、R-02、A-00、K00/K01、G05、G06 与 G00 记录位于 `docs/20260724/`；2026-07-26 当前任务编辑/BYOK 纠正记录见 `docs/20260726/G07_TASK_METADATA_AND_BYOK_CORRECTION_STAGE_CN.md`。Q01–Q03 最新后端唯一实施契约见 `docs/20260726/Q01_Q03_UNIFIED_QUESTION_PREPARATION_BACKEND_PLAN_CN.md`，本轮工程记录见 `docs/20260726/Q01_Q03_UNIFIED_PREPARATION_IMPLEMENTATION_STAGE_CN.md`。2026-07-27 单一学生校对 URL、Q03 定位纠正和 C01 同页任务资料记录见 `docs/20260727/Q03_S01_S05_WORKFLOW_CORRECTION_STAGE_CN.md`；同日更新的“上传作答 → 校对作答 → 批改设置 → 10 秒任务摘要”唯一最新流程见 `docs/20260727/S01_S05_C01_C02_SUBMISSION_TO_GRADING_REALIGNMENT_STAGE_CN.md`；S05/R01 共用矩阵与待处理队列的最新覆盖见 `docs/20260727/S05_R01_MATRIX_QUEUE_ALIGNMENT_STAGE_CN.md`。2026-07-28 的最终代码—文档审计和两类后端交接见 `docs/20260728/FRONTEND_DOCUMENT_AUDIT_AND_BACKEND_HANDOFF_STAGE_CN.md`。
 >
 > 当前阶段：Figma 16 正式结果工作区已统一为顶部五个大入口，A03/A05 共用题号目录、搜索、上下题切换与输入法门禁；Figma 17 的题目/作答/批改/结果/图表/报告错误也已收敛为同一可恢复状态合同。工程回归完成，真实 provider 限流重放、持久化与用户逐页视觉签收仍按边界保留。
 
@@ -105,7 +105,7 @@
 | D-06 | 历史任务支持标签、学期、课程、状态、未完成等结构化与自然语言筛选 | 已确认 | 课程是系统标签。 |
 | D-07 | 添加题目支持上传/课程资料库，并支持“已按题整理/从原文提取” | 已确认 | 原文提取需要章节/题号等说明输入。 |
 | D-08 | 学生和题目是两个互不干扰的筛选/导航维度 | 已确认 | 左右切学生，上下切题目。 |
-| D-09 | 学生详情同时支持“全部题目长视图”和“单题切换视图” | 已确认 | 进入来源决定默认视图。 |
+| D-09 | 学生详情只保留“当前学生全部筛选题目连续视图” | 已确认 | `question` 只负责首次定位；题号目录、题卡按钮和上下键均在同一长页内定位，不维护单题模式或第二套 URL。 |
 | D-10 | 正式结果拆成总览、题目分析、学生分析、可视化分析、报告与下载五个独立子页 | 已确认 | 2026-07-27 最终覆盖：五项使用顶部等宽大入口；为详情左侧题号目录保留内容宽度。 |
 | D-11 | Figma 16 不足以承载最终结果，只保留其视觉语言和完成/下载状态 | 已确认 | 新结果 shell 参考旧代码信息架构。 |
 | D-12 | 学期选项始终包含下一学期，最早从 `2025-2026 秋季学期` 开始 | 已确认 | 月份映射只服务默认选择，不要求达到学校教务校历精度。 |
@@ -128,7 +128,7 @@
 | 04 Add Problems | 上传优先、资料库来源、识别摘要、单一开始 CTA | 新增 `已按题整理 / 从原文提取`；原文提取增加章节/题号说明和候选确认。 |
 | 08 Bulk Material Import | 两种文档结构选择的交互语言 | 继续用于资料导入；其结构选择能力同时复用到题目来源，但两个页面业务对象不同。 |
 | 14 Results Overview | 复核指标、热力图、复核队列、精确入口 | 明确为教师确认前 `/review`，增加结构化/自然语言筛选和真实复核门禁。 |
-| 15 Review Detail | 学生作答、AI理由、教师最终结果层、双维概念 | 重做导航位置；学生/题目独立智能筛选；方向键；全部题目/单题两种学生视图。 |
+| 15 Review Detail | 学生作答、AI理由、教师最终结果层、双维概念 | 重做导航位置；学生/题目独立智能筛选；左右切学生、上下定位题目；只保留单学生全题连续视图。 |
 | 16 Analysis Export Finalized | 完成状态、摘要图表、下载/过期语义和视觉语言 | 不能继续作为单页终点；扩展为正式结果 shell + 总览/题目/学生/可视化/报告多页。 |
 | 17 Recoverable Errors | BYOK、限流、解析失败及恢复动作 | 作为跨页状态组件规格，不做同时展示多种错误的真实页面；BYOK 入口连接真实用户隔离配置。 |
 
@@ -224,8 +224,8 @@
 - [ ] BE-AI-03 学生与题目筛选分别维护，不因一维查询清空另一维选择。
 - [ ] BE-AI-04 查询覆盖全量或服务端聚合数据，不只取前 50 名学生。
 - [~] BE-AI-05 保存教师 final result overlay、复核状态、审计信息和版本。进展：2026-07-24；R02 逐格覆盖与 A00 任务级 `final_result_version/fingerprint/updated_by/dirty`、不可变快照和 stale 规则均已完成；仍为进程内存且缺数据库事务/持久审计，因此保持 `[~]`。
-- [ ] BE-AI-06 教师确认后生成正式分析/报告；之后修改 final result 会使产物标记 stale。
-- [ ] BE-AI-07 扩展安全 ChartOutput；heatmap 使用明确 `x/y/z` schema，不开放任意 Plotly JSON。
+- [~] BE-AI-06 教师确认后生成正式分析/报告；之后修改 final result 会使产物标记 stale。工程完成边界：正式结果不可变版本、确定性报告/下载产物、幂等生成和改分后 `stale` 已接入；真正异步分析 Agent、数据库事务和对象存储仍待后端完成。
+- [~] BE-AI-07 扩展安全 ChartOutput；不开放任意 Plotly JSON。工程完成边界：`bar/scatter/pie/histogram/box` 已由 Pydantic 白名单约束并有未知 trace 拒绝测试；学生×题目热力图当前由正式结果本地确定性渲染，若开放 AI heatmap，仍需新增明确 `x/y/z` schema。
 
 ### 3.5 题目原文提取
 
@@ -242,8 +242,8 @@
 为唯一实施契约。以下项目取代“先抽题 → Q08 导入 → Q09 补缺”的前端流程，
 但旧实现的 owner 隔离、token、候选、CAS、provenance 和失败恢复合同必须复用。
 
-- [ ] BE-PREP-01 建立四类来源 manifest：`problem / reference_answer / rubric / programming_tests`；四类均支持多来源，题目至少一份，其余可空；每份来源独立保存上传/资料库、按题/原文、提取说明、hash、顺序和 owner/task/role-bound token。
-- [ ] BE-PREP-02 建立唯一 `QuestionPreparationAgent` 与一个幂等 Job；一次完成题目结构识别、资料匹配、缺项生成、标答过程扩展、rubric 步骤关联、编程测试准备、风险检测和原子提交，并全程上报 `ProgressReporter` 事实子步骤。
+- [~] BE-PREP-01 建立四类来源 manifest：`problem / reference_answer / rubric / programming_tests`；四类均支持多来源，题目至少一份，其余可空。工程完成边界：四类均可独立预检并生成 owner/task/role-bound token，支持上传/资料库、按题/原文、说明、hash 和多 token 启动；当前 manifest/draft 仍为内存短期对象，尚未形成持久 repository 与显式顺序模型。
+- [~] BE-PREP-02 建立唯一 `QuestionPreparationAgent` 与一个幂等 Job；一次完成题目结构识别、资料匹配、缺项生成、标答过程扩展、rubric 对齐、编程测试准备、风险检测和原子提交。工程完成边界：统一 Agent、单 Job、八个事实阶段、嵌套 skill 不重置进度和提交后才 8/8 已实现；稳定 rubric-step 引用与更完整冲突合并仍属 BE-PREP-03/04。
 - [ ] BE-PREP-03 将松散 `stem/criterion/reference_answer/test_cases` 升级为带 origin、source IDs、confidence、review status、issue IDs 和 field version 的题目知识包；标答使用稳定 solution step，rubric item 显式引用 answer step。
 - [ ] BE-PREP-04 多来源一致时合并 provenance；不一致时保留 alternatives 并产生 `source_conflict`，不按上传顺序覆盖。正常 AI 生成资料不标为 missing；只有生成失败或必需字段无效才阻断。
 - [ ] BE-PREP-05 编程题测试采用 OJ 结构：公开样例/隐藏测试、stdin/function、输入、期望输出、解释、来源、置信度和参考解运行状态；非编程题序列化完全省略 programming/tests。
@@ -263,9 +263,9 @@
 - [x] UI-SHELL-03 顶栏选中项只在入口本身表达，不显示重复页面胶囊。完成：2026-07-13 16:29 UTC+8；当前项使用字重、主色和克制浅底，用户确认按该标准继续后归档完成。
 - [x] UI-SHELL-04 用户名左侧显示紧凑模型配置入口；点击打开模型摘要。完成：2026-07-13 16:29 UTC+8；接入真实 `useExperts()`，只显示 provider/model/enabled 和已配置且启用数，加载、失败、空状态与重试均已验证；enabled 不代表供应商实时在线验证。
 - [x] UI-SHELL-05 用户名菜单包含账户设置、模型与 BYOK、退出登录。完成：2026-07-13 16:29 UTC+8；`/settings/account`、`/settings/byok` 与旧路径兼容重定向已建立，退出/会话失效会清空用户态 Query cache，菜单交互已验证。
-- [~] UI-SHELL-06 建立任务上下文栏：返回、任务名、当前阶段、保存状态、阶段门禁。Q-01 已在标题同一行提供可见任务名/返回入口，并修正非草稿题目阶段的 gate/回链；其他任务页仍需随各自阶段统一，故本项保持 `[~]`。
-- [ ] UI-SHELL-07 建立局部侧栏/局部 tabs 组件，只供复杂工作区使用，不恢复全局固定侧栏。
-- [ ] UI-SHELL-08 建立智能选择器、标签选择器、SmartQueryBar、对象导航器、图表容器等共用组件。
+- [x] UI-SHELL-06 建立任务上下文与阶段门禁。完成：所有八步任务页共用 `NewTaskStepper` 和 task destination/state 规则；已完成步骤可回溯、未来步骤禁用，任务编辑与安全 `returnTo` 回链统一，运行中/失败/完成状态使用共享恢复合同。
+- [x] UI-SHELL-07 建立只供复杂工作区使用的局部导航，不恢复全局固定侧栏。完成：Q03、S05、R02、A03、A05 使用独立滚动题号目录；正式结果五项使用顶部局部导航；矩阵工作区使用共享 `MatrixQueueWorkspace`。
+- [x] UI-SHELL-08 建立可复用的智能选择、标签、对象导航和图表工作区组件。完成：课程/标签使用 `SmartCatalogField`，历史使用 `HistoryFilters`，作答/复核共用矩阵状态组件，题目详情共用 `ResultQuestionSidebar`，结果页使用同一筛选/图表模型；为避免强耦合，不强制合并为一个“万能 SmartQueryBar”。
 - [x] UI-SHELL-09 中文/英文分别完整显示，不混排；所有本阶段新文案进入 i18n。完成：2026-07-13 16:29 UTC+8；产品壳与工作台文案已全部进入 i18n，并同步更新 `<html lang>`；其他页面继续按各自阶段验收。
 - [x] UI-SHELL-10 本阶段顶栏与下拉支持键盘、焦点、缩放和移动端折叠。完成：2026-07-13 16:29 UTC+8；顶栏、弹出菜单和移动抽屉支持 focus-visible、Escape、点击外部关闭、焦点返回及滚动锁；尚未创建的局部侧栏/筛选器不计入本项。
 
@@ -465,7 +465,7 @@
 
 ### Q-02 至 Q-09
 
-- [~] Q02 题目识别进度独立 route，显示事实步骤、进度、最近事件、后台运行与恢复动作。工程完成：2026-07-16；不再渲染旧 `TaskUploadPage`，Figma 05 的居中 `800×430` 进度卡已落地；后端新增四项事实阶段字段，没有真实页数/ETA 时不伪造。`1440×900` PNG 与真实阶段渲染通过，等待用户视觉确认。
+- [~] Q02 题目资料准备进度独立 route，显示事实步骤、进度、最近事件、后台运行与恢复动作。工程更新：2026-07-28；不再渲染旧 `TaskUploadPage`，Figma 05 的居中进度卡已落地；统一 Job 由后端发布八阶段有序契约，内层抽题不再覆盖外层 phase 或提前完成，没有真实页数/ETA 时不伪造。等待用户视觉确认。
 - [~] Q03 题目准备总览改为完整资料矩阵并以风险状态覆盖。工程与浏览器验收更新：2026-07-27；0 风险时仍列出全部题目，题目/AI 生成资料显示绿色“已识别/已生成”，非编程测试显示中性“不适用”；风险只覆盖对应状态和审核提示。独占搜索支持 Safari IME 与“积分题”等可解释别名，表头支持双向排序，题型列支持多选。等待用户视觉确认。
 - [~] Q04–Q07 题目知识包连续审核页。工程与浏览器验收完成：2026-07-26；左侧可滚动题号目录与正文联动，每题一次显示题干、标答/步骤、对应评分标准，只有编程题出现 OJ 测试区；各字段独立编辑，前后题只滚动定位，底部一次确认，浏览态 KaTeX/编辑态源码均通过。结构化 step ID 与 confirm-all 独立 API 仍待后端，等待用户视觉确认。
 - [~] Q08 批量导入底层能力迁入 Q01。原 `preflight -> plan -> review -> CAS apply`、按题/原文结构和冲突保护合同可复用；2026-07-26 起不再作为 Q03 的“补缺”主入口，待 Q01 四资料位接入后旧 route 做迁移/重定向。
@@ -543,7 +543,7 @@
 - [~] S03 作答校对总览只显示学生 x 题目矩阵、筛选和分流。工程与浏览器验收完成：2026-07-27；所有学号、单元格和“查看”入口统一进入同一个学生连续校对 route，并用 query 精确定位题目，不再分流到两套页面。
 - [~] S04/S05 已合并为一套学生作答连续校对页。canonical route 为 `/tasks/:id/students/:sid?question=:qid`；单学生指标、身份修正、学生直选、题目搜索、左侧独立滚动题号栏、全部题目连续渲染、LaTeX 浏览/源码编辑、键盘导航和真实答案 CAS 均保留。2026-07-27 增加异常学生着色、逐题持久“已复核”和修改后自动重开；S05 总览进一步与 R01 共用 `1fr + 280px` 矩阵/队列工作区、紧凑图标状态格和学号/姓名/查看列。旧 `/questions/:qid` route 与旧总览组件已删除，等待用户视觉确认。
 - [~] C01 批改配置合同保留，默认简单、高级折叠；归属顶部第 6“执行批改”，不再内嵌 S01。主动作“开启 SmarTAI 批改”保存后进入 C02 摘要；任务级无密钥配置、真实批改消费链和共享池安全边界不变，等待用户视觉确认。
-- [~] C02 批改任务摘要只读汇总，不成为第二个配置页。2026-07-27 增加明确 5 秒自动启动、进度线、“返回修改批改设置”和“立即开始批改”，两种开始方式共用幂等启动函数；Figma 12 几何、真实任务/设置摘要、task-scoped 回链和历史快照语义保留，等待用户视觉确认。
+- [~] C02 批改任务摘要只读汇总，不成为第二个配置页。2026-07-28 最终调整为明确 10 秒自动启动、进度线、“返回修改批改设置”和“立即开始批改”，两种开始方式共用幂等启动函数；真实任务/设置摘要、task-scoped 回链和历史快照语义保留，等待用户视觉确认。
 - [~] C03 批改进度独立页。工程与浏览器验收完成：2026-07-24；2026-07-27 修复第 6 步在 grading 状态绕回 C02 的回路，错误入口统一为带回链的“调整批改设置”，窄桌面流程条不再露出粗滚动条。Figma 13 几何、事实题次/ETA/队列、后台恢复及双尺寸证据保留，等待用户视觉确认。
 - [~] R01 “复核批改”总览采用 Figma 14 的热力图、指标和待复核队列。2026-07-27 最新覆盖：与 S05 共用 `1fr + 280px` 工作区，显式拆分学号/姓名、每行增加“查看”、题目状态改为占满单元格的可访问图标色块；队列显示全部真实待处理项；“查看批改详情 / 确认复核完成”统一置于右下页脚。等待用户视觉确认。
 - [~] R02 复核详情采用 Figma 15 的内容层级，并按最终纠偏统一为单学生全题连续工作区。两维独立 exact/related 筛选、方向键、左侧题号栏、完整 SmarTAI 结果、真实教师分数/评语覆盖层及 R01 回流已完成，等待用户视觉确认。
@@ -765,8 +765,8 @@
 ### A-05 学生详情 `/tasks/:id/results/students/:sid`
 
 - [~] A05-01 支持学号/姓名智能查找学生，上一位/下一位及左右键切换。工程完成：两行导航中的学生行提供 exact/related 搜索结果、直接下拉选择、独立清空、首尾按钮和左右键。
-- [~] A05-02 支持 `全部题目` 长视图和 `单题` 聚焦视图。工程完成：行详情默认全题长视图，逐题单元格直接聚焦；两种模式通过题目下拉和 URL `question` 切换。
-- [~] A05-03 单题模式支持题目智能筛选、上一题/下一题及上下键切换。工程完成：题号/题型/题干/透明语义别名 exact/related，下拉、上下键和首尾双组题目按钮均已实测。
+- [~] A05-02 只保留当前学生全部筛选题目的连续长视图。工程完成：逐题单元格和 URL `question` 只定位初始题目；不存在“单题/连续”模式切换或第二套详情分支。
+- [~] A05-03 连续视图支持题目智能筛选、题号目录、上一题/下一题及上下键定位。工程完成：题号/题型/题干/透明语义别名 exact/related、目录、上下键和题卡按钮已实测。
 - [~] A05-04 每题显示答案、得分/百分比、置信度、AI 理由、教师最终结果和复核状态。工程完成：另含题干、评分标准、专家数与合成方式；正式结果只读，不复制复核改分表单。
 - [~] A05-05 提供跳转到当前题目详情的按钮并保留学生上下文。工程完成：A05→A03 携带 `student/student_return`；A03 新增返回当前学生入口并在切题时保留，Alice/Q2 往返实测通过。
 - [~] A05-06 两维筛选、快捷键和返回上下文遵循 R02 同一组件。工程完成：沿用 R02 已验证的匹配函数与交互口径，A04 `return`、两维查询和当前题目均写入 URL；旧结果学生页文件和旧视觉已移除。
@@ -774,7 +774,7 @@
 ### 8.6 A-05 学生分析详情阶段工程记录（2026-07-24）
 
 - 详细决定与验收矩阵：`docs/20260724/A05_STUDENT_ANALYSIS_DETAIL_STAGE_DECISION_AND_ACCEPTANCE_CN.md`。
-- 页面职责：正式结果只读复看；学生与题目分行导航；全部题目长视图和单题聚焦并存，不建立第二套教师改分入口。
+- 页面职责（2026-07-27 最新覆盖）：正式结果只读复看；学生与题目分行导航；当前学生的全部筛选题目始终连续展示，`question` 只负责初始定位，不建立单题模式或第二套教师改分入口。
 - 交互证据：学生 `PB20111611` exact、`低置信` 6 个 related；题目 `Q2` exact、`积分题` 1 个 related；Alice/Q2 经 `→` 到 Bob/Q2，再经 `↓` 到 Bob/Q3。
 - 双向证据：A05 Alice/Q2 → A03 Q2 → A05 Alice/Q2 恢复；2026-07-27 删除旧 `/results/:sid` 兼容 route，只保留 `/results/students/:sid` canonical 路由，遗留 `TaskStudentDetailPage.tsx` 已删除。
 - 工程证据：visible-scope audit 扫描 79 文件、TypeScript、lint、Vite production build（`480 modules`）与 `git diff --check` 通过。
@@ -854,7 +854,7 @@
 - [~] QA-06 自然语言筛选解释、清空、无匹配、大班级、限流和错误恢复测试。进展：A02/A04/R01/R02/A08 已覆盖解释、清空、无匹配、中文 composition 与两维 URL 独立；R7 统一覆盖 BYOK、限流、文件、来源变化、workflow 冲突、网络与未知错误的恢复动作。真实大班级服务端筛选、真正语义检索和供应商限流重放仍待后端合同/测试 key。
 - [~] QA-07 图表类型、数据版本、空数据、单学生/单题和导出测试。进展：图表 schema 白名单、正式版本/历史版本、产物幂等与真实单项/ZIP 下载通过；既有浏览器 PNG 和打印入口通过。空数据、单学生与单题专门视觉 fixture 尚未完成，故不勾成 `[x]`。
 - [~] QA-08 BYOK 用户隔离、密钥掩码、外链和缺失门禁测试。进展：2026-07-27；G06A owner/shared 隔离、key 保留/脱敏、验证错误/CAS 和官方 HTTPS 白名单已有定向/全量后端回归，G06B 新增/修改/启停/验证确认/删除/外链/header 同源已有真实浏览器链路；R7 将缺失模型恢复统一到 `/settings/byok?returnTo=...`，返回当前任务时保留页面状态。真实 provider 成功验证与持久化重启测试仍未完成。
-- [~] QA-09 `1440x900` 逐帧对照 Figma；工程直接截图缺口已于 R6-08A 清零，Q07/R02 1440 与 Q08 390 已补；用户主观逐页确认仍待完成。
+- [~] QA-09 `1440x900` 逐帧对照 Figma；工程直接截图缺口已于 R6-08A 清零，Q07/R02 1440 与 Q08 390 已补。2026-07-28 用户明确本次收口不再要求复核 Figma，故该项作为历史验收记录保留，不计入“前端代码是否完整”的剩余项。
 - [~] QA-10 桌面/移动、键盘、焦点、对比度、缩放、读屏和 reduced-motion 检查。工程与自动浏览器验收完成：2026-07-24；焦点门禁、AA 语义色、reduced-motion、1280/既有 390 回流及核心 route 可访问名称均通过。原生 200% 与 VoiceOver/NVDA 留待用户终验。
 - [x] QA-11 新页面替代的旧可见 UI 已删除，旧深链只做 canonical 跳转；用户可见开发说明已清理并由 lint 门禁防回归。
 - [ ] QA-12 用户逐页验收全部通过；在此之前不得宣称“前端已完成”或“只剩美工”。
@@ -888,7 +888,7 @@
 - [~] QA-06：解释/清空/无匹配、中文输入和通用限流/错误恢复已完成；大班级服务端分页、真正语义检索和真实供应商限流仍依赖 SmartQuery/测试 key，不能由前端伪造。
 - [~] QA-07：图表类型、数据版本、正式/历史产物及单项/ZIP/PNG/打印路径已有证据；空数据、单学生/单题视觉 fixture 仍需补，因此不冒充全部终验。
 - [~] QA-08：BYOK 前端新增/修改/启停/删除、掩码、官方外链和缺失门禁已完成；仍待真实 provider 的低成本成功/限流验证与持久化重启测试，后两项不是纯前端工作。
-- [~] QA-09 / QA-10 / QA-12：现有双尺寸工程截图不等于用户逐页确认；仍需按页面完成主观 Figma 对照、原生 200%/VoiceOver 或 NVDA 抽查及最终逐页签收。在此之前继续禁止宣称“前端全部完成”。
+- [~] QA-09 / QA-10 / QA-12：2026-07-28 用户明确本轮不再复核 Figma，因此 QA-09 不计入代码完整度；原生 200%/VoiceOver 或 NVDA 抽查及最终逐页签收仍属于外部验收，不等于尚缺页面或交互。
 - 后端依赖但会影响前端最终体验：统一题目资料来源/置信度/冲突字段，SmartQuery 大数据与语义匹配，OCR/视觉识别，数据库/对象存储持久化，以及真实 provider 端到端成功与失败恢复。前端不得用假数据或额外按钮掩盖这些缺口。
 - 本轮工程证据：C01/C03 定向合同回归 `15 passed`，visible-scope audit `67` 个文件、TypeScript、Vite production build（`930 modules transformed`）、task-scoped 回链浏览器交互和 `git diff --check` 通过；详细记录见 C02/C03 阶段文档。
 
@@ -985,6 +985,27 @@
 - [x] BYOK-QA-01 `1280×720` 浏览器实测五列表头与数据单元格的 `x / width` 完全一致，中间三列均为 `text-align: center`、全部单元格为 `vertical-align: middle`，页面无横向溢出且控制台 `0 errors / 0 warnings`。
 - [x] BYOK-QA-02 使用本地一次性假配置完成表格、刷新与截图验收后立即删除，未调用真实 provider，也未留下测试密钥或配置。
 - 视觉证据：`smartai-byok-aligned.png`，位于当前 Codex 临时可视化目录。
+
+### 9.17 Q02 题目资料准备进度与能力契约收口（2026-07-28）
+
+- [x] Q02-PROGRESS-01 `question_preparation` 外层编排独占 Job 生命周期；旧 `extract_problems` 在嵌套模式只上报消息与题目数量，不再把八阶段进度重置为四阶段或提前写 `done`。
+- [x] Q02-PROGRESS-02 `JobProgress` v1 携带 `job_id / workflow / stage_sequence`；`completed_steps` 单调不减，最终 8/8 只在题目包原子提交成功后发布。
+- [x] Q02-PROGRESS-03 Q02 按后端阶段顺序动态展示并核对 active Job；启动后的缓存先行更新消除误回上传页，未知未来阶段不会倒退到第一步。
+- [x] Q01-CAPABILITY-01 新增 task-owner scoped 能力接口；Q01 的扩展名、格式说明和 OCR 状态以接口为准。当前如实开放文字型 PDF/TXT/MD、测试 JSON 和 rubric 自然语言，OCR/图片/扫描 PDF/DOCX 均为 false。
+- [x] Q02-FUTURE-OCR-01 前端已预留读取后端新增 OCR/扫描检测/归一化阶段的动态映射；以后实现 OCR 只需修改后端能力与阶段合同，不新增第二套上传或进度页。
+- [x] Q02-QA-01 后端相关回归 `59 passed, 1 skipped`、全量回归 `242 passed, 1 skipped`；前端 visible-scope/lint、TypeScript 与 Vite production build通过。未调用真实 provider，未把 OCR 未实现写成可用。
+- 详细合同与实现记录：`docs/20260726/Q01_Q03_UNIFIED_QUESTION_PREPARATION_BACKEND_PLAN_CN.md` 第 15 节、`docs/20260726/Q01_Q03_UNIFIED_PREPARATION_IMPLEMENTATION_STAGE_CN.md` 第 9 节。
+
+### 9.18 前端文档审计与后端交接收口（2026-07-28）
+
+- [x] DOC-AUDIT-01 对照当前 `frontend/app/src/main.tsx`、任务 stepper、主要工作区组件和 API/type 层核对 tracker；教师端 canonical route 与主要交互没有尚未搭建的页面。
+- [x] DOC-AUDIT-02 清理 tracker 的历史矛盾：C02 统一为 10 秒；D-09、Figma 15、A05 统一为单学生全题连续视图；共享任务上下文、局部导航和智能组件按现有实现收口。
+- [x] DOC-AUDIT-03 将 BE-PREP-01/02、BE-AI-06/07 按实际代码从“未开始”改为“已完成可用骨架、仍有明确后端缺口”，不把持久化、结构化 rubric、AI heatmap 或异步分析冒充完成。
+- [x] DOC-HANDOFF-01 新增面向人的 `docs/20260728/FRONTEND_BACKEND_INTEGRATION_GUIDE_CN.md`，列出前端完成度、canonical route、API/type 文件、接口映射、边界与联调检查。
+- [x] DOC-HANDOFF-02 新增面向后端 AI Agent 的 `docs/20260728/BACKEND_AGENT_IMPLEMENTATION_HANDOFF_CN.md`，列出不可破坏约束、目标 schema/API、OCR/SmartQuery/persistence 接入波次、测试与停手条件。
+- [x] DOC-SCOPE-01 用户明确本轮不再核对 Figma；QA-09 作为历史验收项保留，不再计入“前端工程是否完整”。仍未完成的内容被严格分为后端能力与人工/外部验收，不再混称前端缺页。
+- [x] FRONTEND-COMPLETE-01 以“canonical 教师页面、导航、主要交互、真实 API 消费与错误恢复”为口径，前端工程实现完成度为 100%；产品整体仍受 OCR、持久化、SmartQuery、结构化 rubric 和真实 provider 边界限制。
+- 详细记录：`docs/20260728/FRONTEND_DOCUMENT_AUDIT_AND_BACKEND_HANDOFF_STAGE_CN.md`。
 
 ---
 

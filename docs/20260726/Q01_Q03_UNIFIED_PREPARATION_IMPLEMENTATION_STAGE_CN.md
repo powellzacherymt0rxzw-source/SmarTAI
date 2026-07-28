@@ -96,3 +96,13 @@
 - 单文件题目上传在 `1920×1080` 桌面验收尺寸下 `documentHeight = viewportHeight = 1080`，主操作底边位于 `889px`，页面无横向溢出；视觉证据为 `smartai-q01-compact-upload.png`。
 - 评分标准新增“自然语言描述”来源，输入后顶部计数从 `可选 · 0` 即时更新为 `可选 · 1`；自然语言卡、范围选项和统一识别主操作在同一首屏内，视觉证据为 `smartai-q01-natural-language-rubric.png`。
 - 本轮只上传本地题目样例验证页面状态，没有点击统一识别、没有调用 provider；旧内存任务数据因后端重启失效，因此详情导航的视觉结论只采用构建/类型检查和组件结构核对，不伪造带数据截图。
+
+## 9. 2026-07-28 Q02 进度契约与 OCR 接口对齐
+
+- 修复统一题目准备中“题目识别完成后先到 100%，随后又跳回准备资料”的根因：旧抽题 Skill 不再接管统一 Job 的 phase 和阶段，八阶段外层编排成为唯一进度来源。
+- Q02 不再硬编码或猜测阶段。页面读取后端 `workflow / stage_sequence / current_step / completed_steps`，未知但合法的新阶段使用后端代码的可读回退标签；因此以后增加 OCR/版面分析阶段不会把页面重置到第一步。
+- 启动成功后立即把当前任务缓存标记为 `extracting_problems + question_preparation + active_job_id`，避免启动后的短暂旧缓存把教师送回上传页；轮询快照还会核对 Job ID，拒绝显示上一次任务的缓存进度。
+- 进度标题统一为“题目资料准备进度”，清楚说明同一 Job 正在处理题目、标答、评分标准和编程测试，而不是在“识别题目”和“准备资料”两个无关流程之间切换。
+- Q01 读取 `/question-preparation/capabilities`：文件选择器和提示均按真实后端能力显示。当前只开放可复制文字 PDF/TXT/Markdown（编程测试可用 JSON）与评分标准自然语言；图片、扫描 PDF、OCR、视觉识别和 DOCX 均明确为尚未接入。
+- 后续后端只需实现读取器、更新能力布尔值并向 `stage_sequence` 插入真实 OCR 阶段，现有上传与进度页面即可自动消费；前端不会提前展示不可用控件，也不需要再维护 OCR 专用页面。
+- 工程验证：后端相关回归 `59 passed, 1 skipped`、全量回归 `242 passed, 1 skipped`；前端 visible-scope/lint、TypeScript 与 Vite production build 通过。未调用真实 provider，未伪造 OCR 成功态或预计时长。

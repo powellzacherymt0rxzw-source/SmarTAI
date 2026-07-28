@@ -20,6 +20,7 @@ from backend.state import (
     get_problem_source_draft_store,
     get_task_store,
 )
+from backend.progress.tracker import get_or_create_reporter, remove_reporter
 
 
 HEADERS = {"Authorization": "Bearer demo-teacher-q01owner"}
@@ -150,6 +151,8 @@ def test_unified_preparation_accepts_independent_roles_and_commits_once(client, 
     assert started.status_code == 200, started.text
     assert started.json()["status"] == "started"
     assert started.json()["source_count"] == 3
+    assert started.json()["operation"] == "question_preparation"
+    assert started.json()["progress_contract_version"] == 1
     asyncio.run(asyncio.sleep(0.1))
     completed = client.get(f"/tasks/{task_id}", headers=HEADERS).json()
     assert completed["status"] == "problems_ready"
@@ -158,6 +161,76 @@ def test_unified_preparation_accepts_independent_roles_and_commits_once(client, 
         "roles": ["problem", "reference_answer", "programming_tests"],
         "provider_id": "mock-unified",
     }
+
+
+def test_question_preparation_capabilities_are_factual_and_backend_owned(client):
+    task_id = _create_task(client)
+    response = client.get(
+        f"/tasks/{task_id}/question-preparation/capabilities",
+        headers=HEADERS,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["contract_version"] == 1
+    assert body["operation"] == "question_preparation"
+    assert body["stage_sequence"] == [
+        "validating_sources",
+        "extracting_questions",
+        "aligning_uploaded_materials",
+        "generating_solutions",
+        "aligning_rubrics",
+        "preparing_programming_tests",
+        "detecting_conflicts",
+        "committing_question_packages",
+    ]
+    assert body["source_roles"]["problem"]["accepted_extensions"] == [".pdf", ".txt", ".md"]
+    assert body["source_roles"]["programming_tests"]["accepted_extensions"][-1] == ".json"
+    assert body["source_roles"]["rubric"]["inline_text"] is True
+    assert body["reader"] == {
+        "selectable_text_pdf": True,
+        "plain_text": True,
+        "markdown": True,
+        "json_programming_tests": True,
+        "ocr": False,
+        "vision": False,
+        "scanned_pdf": False,
+        "images": False,
+        "docx": False,
+    }
+
+
+def test_task_state_identifies_question_preparation_job_and_contract(client):
+    task_id = _create_task(client)
+    task = get_task_store().get(task_id)
+    assert task is not None
+    job_id = "question-preparation-state-contract"
+    task.status = "extracting_problems"
+    task.extract_job_id = job_id
+    reporter = get_or_create_reporter(job_id)
+    asyncio.run(reporter.configure_workflow(
+        "question_preparation",
+        ["validating_sources", "extracting_questions"],
+    ))
+    asyncio.run(reporter.set_stage_progress(
+        "extracting_questions",
+        total_steps=2,
+        completed_steps=1,
+    ))
+    try:
+        response = client.get(f"/tasks/{task_id}/state", headers=HEADERS)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["active_job_id"] == job_id
+        assert body["active_operation"] == "question_preparation"
+        assert body["progress"]["job_id"] == job_id
+        assert body["progress"]["workflow"] == "question_preparation"
+        assert body["progress"]["stage_sequence"] == [
+            "validating_sources",
+            "extracting_questions",
+        ]
+    finally:
+        remove_reporter(job_id)
 
 
 def test_rubric_preflight_accepts_natural_language_as_an_explicit_source(client):
@@ -375,7 +448,11 @@ def test_upload_validation_is_strict_and_scanned_pdf_is_not_claimed(client, monk
     task_id = _create_task(client)
     unsupported = _preflight(client, task_id, filename="questions.docx")
     assert unsupported.status_code == 400
-    assert "Allowed: PDF, TXT, MD" in unsupported.json()["detail"]
+    assert unsupported.json()["detail"] == {
+        "code": "problem_source_unsupported",
+        "accepted_extensions": [".md", ".pdf", ".txt"],
+        "ocr_available": False,
+    }
 
     empty = _preflight(client, task_id, body=b"")
     assert empty.status_code == 400

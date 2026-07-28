@@ -200,6 +200,7 @@ const BYOK_CODES = new Set([
 ]);
 
 const FILE_CODES = new Set([
+  "problem_source_unsupported",
   "problem_source_decode_failed",
   "problem_source_character_limit_exceeded",
   "problem_source_token_limit_exceeded",

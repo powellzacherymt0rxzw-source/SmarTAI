@@ -87,4 +87,35 @@ export interface StartQuestionPreparationInput {
 
 export type StartQuestionPreparationResponse = TaskMutationResponse & {
   source_count?: number;
+  operation?: "question_preparation";
+  progress_contract_version?: number;
 };
+
+export interface QuestionPreparationRoleCapabilities {
+  accepted_extensions: string[];
+  course_library: boolean;
+  inline_text: boolean;
+}
+
+export interface QuestionPreparationCapabilities {
+  contract_version: number;
+  operation: "question_preparation";
+  stage_sequence: string[];
+  source_roles: Record<PreparationSourceRole, QuestionPreparationRoleCapabilities>;
+  reader: {
+    selectable_text_pdf: boolean;
+    plain_text: boolean;
+    markdown: boolean;
+    json_programming_tests: boolean;
+    ocr: boolean;
+    vision: boolean;
+    scanned_pdf: boolean;
+    images: boolean;
+    docx: boolean;
+  };
+  limits: {
+    max_file_bytes: number;
+    max_text_characters: number;
+    max_inline_rubric_characters: number;
+  };
+}

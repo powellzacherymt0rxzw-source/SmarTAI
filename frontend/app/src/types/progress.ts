@@ -26,6 +26,8 @@ export interface ProgressEvent {
 }
 
 export interface JobProgress {
+  contract_version?: number;
+  job_id?: string | null;
   phase: ProgressPhase;
   total_students: number;
   total_questions: number;
@@ -34,6 +36,8 @@ export interface JobProgress {
   messages: ProgressEvent[];
   error_detail?: string | null;
   started_at?: number | null;
+  workflow?: string | null;
+  stage_sequence?: string[];
   current_step?: string | null;
   total_steps?: number | null;
   completed_steps?: number | null;

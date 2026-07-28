@@ -98,20 +98,23 @@ async def extract_problems(
     structure_mode: str = "organized",
     extraction_hint: str = "",
     confirmed_candidates: Optional[List[Dict[str, Any]]] = None,
+    manage_progress_lifecycle: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Extract and classify problems from assignment text.
     Stores into problem_store and returns the same dict.
 
-    If `reporter` is provided, emits progress phases:
-        extracting → done (or error)
+    If `reporter` is provided and ``manage_progress_lifecycle`` is true,
+    owns the legacy extraction lifecycle (extracting → done/error). Unified
+    outer workflows pass false so this bounded skill can emit useful messages
+    without replacing the outer workflow's phase or stage contract.
     """
     if not text or not text.strip():
-        if reporter:
+        if reporter and manage_progress_lifecycle:
             await reporter.set_error("Input text is empty.")
         raise ValueError("Input text is empty.")
 
-    if reporter:
+    if reporter and manage_progress_lifecycle:
         await reporter.set_phase("extracting")
         await reporter.set_stage_progress(
             "source_prepared",
@@ -153,12 +156,13 @@ async def extract_problems(
 
     logger.info("extract_problems: calling LLM...")
     if reporter:
-        await reporter.set_stage_progress(
-            "calling_recognition",
-            total_steps=4,
-            completed_steps=1,
-            message="Problem recognition started.",
-        )
+        if manage_progress_lifecycle:
+            await reporter.set_stage_progress(
+                "calling_recognition",
+                total_steps=4,
+                completed_steps=1,
+                message="Problem recognition started.",
+            )
         await reporter._emit_message(
             f"Applying source mode {structure_mode} with {len(confirmed_candidates)} confirmed local candidates..."
         )
@@ -168,18 +172,19 @@ async def extract_problems(
     logger.info(f"extract_problems: LLM returned {len(raw_output)} chars")
 
     if reporter:
-        await reporter.set_stage_progress(
-            "organizing_structure",
-            total_steps=4,
-            completed_steps=2,
-            message="Organizing recognized problem structure.",
-        )
+        if manage_progress_lifecycle:
+            await reporter.set_stage_progress(
+                "organizing_structure",
+                total_steps=4,
+                completed_steps=2,
+                message="Organizing recognized problem structure.",
+            )
         await reporter._emit_message(f"Parsing JSON ({len(raw_output)} chars)...")
 
     parsed = extract_and_parse_json(raw_output, ProblemSet)
 
     if not parsed.problems:
-        if reporter:
+        if reporter and manage_progress_lifecycle:
             await reporter.set_error("LLM did not extract any problems from the text.")
         raise ValueError("LLM did not extract any problems from the text.")
 
@@ -191,13 +196,14 @@ async def extract_problems(
 
     if reporter:
         await reporter.set_totals(students=0, questions=len(prob_dict))
-        await reporter.set_stage_progress(
-            "completed",
-            total_steps=4,
-            completed_steps=4,
-            message="Problem recognition completed.",
-        )
-        await reporter.set_phase("done")
+        if manage_progress_lifecycle:
+            await reporter.set_stage_progress(
+                "completed",
+                total_steps=4,
+                completed_steps=4,
+                message="Problem recognition completed.",
+            )
+            await reporter.set_phase("done")
 
     return prob_dict
 

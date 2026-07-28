@@ -23,6 +23,18 @@ from backend.progress.tracker import ProgressReporter
 
 SourceRow = Tuple[ProblemSourceDraft, str]
 
+QUESTION_PREPARATION_WORKFLOW = "question_preparation"
+QUESTION_PREPARATION_STAGE_SEQUENCE = (
+    "validating_sources",
+    "extracting_questions",
+    "aligning_uploaded_materials",
+    "generating_solutions",
+    "aligning_rubrics",
+    "preparing_programming_tests",
+    "detecting_conflicts",
+    "committing_question_packages",
+)
+
 
 async def prepare_question_packages(
     sources: Iterable[SourceRow],
@@ -43,6 +55,10 @@ async def prepare_question_packages(
     if not problem_sources:
         raise ValueError("At least one problem source is required.")
 
+    await reporter.configure_workflow(
+        QUESTION_PREPARATION_WORKFLOW,
+        QUESTION_PREPARATION_STAGE_SEQUENCE,
+    )
     await reporter.set_phase("parsing")
     await reporter.set_stage_progress(
         "validating_sources",
@@ -71,7 +87,7 @@ async def prepare_question_packages(
     await reporter.set_stage_progress(
         "extracting_questions",
         total_steps=8,
-        completed_steps=2,
+        completed_steps=1,
         message="Recognizing question structure",
     )
     await extract_problems(
@@ -82,6 +98,7 @@ async def prepare_question_packages(
         structure_mode=structure_mode,
         extraction_hint=extraction_hint,
         confirmed_candidates=confirmed_candidates,
+        manage_progress_lifecycle=False,
     )
 
     issues: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -94,7 +111,7 @@ async def prepare_question_packages(
     await reporter.set_stage_progress(
         "aligning_uploaded_materials",
         total_steps=8,
-        completed_steps=3,
+        completed_steps=2,
         message="Matching uploaded answers, rubrics and programming tests",
     )
     for draft, text in source_rows:
@@ -153,7 +170,7 @@ async def prepare_question_packages(
     await reporter.set_stage_progress(
         "generating_solutions",
         total_steps=8,
-        completed_steps=4,
+        completed_steps=3,
         message="Generating complete answers for material not supplied by the teacher",
     )
     requested_targets: List[Dict[str, str]] = []
@@ -226,7 +243,7 @@ async def prepare_question_packages(
     await reporter.set_stage_progress(
         "aligning_rubrics",
         total_steps=8,
-        completed_steps=5,
+        completed_steps=4,
         message="Aligning answers and grading rubrics for review",
     )
     for q_id, problem in problem_data.items():
@@ -246,7 +263,7 @@ async def prepare_question_packages(
     await reporter.set_stage_progress(
         "preparing_programming_tests",
         total_steps=8,
-        completed_steps=6,
+        completed_steps=5,
         message="Normalizing programming examples and hidden tests",
     )
     for problem in problem_data.values():
@@ -266,7 +283,7 @@ async def prepare_question_packages(
     await reporter.set_stage_progress(
         "detecting_conflicts",
         total_steps=8,
-        completed_steps=7,
+        completed_steps=6,
         message="Detecting only risks that need teacher attention",
     )
     for q_id, problem in problem_data.items():
@@ -275,8 +292,8 @@ async def prepare_question_packages(
     await reporter.set_stage_progress(
         "committing_question_packages",
         total_steps=8,
-        completed_steps=8,
-        message="Question packages are ready for teacher review",
+        completed_steps=7,
+        message="Committing prepared question packages",
     )
     return problem_data
 

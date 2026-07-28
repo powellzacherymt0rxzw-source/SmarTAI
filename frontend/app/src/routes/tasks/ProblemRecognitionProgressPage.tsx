@@ -29,7 +29,8 @@ const QUESTION_WORKSPACE_STATUSES = new Set<TaskStatus>([
 type RecognitionStepState = "done" | "active" | "pending";
 
 interface RecognitionStep {
-  key: MessageKey;
+  code: string;
+  labelKey?: MessageKey;
   state: RecognitionStepState;
 }
 
@@ -42,7 +43,7 @@ export function ProblemRecognitionProgressPage() {
   const progressQuery = useTaskProgress(taskId);
   const status = (progressQuery.data?.status ?? taskQuery.data?.status) as TaskStatus | undefined;
 
-  if (taskId && status === "draft") {
+  if (taskId && status === "draft" && !taskQuery.isFetching && !progressQuery.isFetching) {
     return <Navigate to={`/tasks/${taskId}/upload/problems`} replace />;
   }
 
@@ -132,8 +133,20 @@ export function ProblemRecognitionProgressPage() {
     );
   }
 
-  const progress = progressQuery.progress;
+  const candidateProgress = progressQuery.progress;
+  const activeJobId = progressQuery.data?.active_job_id;
+  const progress = (
+    candidateProgress?.job_id && activeJobId && candidateProgress.job_id !== activeJobId
+      ? null
+      : candidateProgress
+  );
   const steps = getRecognitionSteps(progress);
+  const activeStep = steps.find((step) => step.state === "active")
+    ?? steps.find((step) => step.code === progress?.current_step)
+    ?? steps.at(-1);
+  const activeStageLabel = activeStep
+    ? getStageLabel(activeStep, locale, t)
+    : t("problemProgressRecognizingStructure");
   const recentEvents = [...(progress?.messages ?? [])].slice(-3).reverse();
   const hasDeterminateProgress = Boolean(
     progress &&
@@ -152,7 +165,8 @@ export function ProblemRecognitionProgressPage() {
       >
         <div>
           <h2 className="text-[22px] font-bold leading-8 tracking-[-0.01em] text-foreground sm:text-2xl">
-            {t("problemProgressRecognizingStructure")}
+            <span className="text-muted-foreground">{t("problemProgressActiveStage")}：</span>{" "}
+            {activeStageLabel}
           </h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {t("problemProgressBackgroundDescription")}
@@ -186,7 +200,11 @@ export function ProblemRecognitionProgressPage() {
         <div className="mt-8 grid min-h-0 flex-1 gap-6 md:grid-cols-[210px_minmax(0,1fr)] md:gap-16">
           <ol className="grid content-start gap-3" aria-label={t("problemProgressStepsLabel")}>
             {steps.map((step) => (
-              <RecognitionStepItem key={step.key} step={step} label={t(step.key)} />
+              <RecognitionStepItem
+                key={step.code}
+                step={step}
+                label={getStageLabel(step, locale, t)}
+              />
             ))}
           </ol>
 
@@ -341,67 +359,80 @@ function RecoveryState({
   );
 }
 
+const UNIFIED_STAGE_SEQUENCE = [
+  "validating_sources",
+  "extracting_questions",
+  "aligning_uploaded_materials",
+  "generating_solutions",
+  "aligning_rubrics",
+  "preparing_programming_tests",
+  "detecting_conflicts",
+  "committing_question_packages",
+];
+
+const LEGACY_STAGE_SEQUENCE = [
+  "source_prepared",
+  "calling_recognition",
+  "organizing_structure",
+  "completed",
+];
+
+const STAGE_LABEL_KEYS: Record<string, MessageKey> = {
+  validating_sources: "problemProgressStepValidateSources",
+  extracting_questions: "problemProgressStepExtractQuestions",
+  aligning_uploaded_materials: "problemProgressStepAlignMaterials",
+  generating_solutions: "problemProgressStepGenerateSolutions",
+  aligning_rubrics: "problemProgressStepAlignRubrics",
+  preparing_programming_tests: "problemProgressStepPrepareTests",
+  detecting_conflicts: "problemProgressStepDetectConflicts",
+  committing_question_packages: "problemProgressStepCommitPackages",
+  reading_sources: "problemProgressStepReadSources",
+  detecting_scanned_content: "problemProgressStepDetectScans",
+  recognizing_with_ocr: "problemProgressStepOCR",
+  normalizing_ocr_output: "problemProgressStepNormalizeOCR",
+  source_prepared: "problemProgressStepPrepareSource",
+  calling_recognition: "problemProgressStepModelRecognition",
+  organizing_structure: "problemProgressStepParseStructure",
+  completed: "problemProgressStepSaveResults",
+};
+
 function getRecognitionSteps(progress: JobProgress | null): RecognitionStep[] {
-  const currentStep = progress?.current_step;
-  if (currentStep) {
-    const stageIndex: Record<string, number> = {
-      source_prepared: 1,
-      calling_recognition: 2,
-      organizing_structure: 3,
-      completed: 5,
-    };
-    const activeIndex = stageIndex[currentStep] ?? 1;
-    const keys: MessageKey[] = [
-      "problemProgressStepSourceReceived",
-      "problemProgressStepPrepareSource",
-      "problemProgressStepModelRecognition",
-      "problemProgressStepParseStructure",
-      "problemProgressStepSaveResults",
-    ];
-    return keys.map((key, index) => ({
-      key,
-      state: activeIndex >= keys.length || index < activeIndex
-        ? "done"
-        : index === activeIndex
-          ? "active"
-          : "pending",
-    }));
-  }
+  const backendSequence = (progress?.stage_sequence ?? []).filter(Boolean);
+  const currentStep = progress?.current_step ?? null;
+  const sequence = backendSequence.length
+    ? backendSequence
+    : currentStep && LEGACY_STAGE_SEQUENCE.includes(currentStep)
+      ? LEGACY_STAGE_SEQUENCE
+      : UNIFIED_STAGE_SEQUENCE;
+  const completed = Math.max(
+    0,
+    Math.min(sequence.length, progress?.completed_steps ?? 0),
+  );
+  const currentIndex = currentStep ? sequence.indexOf(currentStep) : -1;
+  const fallbackActiveIndex = Math.min(completed, sequence.length - 1);
 
-  const messages = (progress?.messages ?? []).map((event) => event.message.toLowerCase());
-  const hasModelCall = messages.some((message) => message.startsWith("calling "));
-  const hasStructuredResult = messages.some((message) => message.includes("parsing json"));
-  const hasFinishedRecognition = progress?.phase === "done";
+  return sequence.map((code, index) => ({
+    code,
+    labelKey: STAGE_LABEL_KEYS[code],
+    state: progress?.phase === "done" || index < completed
+      ? "done"
+      : index === currentIndex || (currentIndex < 0 && index === fallbackActiveIndex)
+        ? "active"
+        : "pending",
+  }));
+}
 
-  return [
-    { key: "problemProgressStepSourceReceived", state: "done" },
-    {
-      key: "problemProgressStepPrepareSource",
-      state: hasModelCall || hasStructuredResult || hasFinishedRecognition
-        ? "done"
-        : "active",
-    },
-    {
-      key: "problemProgressStepModelRecognition",
-      state: hasStructuredResult || hasFinishedRecognition
-        ? "done"
-        : hasModelCall
-          ? "active"
-          : "pending",
-    },
-    {
-      key: "problemProgressStepParseStructure",
-      state: hasFinishedRecognition
-        ? "done"
-        : hasStructuredResult
-          ? "active"
-          : "pending",
-    },
-    {
-      key: "problemProgressStepSaveResults",
-      state: hasFinishedRecognition ? "active" : "pending",
-    },
-  ];
+function getStageLabel(
+  step: RecognitionStep,
+  locale: string,
+  t: (key: MessageKey) => string,
+) {
+  if (step.labelKey) return t(step.labelKey);
+  const readableCode = step.code
+    .replaceAll("_", " ")
+    .replace(/\bocr\b/gi, "OCR")
+    .replace(/^\w/, (value) => value.toUpperCase());
+  return locale === "zh-CN" ? `SmarTAI 后台：${readableCode}` : readableCode;
 }
 
 function localizeEvent(
@@ -410,7 +441,8 @@ function localizeEvent(
 ): string {
   const message = event.message.toLowerCase();
   if (message === "phase: extracting") return t("problemProgressEventExtracting");
-  if (message === "phase: done") return t("problemProgressEventDone");
+  if (message === "phase: parsing") return t("problemProgressEventQuestions");
+  if (message === "phase: done") return t("problemProgressEventReady");
   if (message === "problem source prepared.") return t("problemProgressEventSourcePrepared");
   if (message === "problem recognition started.") return t("problemProgressEventModelStarted");
   if (message === "organizing recognized problem structure.") return t("problemProgressEventParsing");
@@ -418,6 +450,15 @@ function localizeEvent(
   if (message.includes("applying source mode")) return t("problemProgressEventSourcePrepared");
   if (message.startsWith("calling ")) return t("problemProgressEventModelStarted");
   if (message.includes("parsing json")) return t("problemProgressEventParsing");
+  if (message === "validated question and optional material sources") return t("problemProgressEventSourcesValidated");
+  if (message === "recognizing question structure") return t("problemProgressEventQuestions");
+  if (message === "matching uploaded answers, rubrics and programming tests") return t("problemProgressEventMaterials");
+  if (message === "generating complete answers for material not supplied by the teacher") return t("problemProgressEventSolutions");
+  if (message === "aligning answers and grading rubrics for review") return t("problemProgressEventRubrics");
+  if (message === "normalizing programming examples and hidden tests") return t("problemProgressEventTests");
+  if (message === "detecting only risks that need teacher attention") return t("problemProgressEventConflicts");
+  if (message === "committing prepared question packages") return t("problemProgressEventCommitting");
+  if (message === "question materials are ready for teacher review.") return t("problemProgressEventReady");
   return event.message;
 }
 

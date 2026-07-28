@@ -442,3 +442,30 @@ SmarTAI 只借鉴上述清晰的信息层次和防泄漏边界，不复制 LeetC
 2. 再把当前兼容编排从松散 `problem_data` 迁入统一 domain service，补 alternatives、结构化 provenance、语义冲突检测和稳定 issue code。
 3. 接着交付 index / questions / issues / field-CAS / confirm-all API，让连续审核页不再逐题循环调用旧 PUT。
 4. 最后完成 OJ 沙箱与导出，再替换 PostgreSQL/对象存储 adapter。每一步继续保留旧 route 适配和 idempotency 回归，直到前端迁移完成。
+
+## 15. 2026-07-28 进度与文件能力契约收口
+
+### 15.1 本次修复的根因
+
+- 统一题目资料准备 Job 原本声明八个外层阶段，但内部复用旧 `extract_problems` 时，内层又把同一个 `ProgressReporter` 改回四阶段，并提前写入 `phase=done`。这会让前端在题目刚识别完时先显示 100%，随后又回到“准备资料”等后续阶段。
+- 外层编排过去在阶段开始时把该阶段计作完成，并在 `TaskStore` 原子提交之前写入 8/8；因此进度百分比不完全代表已经落入任务状态的事实。
+- 前端只认识旧四阶段代码，遇到新阶段会回退到早期步骤，进一步放大了视觉上的倒退。
+
+### 15.2 唯一进度合同
+
+- 统一 Job 是生命周期的唯一所有者；内层抽题 Skill 只允许追加消息和题目数量，不得改写外层 `phase / workflow / stage_sequence / completed_steps`。
+- `JobProgress` 合同版本为 `1`，每次快照携带 `job_id`、`workflow` 和由后端拥有的有序 `stage_sequence`。客户端必须同时核对 `active_job_id` 与快照 `job_id`，不得把旧 Job 缓存混入新任务。
+- 当前 `question_preparation` 顺序固定为：`validating_sources → extracting_questions → aligning_uploaded_materials → generating_solutions → aligning_rubrics → preparing_programming_tests → detecting_conflicts → committing_question_packages`。
+- `completed_steps` 只统计已经完成的事实阶段，必须单调不减；最终 8/8 只在 `TaskStore.commit_problem_extraction` 成功后发布，随后才进入 `phase=done`。提交失败进入稳定错误状态，不显示完成。
+- `GET /tasks/{id}/state` 返回 `active_job_id / active_operation / progress`；题目统一准备期间 `active_operation=question_preparation`。启动、already-running 和 already-done 响应同时返回 `operation` 与 `progress_contract_version`，便于客户端安全恢复。
+
+### 15.3 文件读取能力合同与 OCR 接入边界
+
+- 新增 `GET /tasks/{id}/question-preparation/capabilities`，返回合同版本、阶段顺序、四类资料各自允许的扩展名、文字评分标准能力及读取器能力。前端文件选择、格式提示和 OCR 状态均以此接口为准，不再从页面文案猜测后端能力。
+- 当前事实能力为可复制文字 PDF、TXT、Markdown；编程测试额外允许 JSON；rubric 额外允许 `inline_text`。DOCX、图片、扫描 PDF、OCR 与视觉识别明确返回 `false`，上传不支持的格式返回稳定码 `problem_source_unsupported` 及允许扩展名。
+- 后续接入 OCR 时，后端先实现 OCR provider 抽象与安全读取，再将对应能力改为 `true`，并可在同一 Job 的 `stage_sequence` 中插入扫描检测、OCR 与版面归一化阶段。前端已经按后端顺序动态渲染，届时只需扩展接口/后端实现，不需要重做 Q01/Q02 页面或再增加一套进度逻辑。
+
+### 15.4 验证证据
+
+- 后端定向与兼容回归：`59 passed, 1 skipped`，随后全量回归 `242 passed, 1 skipped`；覆盖外层阶段不可被内层覆盖、进度单调、Job 身份、能力接口、格式拒绝、Q08/Q09 与旧课程资料上传兼容路径。
+- 前端：visible-scope/lint、TypeScript 和 Vite production build 全部通过；进度百分比优先使用事实 `completed_steps / total_steps`，不会再因错误的早期 `phase=done` 跳到 100%。

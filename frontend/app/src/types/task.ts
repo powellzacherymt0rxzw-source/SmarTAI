@@ -210,7 +210,14 @@ export interface Task extends TaskLite {
 export interface TaskStateSnapshot extends TaskLite {
   progress?: JobProgress | null;
   active_job_id?: string | null;
-  active_operation?: string | null;
+  active_operation?:
+    | "question_preparation"
+    | "problem_extraction"
+    | "submission_recognition"
+    | "grading"
+    | "material_import"
+    | "ai_completion"
+    | null;
 }
 
 export type TaskListResponse = Record<string, TaskLite>;

@@ -1,6 +1,7 @@
 import { apiClient, getJSON, normalizeAPIError } from "./client";
 import type {
   ProblemLibraryResponse,
+  QuestionPreparationCapabilities,
   ProblemSourcePreflightInput,
   ProblemSourcePreflightResponse,
   ProblemSourceScope,
@@ -9,6 +10,14 @@ import type {
   StartQuestionPreparationInput,
   StartQuestionPreparationResponse,
 } from "@/types";
+
+export function getQuestionPreparationCapabilities(
+  taskId: string,
+): Promise<QuestionPreparationCapabilities> {
+  return getJSON<QuestionPreparationCapabilities>(
+    `/tasks/${taskId}/question-preparation/capabilities`,
+  );
+}
 
 export function listProblemSourceLibrary(
   taskId: string,
