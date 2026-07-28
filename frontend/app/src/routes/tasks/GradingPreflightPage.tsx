@@ -11,7 +11,7 @@ import { gradingPreflightText as copy } from "@/lib/gradingPreflightCopy";
 import { getTaskDestination, getTaskGradingSetupHref, hasTaskReachedStep } from "@/lib/taskFlow";
 import type { GradingFeedbackLength, GradingSetup, ProblemInfo, StudentSubmission } from "@/types";
 
-const AUTO_START_SECONDS = 5;
+const AUTO_START_SECONDS = 10;
 
 /** C02: one read-only checkpoint before the idempotent grading mutation. */
 export function GradingPreflightPage() {

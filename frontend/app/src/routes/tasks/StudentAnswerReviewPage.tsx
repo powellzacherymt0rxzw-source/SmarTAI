@@ -734,16 +734,15 @@ function StudentNavigation({ student, previous, next, onPrevious, onNext, identi
   t: (key: MessageKey) => string;
 }) {
   return (
-    <nav aria-label={t("answerReviewStudentNavigation")} className="grid min-h-[58px] gap-2 rounded-[10px] border bg-card p-2 sm:grid-cols-2 xl:grid-cols-[150px_205px_minmax(300px,1fr)_150px_145px] xl:items-center">
+    <nav aria-label={t("answerReviewStudentNavigation")} className="grid min-h-[58px] gap-2 rounded-[10px] border bg-card p-2 sm:grid-cols-2 xl:grid-cols-[135px_260px_minmax(240px,1fr)_135px_135px] xl:items-center">
       <Button type="button" variant="ghost" className="h-10 justify-start px-3" disabled={!previous} onClick={onPrevious}>
         <ArrowLeft aria-hidden="true" className="h-4 w-4" />
         <span className="min-w-0 truncate">{previous?.stu_name || t("answerReviewPreviousStudent")}</span>
       </Button>
-      <div className="flex h-10 min-w-0 items-center rounded-[7px] bg-primary/[0.055] px-3">
-        <div className="min-w-0">
-          <p className="truncate text-[13px] font-semibold text-primary">{student.stu_name || student.stu_id}</p>
-          <p className="truncate text-[10px] text-muted-foreground">{student.stu_id}</p>
-        </div>
+      <div className="flex h-10 min-w-0 items-center rounded-[7px] bg-primary/[0.055] px-3" title={`${student.stu_id} · ${student.stu_name || student.stu_id}`}>
+        <p className="truncate text-[15px] font-bold tracking-[-0.01em] text-primary">
+          {student.stu_id} <span className="mx-1 text-primary/45">·</span> {student.stu_name || student.stu_id}
+        </p>
       </div>
       <div className="relative col-span-2 min-w-0 sm:col-span-2 xl:col-span-1">{children}</div>
       <Button type="button" variant="ghost" className="h-10 justify-end px-3" disabled={!next} onClick={onNext}>

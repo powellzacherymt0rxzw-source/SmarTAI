@@ -20,6 +20,7 @@ Q01：为四类资料分别添加 0..N 个来源
   编程题测试资料（可选）
         ↓
 每个来源独立配置：上传/课程资料库 + 已按题整理/从原文提取 + 提取说明
+评分标准额外允许自然语言 `inline_text` 来源
         ↓
 一次点击“识别并准备题目资料”
         ↓
@@ -75,7 +76,7 @@ class PreparationSourceDraft(BaseModel):
     task_id: str
     owner_id: str
     role: PreparationSourceRole
-    source_kind: Literal["upload", "library"]
+    source_kind: Literal["upload", "library", "inline_text"]
     structure_mode: Literal["organized", "extract_from_source"]
     extraction_hint: str
     filename: str
@@ -88,7 +89,7 @@ class PreparationSourceDraft(BaseModel):
     expires_at: float
 ```
 
-来源 token 必须绑定 owner、task、role、hash 和 workflow revision；`problem` token 不能被当作 rubric token 使用。上传文件与资料库引用使用同一公开 schema，但资料库读取时必须再次校验 owner 和 hash。
+来源 token 必须绑定 owner、task、role、hash 和 workflow revision；`problem` token 不能被当作 rubric token 使用。上传文件与资料库引用使用同一公开 schema，但资料库读取时必须再次校验 owner 和 hash。`inline_text` 只允许 `rubric` 角色，不能假装成文件、不能直接标记“同时保存到资料库”，并且前后端统一限制为 12,000 字。
 
 ### 3.3 来源优先规则
 
@@ -411,6 +412,7 @@ SmarTAI 只借鉴上述清晰的信息层次和防泄漏边界，不复制 LeetC
 ### 14.1 本轮已经实现
 
 - `PreparationSourceRole` 已进入 `backend/models.py`，来源草稿按 `problem / reference_answer / rubric / programming_tests` 绑定角色；旧抽题接口拒绝复用非题目 token。
+- rubric 自然语言规则已作为明确的 `source_kind="inline_text"` 接入同一个 preflight；服务端要求 file/library/inline_text 三选一、限制 rubric 角色与 12,000 字，并继续绑定 owner、task、hash 和 workflow revision。它进入统一准备 Job，不另建“保存文字规则”旁路。
 - `POST /tasks/{id}/question-preparation/sources/preflight` 已作为 role-aware 预检入口；上传和课程资料库来源都继续复用 owner、task、hash、workflow revision 与过期校验。JSON 只新增为编程测试资料可接受格式，不代表 OCR/DOCX 已支持。
 - `POST /tasks/{id}/question-preparation/jobs` 已接入一次性编排：一个请求收集四类多来源、一个 fingerprint、一个后台任务、一个 `ProgressReporter` 和一次 `TaskStore.commit_problem_extraction` 原子提交。相同请求继续沿用既有 running/done 幂等门禁。
 - 新增 `backend/agents/question_preparation_agent.py` 作为兼容期编排层，顺序执行题目抽取、可选资料匹配、缺项生成、答案过程扩展、rubric 对齐提示、编程测试归一化与风险收集。任一步异常都走旧成功版本保留/失败恢复路径。
@@ -428,7 +430,13 @@ SmarTAI 只借鉴上述清晰的信息层次和防泄漏边界，不复制 LeetC
 5. OJ 测试只完成展示字段兼容；参考解执行、逐例结果、超时/容差、hidden 防泄漏接口与 tests 导出仍属于 BQ-04。
 6. 旧 Q08/Q09 route 仍保留兼容能力，但新前端主流程已删除对应“批量导入资料 / AI 补全缺失项”入口。后端后续应让旧 endpoint 调用统一 domain service，再做 deprecate，不复制新分支。
 
-### 14.3 后续后端一次做对的顺序
+### 14.3 2026-07-28 自然语言评分标准合同验证
+
+- `POST /tasks/{id}/question-preparation/sources/preflight` 接受 rubric `inline_text`，返回 `source.kind = inline_text` 和不冒充真实上传的稳定展示名。
+- 非 rubric 角色使用文字来源返回 `inline_text_requires_rubric_role`；同时提交多种来源仍按“恰好一个来源”拒绝；文字来源不能直接保存到课程资料库。
+- 超过 12,000 字返回 `413` 和稳定码 `inline_rubric_character_limit_exceeded`；契约测试已覆盖成功、角色隔离、超长和多来源冲突。
+
+### 14.4 后续后端一次做对的顺序
 
 1. 先完成 `PreparedField + SolutionStep + StructuredRubric + PreparationIssue` 与旧数据转换器，并建立 repository protocol；这是字段级编辑、步骤对应和持久化的共同前置。
 2. 再把当前兼容编排从松散 `problem_data` 迁入统一 domain service，补 alternatives、结构化 provenance、语义冲突检测和稳定 issue code。

@@ -474,13 +474,12 @@ function StudentNavigation({ className, locale, value, current, matches, previou
   }, [value]);
 
   return (
-    <section className={cn("relative grid min-h-[58px] gap-2 rounded-[10px] border bg-card p-2 sm:grid-cols-2 xl:grid-cols-[150px_205px_minmax(300px,1fr)_150px] xl:items-center", className)} aria-label={tx(locale, "学生导航", "Student navigation")}>
+    <section className={cn("relative grid min-h-[58px] gap-2 rounded-[10px] border bg-card p-2 sm:grid-cols-2 xl:grid-cols-[135px_260px_minmax(240px,1fr)_135px] xl:items-center", className)} aria-label={tx(locale, "学生导航", "Student navigation")}>
       <NavButton disabled={!previous} onClick={() => previous && onSelect(previous.id)} icon={ArrowLeft} label={previous?.primary || tx(locale, "上一位学生", "Previous student")} />
-      <div className="flex h-10 min-w-0 items-center rounded-[7px] bg-primary/[0.055] px-3">
-        <div className="min-w-0">
-          <p className="truncate text-[13px] font-semibold text-primary">{current.primary}</p>
-          <p className="truncate text-[10px] text-muted-foreground">{current.secondary}</p>
-        </div>
+      <div className="flex h-10 min-w-0 items-center rounded-[7px] bg-primary/[0.055] px-3" title={`${current.secondary} · ${current.primary}`}>
+        <p className="truncate text-[15px] font-bold tracking-[-0.01em] text-primary">
+          {current.secondary} <span className="mx-1 text-primary/45">·</span> {current.primary}
+        </p>
       </div>
       <div className="relative col-span-2 min-w-0 sm:col-span-2 xl:col-span-1">
         <label className="relative block">

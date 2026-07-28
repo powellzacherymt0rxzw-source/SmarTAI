@@ -59,7 +59,7 @@ export interface PreparationIssue {
 export interface MaterialFieldProvenance {
   import_job_id: string;
   candidate_id: string;
-  source_kind: "upload" | "library";
+  source_kind: "upload" | "library" | "inline_text";
   source_filename: string;
   library_material_id?: string | null;
   confidence: number;

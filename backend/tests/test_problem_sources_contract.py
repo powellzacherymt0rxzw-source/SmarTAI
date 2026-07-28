@@ -160,6 +160,62 @@ def test_unified_preparation_accepts_independent_roles_and_commits_once(client, 
     }
 
 
+def test_rubric_preflight_accepts_natural_language_as_an_explicit_source(client):
+    task_id = _create_task(client)
+    description = "每题满分 10 分；推导过程占 60%，最终结果占 40%，允许等价表达。"
+    response = client.post(
+        f"/tasks/{task_id}/question-preparation/sources/preflight",
+        headers=HEADERS,
+        data={
+            "role": "rubric",
+            "inline_text": description,
+            "structure_mode": "extract_from_source",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["role"] == "rubric"
+    assert body["source"]["kind"] == "inline_text"
+    assert body["source"]["filename"] == "rubric-natural-language.txt"
+    task = get_task_store().get(task_id)
+    assert task is not None
+    draft = get_problem_source_draft_store().get_for_owner_task(
+        body["source_token"],
+        owner_id=task.owner_id,
+        task_id=task_id,
+    )
+    assert draft is not None
+    assert draft.text == description
+
+    wrong_role = client.post(
+        f"/tasks/{task_id}/question-preparation/sources/preflight",
+        headers=HEADERS,
+        data={"role": "problem", "inline_text": description},
+    )
+    assert wrong_role.status_code == 422
+    assert wrong_role.json()["detail"] == {"code": "inline_text_requires_rubric_role"}
+
+    too_long = client.post(
+        f"/tasks/{task_id}/question-preparation/sources/preflight",
+        headers=HEADERS,
+        data={"role": "rubric", "inline_text": "a" * 12_001},
+    )
+    assert too_long.status_code == 413
+    assert too_long.json()["detail"] == {
+        "code": "inline_rubric_character_limit_exceeded",
+        "max_characters": 12_000,
+    }
+
+    ambiguous = client.post(
+        f"/tasks/{task_id}/question-preparation/sources/preflight",
+        headers=HEADERS,
+        data={"role": "rubric", "inline_text": description},
+        files={"file": ("rubric.txt", b"1. Ten points", "text/plain")},
+    )
+    assert ambiguous.status_code == 422
+
+
 def test_non_problem_source_token_cannot_enter_legacy_extraction(client):
     task_id = _create_task(client)
     answer = _preflight(

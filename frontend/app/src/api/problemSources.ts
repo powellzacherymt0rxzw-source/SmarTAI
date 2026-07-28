@@ -32,6 +32,9 @@ export async function preflightProblemSource(
   if (input.mode === "library" && input.libraryMaterialId) {
     formData.append("library_material_id", input.libraryMaterialId);
   }
+  if (input.mode === "inline_text" && input.inlineText?.trim()) {
+    formData.append("inline_text", input.inlineText.trim());
+  }
   formData.append("structure_mode", input.structureMode);
   formData.append("role", input.role ?? "problem");
   formData.append("extraction_hint", input.extractionHint?.trim() ?? "");

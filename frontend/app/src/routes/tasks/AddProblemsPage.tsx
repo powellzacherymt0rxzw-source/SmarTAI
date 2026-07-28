@@ -1,4 +1,5 @@
 import {
+  AlignLeft,
   ArrowLeft,
   ArrowRight,
   BookOpen,
@@ -43,6 +44,7 @@ type SourceDraft = {
   libraryScope: ProblemSourceScope;
   librarySearch: string;
   libraryMaterial: ProblemLibraryMaterial | null;
+  inlineText: string;
   structureMode: ProblemStructureMode;
   extractionHint: string;
   saveToLibrary: boolean;
@@ -161,6 +163,7 @@ export function AddProblemsPage() {
           mode: source.sourceMode,
           file: source.file,
           libraryMaterialId: source.libraryMaterial?.material_id,
+          inlineText: source.inlineText,
           structureMode: source.structureMode,
           extractionHint: source.extractionHint,
           saveToLibrary: source.sourceMode === "upload" && source.saveToLibrary,
@@ -226,9 +229,9 @@ export function AddProblemsPage() {
       </h1>
       <NewTaskStepper currentStep={1} reachableStep={hasRecognizedProblems ? 2 : 1} returnState={routeState} />
 
-      <div className="mx-auto mt-9 w-full max-w-[940px]">
+      <div className="mx-auto mt-6 w-full max-w-[940px]">
         <section className="overflow-hidden rounded-[10px] border bg-card">
-          <div className="flex items-center justify-between border-b px-5 py-4 sm:px-7">
+          <div className="flex items-center justify-between border-b px-5 py-3 sm:px-7">
             <button
               type="button"
               onClick={() => moveRole(-1)}
@@ -263,7 +266,7 @@ export function AddProblemsPage() {
                   type="button"
                   onClick={() => setActiveRole(role)}
                   className={cn(
-                    "min-h-[62px] border-b-2 px-3 text-left transition-colors sm:text-center",
+                    "min-h-[54px] border-b-2 px-3 text-left transition-colors sm:text-center",
                     active ? "border-primary bg-blue-50/60 text-primary dark:bg-blue-950/20" : "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                   )}
                 >
@@ -274,7 +277,7 @@ export function AddProblemsPage() {
             })}
           </nav>
 
-          <div className="space-y-4 bg-slate-50/60 p-4 dark:bg-slate-950/20 sm:p-6">
+          <div className="space-y-3 bg-slate-50/60 p-3 dark:bg-slate-950/20 sm:p-4">
             {activeSources.length ? activeSources.map((source, index) => (
               <SourceEditor
                 key={source.id}
@@ -306,7 +309,7 @@ export function AddProblemsPage() {
           </div>
         </section>
 
-        <section className="mt-5 flex flex-col gap-3 rounded-[10px] border bg-card px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+        <section className="mt-4 flex flex-col gap-3 rounded-[10px] border bg-card px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-7">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground">{tx(locale, "一次识别并准备全部题目资料", "Prepare all question materials in one job")}</p>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -420,9 +423,12 @@ function SourceEditor({
         </button>
       </header>
 
-      <div className="p-4 sm:p-5">
-        <div className="grid grid-cols-2 gap-2 rounded-[8px] bg-muted/60 p-1">
+      <div className="p-3 sm:p-4">
+        <div className={cn("grid gap-2 rounded-[8px] bg-muted/60 p-1", source.role === "rubric" ? "grid-cols-3" : "grid-cols-2")}>
           <ModeButton active={source.sourceMode === "upload"} disabled={disabled} onClick={() => onUpdate({ sourceMode: "upload", libraryMaterial: null })} icon={<UploadCloud className="h-4 w-4" />} label={tx(locale, "上传新文件", "Upload File")} />
+          {source.role === "rubric" ? (
+            <ModeButton active={source.sourceMode === "inline_text"} disabled={disabled} onClick={() => onUpdate({ sourceMode: "inline_text", file: null, libraryMaterial: null })} icon={<AlignLeft className="h-4 w-4" />} label={tx(locale, "自然语言描述", "Describe")} />
+          ) : null}
           <ModeButton active={source.sourceMode === "library"} disabled={disabled} onClick={() => onUpdate({ sourceMode: "library", file: null })} icon={<BookOpen className="h-4 w-4" />} label={tx(locale, "课程资料库", "Course Library")} />
         </div>
 
@@ -432,18 +438,33 @@ function SourceEditor({
             onDragOver={(event) => event.preventDefault()}
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
             onDrop={handleDrop}
-            className={cn("mt-4 flex min-h-[145px] flex-col items-center justify-center rounded-[9px] border border-dashed px-5 text-center transition-colors", dragging ? "border-primary bg-blue-50/60 dark:bg-blue-950/20" : "bg-slate-50/70 dark:bg-slate-950/20")}
+            className={cn("mt-3 flex min-h-[112px] flex-col items-center justify-center rounded-[9px] border border-dashed px-5 text-center transition-colors", dragging ? "border-primary bg-blue-50/60 dark:bg-blue-950/20" : "bg-slate-50/70 dark:bg-slate-950/20")}
           >
-            <FileText aria-hidden="true" className="h-7 w-7 text-primary" />
-            <p className="mt-2 max-w-full truncate text-sm font-semibold text-foreground">{source.file?.name ?? tx(locale, "拖入或选择文件", "Drop or choose a file")}</p>
+            <FileText aria-hidden="true" className="h-6 w-6 text-primary" />
+            <p className="mt-1.5 max-w-full truncate text-sm font-semibold text-foreground">{source.file?.name ?? tx(locale, "拖入或选择文件", "Drop or choose a file")}</p>
             <p className="mt-1 text-xs text-muted-foreground">{accept.replaceAll(".", "").toUpperCase().replaceAll(",", " / ")}</p>
-            <label className="mt-3 inline-flex h-9 cursor-pointer items-center rounded-[7px] border bg-card px-4 text-xs font-semibold text-foreground hover:bg-muted">
+            <label className="mt-2 inline-flex h-9 cursor-pointer items-center rounded-[7px] border bg-card px-4 text-xs font-semibold text-foreground hover:bg-muted">
               {source.file ? tx(locale, "替换文件", "Replace File") : tx(locale, "选择文件", "Choose File")}
               <input id={`problem-source-file-${source.id}`} type="file" accept={accept} className="sr-only" disabled={disabled} onChange={(event: ChangeEvent<HTMLInputElement>) => { selectFile(event.target.files?.[0]); event.target.value = ""; }} />
             </label>
           </div>
+        ) : source.sourceMode === "inline_text" ? (
+          <label className="mt-3 block rounded-[9px] border bg-slate-50/70 p-3 dark:bg-slate-950/20">
+            <span className="text-xs font-semibold text-foreground">{tx(locale, "用自然语言描述评分标准", "Describe the grading rubric")}</span>
+            <span className="mt-1 block text-[11px] leading-4 text-muted-foreground">
+              {tx(locale, "SmarTAI 会把描述整理为与标答步骤对应、可审核的评分标准。", "SmarTAI will align your description with answer steps for review.")}
+            </span>
+            <textarea
+              value={source.inlineText ?? ""}
+              disabled={disabled}
+              maxLength={12000}
+              onChange={(event) => onUpdate({ inlineText: event.target.value })}
+              placeholder={tx(locale, "例如：每题满分 10 分，推导过程占 60%，结果占 40%；允许等价表达。也可以按题号分别描述。", "Example: Each problem is worth 10 points; reasoning is 60% and the final result is 40%. Equivalent expressions are accepted.")}
+              className="mt-2 min-h-[92px] w-full resize-y rounded-[7px] border bg-card px-3 py-2 text-sm font-normal leading-5 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+            />
+          </label>
         ) : (
-          <div className="mt-4 rounded-[9px] border p-4">
+          <div className="mt-3 rounded-[9px] border p-3">
             <div className="grid gap-3 sm:grid-cols-[150px_minmax(0,1fr)]">
               <select value={source.libraryScope} disabled={disabled} onChange={(event) => onUpdate({ libraryScope: event.target.value as ProblemSourceScope, libraryMaterial: null })} className="h-10 rounded-[7px] border bg-card px-3 text-sm outline-none focus:border-primary">
                 <option value="course">{tx(locale, "当前课程", "Current Course")}</option>
@@ -466,15 +487,23 @@ function SourceEditor({
           </div>
         )}
 
-        <div className="mt-4 grid gap-4 border-t pt-4 sm:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="mt-3 grid gap-3 border-t pt-3 sm:grid-cols-[220px_minmax(0,1fr)]">
           <div>
-            <p className="text-xs font-semibold text-muted-foreground">{tx(locale, "文件结构", "File Structure")}</p>
+            <p className="text-xs font-semibold text-muted-foreground">
+              {source.sourceMode === "inline_text" ? tx(locale, "描述范围", "Description Scope") : tx(locale, "文件结构", "File Structure")}
+            </p>
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <StructureButton active={source.structureMode === "organized"} disabled={disabled} onClick={() => onUpdate({ structureMode: "organized" })}>{tx(locale, "已按题整理", "Organized")}</StructureButton>
-              <StructureButton active={source.structureMode === "extract_from_source"} disabled={disabled} onClick={() => onUpdate({ structureMode: "extract_from_source" })}>{tx(locale, "从原文提取", "Extract")}</StructureButton>
+              <StructureButton active={source.structureMode === "organized"} disabled={disabled} onClick={() => onUpdate({ structureMode: "organized" })}>{source.sourceMode === "inline_text" ? tx(locale, "按题描述", "Per Problem") : tx(locale, "已按题整理", "Organized")}</StructureButton>
+              <StructureButton active={source.structureMode === "extract_from_source"} disabled={disabled} onClick={() => onUpdate({ structureMode: "extract_from_source" })}>{source.sourceMode === "inline_text" ? tx(locale, "整体规则", "Overall Rules") : tx(locale, "从原文提取", "Extract")}</StructureButton>
             </div>
           </div>
-          {source.structureMode === "extract_from_source" ? (
+          {source.sourceMode === "inline_text" ? (
+            <p className="self-end pb-1 text-xs leading-5 text-muted-foreground">
+              {source.structureMode === "organized"
+                ? tx(locale, "请在描述中写明题号；系统会分别匹配到对应题目。", "Include problem numbers so each rule can be matched directly.")
+                : tx(locale, "整体规则会由 SmarTAI 结合每道题的标答生成对应评分步骤。", "SmarTAI applies the overall rules to each answer's grading steps.")}
+            </p>
+          ) : source.structureMode === "extract_from_source" ? (
             <label className="grid gap-2 text-xs font-semibold text-muted-foreground">
               {tx(locale, "提取说明", "Extraction Hint")}
               <textarea value={source.extractionHint} disabled={disabled} maxLength={2000} onChange={(event) => onUpdate({ extractionHint: event.target.value })} placeholder={tx(locale, "例如：第 3 章习题 1–8，只提取正文中的题目与对应答案", "Example: Chapter 3, exercises 1–8")} className="min-h-[74px] resize-y rounded-[7px] border bg-card px-3 py-2 text-sm font-normal leading-5 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
@@ -483,7 +512,7 @@ function SourceEditor({
         </div>
 
         {source.sourceMode === "upload" ? (
-          <label className="mt-4 inline-flex items-center gap-2 text-xs text-muted-foreground">
+          <label className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground">
             <input type="checkbox" checked={source.saveToLibrary} disabled={disabled} onChange={(event) => onUpdate({ saveToLibrary: event.target.checked })} className="h-4 w-4 rounded border-border accent-primary" />
             {tx(locale, "同时保存到课程资料库", "Also save to course library")}
           </label>
@@ -573,6 +602,7 @@ function createSourceDraft(role: PreparationSourceRole): SourceDraft {
     libraryScope: "course",
     librarySearch: "",
     libraryMaterial: null,
+    inlineText: "",
     structureMode: "organized",
     extractionHint: "",
     saveToLibrary: false,
@@ -585,12 +615,15 @@ function getRestoredDraft(state: unknown, taskId?: string) {
 }
 
 function sourceHasValue(source: SourceDraft) {
-  return source.sourceMode === "upload" ? Boolean(source.file) : Boolean(source.libraryMaterial);
+  if (source.sourceMode === "upload") return Boolean(source.file);
+  if (source.sourceMode === "inline_text") return Boolean(source.inlineText?.trim());
+  return Boolean(source.libraryMaterial);
 }
 
 function sourceSummary(source: SourceDraft, locale: string) {
   if (source.sourceMode === "upload" && source.file) return source.file.name;
   if (source.sourceMode === "library" && source.libraryMaterial) return source.libraryMaterial.filename;
+  if (source.sourceMode === "inline_text" && source.inlineText?.trim()) return tx(locale, "自然语言评分标准", "Natural-language rubric");
   return tx(locale, `${roleMeta(source.role, locale).shortTitle}来源`, `${roleMeta(source.role, locale).shortTitle} source`);
 }
 
@@ -598,13 +631,13 @@ function roleMeta(role: PreparationSourceRole, locale: string) {
   const zh = {
     problem: { title: "题目文件（必填）", shortTitle: "题目", description: "上传题目正文，或从课程资料库选择题目来源。" },
     reference_answer: { title: "标答 / 解答（可选）", shortTitle: "标答", description: "可只提供最终答案；SmarTAI 会补全可审核的解题过程。" },
-    rubric: { title: "评分标准（可选）", shortTitle: "评分标准", description: "评分步骤会与标答步骤一并呈现，便于一次审核。" },
+    rubric: { title: "评分标准（可选）", shortTitle: "评分标准", description: "可上传文件、从资料库选择或直接描述；评分步骤会与标答对应。" },
     programming_tests: { title: "编程题测试资料（可选）", shortTitle: "测试样例", description: "仅编程题使用，支持输入、期望输出、解释与隐藏测试。" },
   } as const;
   const en = {
     problem: { title: "Problem Files (Required)", shortTitle: "Problems", description: "Upload problem statements or choose them from the course library." },
     reference_answer: { title: "Answers / Solutions (Optional)", shortTitle: "Answers", description: "A final answer is enough; SmarTAI will expand it into a reviewable solution." },
-    rubric: { title: "Grading Rubrics (Optional)", shortTitle: "Rubrics", description: "Rubric items are reviewed alongside the matching answer steps." },
+    rubric: { title: "Grading Rubrics (Optional)", shortTitle: "Rubrics", description: "Upload, choose from the library, or describe rules that align with answer steps." },
     programming_tests: { title: "Programming Tests (Optional)", shortTitle: "Test Cases", description: "Programming problems only: inputs, expected outputs, explanations and hidden tests." },
   } as const;
   return locale === "zh-CN" ? zh[role] : en[role];

@@ -1,6 +1,6 @@
 import type { TaskMutationResponse } from "./task";
 
-export type ProblemSourceMode = "upload" | "library";
+export type ProblemSourceMode = "upload" | "library" | "inline_text";
 export type ProblemSourceScope = "course" | "all";
 export type ProblemStructureMode = "organized" | "extract_from_source";
 export type PreparationSourceRole = "problem" | "reference_answer" | "rubric" | "programming_tests";
@@ -63,6 +63,7 @@ export interface ProblemSourcePreflightInput {
   role?: PreparationSourceRole;
   file?: File | null;
   libraryMaterialId?: string | null;
+  inlineText?: string;
   structureMode: ProblemStructureMode;
   extractionHint?: string;
   saveToLibrary: boolean;

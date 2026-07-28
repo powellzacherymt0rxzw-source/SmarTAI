@@ -512,6 +512,7 @@ _AI_COMPLETION_MAX_GENERATED_BYTES = 2 * 1024 * 1024
 _PROBLEM_SOURCE_EXTENSIONS = {".pdf", ".txt", ".md", ".json"}
 _PROBLEM_SOURCE_MAX_CHARACTERS = 400_000
 _PROBLEM_SOURCE_MAX_ESTIMATED_TOKENS = 120_000
+_INLINE_RUBRIC_MAX_CHARACTERS = 12_000
 _SUBMISSION_SOURCE_MAX_BYTES = 50 * 1024 * 1024
 _SUBMISSION_ROSTER_MAX_BYTES = 1024 * 1024
 _SUBMISSION_SOURCE_SUFFIXES = (
@@ -1655,6 +1656,7 @@ async def preflight_problem_source(
     task_id: str,
     file: Optional[UploadFile] = File(default=None),
     library_material_id: Optional[str] = Form(default=None),
+    inline_text: Optional[str] = Form(default=None),
     structure_mode: Literal["organized", "extract_from_source"] = Form(default="organized"),
     extraction_hint: str = Form(default=""),
     save_to_library: bool = Form(default=False),
@@ -1670,10 +1672,30 @@ async def preflight_problem_source(
     _check_owner(task, current)
     base_workflow_revision = task.workflow_revision
     material_id = (library_material_id or "").strip() or None
-    if (file is None) == (material_id is None):
+    natural_language_text = (inline_text or "").strip()
+    supplied_source_count = sum((file is not None, material_id is not None, bool(natural_language_text)))
+    if supplied_source_count != 1:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Provide exactly one of file or library_material_id.",
+            detail="Provide exactly one of file, library_material_id, or inline_text.",
+        )
+    if natural_language_text and role != "rubric":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "inline_text_requires_rubric_role"},
+        )
+    if len(natural_language_text) > _INLINE_RUBRIC_MAX_CHARACTERS:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "code": "inline_rubric_character_limit_exceeded",
+                "max_characters": _INLINE_RUBRIC_MAX_CHARACTERS,
+            },
+        )
+    if natural_language_text and save_to_library:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "inline_text_cannot_be_saved_to_library"},
         )
     hint = extraction_hint.strip()
     if len(hint) > 2000:
@@ -1685,7 +1707,8 @@ async def preflight_problem_source(
     saved_material_created = False
     if file is not None:
         filename, content_type, raw_bytes, text, content_sha256 = await _read_problem_source_upload(file)
-        source_kind: Literal["upload", "library"] = "upload"
+        source_kind: Literal["upload", "library", "inline_text"] = "upload"
+        source_size_bytes = len(raw_bytes)
         if save_to_library:
             if task.course_id is not None:
                 _validate_course_id(task.course_id, task.owner_id)
@@ -1708,7 +1731,7 @@ async def preflight_problem_source(
                     detail={"code": exc.code},
                 ) from exc
             material_id = saved_material.material_id
-    else:
+    elif material_id is not None:
         material = material_store.get_for_owner(material_id or "", task.owner_id)
         if material is None:
             # Non-disclosure: another owner's material has the same response.
@@ -1721,9 +1744,15 @@ async def preflight_problem_source(
         text = material.text
         content_sha256 = material.sha256
         source_kind = "library"
-
-    if file is not None:
+    else:
+        _validate_problem_source_text(natural_language_text)
+        raw_bytes = natural_language_text.encode("utf-8")
+        filename = "rubric-natural-language.txt"
+        content_type = "text/plain; charset=utf-8"
         source_size_bytes = len(raw_bytes)
+        text = natural_language_text
+        content_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+        source_kind = "inline_text"
 
     candidates, not_found = (
         _detect_problem_source_candidates(

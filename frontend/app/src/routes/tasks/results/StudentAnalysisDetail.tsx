@@ -273,9 +273,15 @@ function DimensionBar({ className, locale, dimension, value, current, matches, a
   }, [value]);
 
   return (
-    <section className={cn("relative grid gap-2 rounded-[9px] border bg-background px-3 py-2 md:grid-cols-[96px_150px_minmax(170px,1fr)_180px_96px] md:items-center", className)} aria-label={isStudent ? tx(locale, "学生导航", "Student navigation") : tx(locale, "题目导航", "Question navigation")}>
+    <section className={cn("relative grid gap-2 rounded-[9px] border bg-background px-3 py-2 md:grid-cols-[90px_250px_minmax(180px,1fr)_160px_90px] md:items-center", className)} aria-label={isStudent ? tx(locale, "学生导航", "Student navigation") : tx(locale, "题目导航", "Question navigation")}>
       <NavButton disabled={!previous || allMode} onClick={() => previous && onSelect(previous.id)} icon={isStudent ? ArrowLeft : ArrowUp} label={isStudent ? tx(locale, "上一位", "Previous") : tx(locale, "上一题", "Previous Q")} shortcut={isStudent ? "←" : "↑"} />
-      <div className="min-w-0 px-2 text-center"><p className="truncate text-[12px] font-bold text-foreground">{allMode ? tx(locale, "全部题目", "All questions") : current?.primary ?? "—"}</p><p className="truncate text-[10px] text-muted-foreground">{allMode ? tx(locale, "学生保持不变", "Student stays fixed") : current?.secondary}</p></div>
+      <div className="min-w-0 px-2 text-center" title={!allMode && current ? `${current.secondary} · ${current.primary}` : undefined}>
+        {isStudent && !allMode && current ? (
+          <p className="truncate text-[15px] font-bold tracking-[-0.01em] text-primary">{current.secondary} <span className="mx-1 text-primary/45">·</span> {current.primary}</p>
+        ) : (
+          <><p className="truncate text-[12px] font-bold text-foreground">{allMode ? tx(locale, "全部题目", "All questions") : current?.primary ?? "—"}</p><p className="truncate text-[10px] text-muted-foreground">{allMode ? tx(locale, "学生保持不变", "Student stays fixed") : current?.secondary}</p></>
+        )}
+      </div>
       <div className="relative">
         <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input

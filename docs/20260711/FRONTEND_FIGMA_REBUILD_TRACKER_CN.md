@@ -968,6 +968,16 @@
 - 视觉证据：`R01-review-matrix-aligned-full.jpg`、`S05-submission-matrix-aligned.jpg`，位于当前 Codex 临时可视化目录。
 - 详细记录：`docs/20260727/S05_R01_MATRIX_QUEUE_ALIGNMENT_STAGE_CN.md`。
 
+### 9.15 Q01 密度、自然语言评分标准与详情身份层级（2026-07-28）
+
+- [x] Q01-DENSITY-01 仅收紧上传页外层间距、卡片 padding、上传区高度和资料类型栏高度；保留正文层级与按钮热区。`1920×1080` 下单文件流程完整落在首屏，窄屏继续滚动且无横向溢出。
+- [x] Q01-RUBRIC-01 评分标准资料位新增“自然语言描述”，与上传文件、课程资料库并列；支持按题描述/整体规则，输入计数即时更新，不再要求教师把文字规则伪装成文件。
+- [x] Q01-RUBRIC-API-01 后端新增 owner/task/revision 受控的 `inline_text` 来源；只允许 rubric、三类来源严格三选一、禁止直接保存资料库、限制 12,000 字并有稳定错误码与契约测试。
+- [x] C02-TIMER-01 批改任务摘要自动开始等待由 5 秒调整为 10 秒，“立即开始批改”和幂等启动路径不变。
+- [x] DETAIL-STUDENT-01 校对作答、复核批改、结果学生详情统一把当前学生显示为更醒目的 `学号 · 姓名` 单行，搜索栏让出空间；相邻学生继续保持次级导航层级。
+- [x] QA-20260728-01 前端 visible-scope/lint、TypeScript、production build与后端来源契约通过；浏览器在 `1920×1080` 验证题目单文件页和自然语言评分标准页均首屏完整、无横向溢出，未调用 provider。
+- 详细记录：`docs/20260728/Q01_C02_DETAIL_NAV_DENSITY_STAGE_CN.md`。
+
 ---
 
 ## 10. 本轮产品决定确认记录

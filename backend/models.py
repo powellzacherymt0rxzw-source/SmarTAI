@@ -160,7 +160,7 @@ class MaterialFieldProvenance(BaseModel):
 
     import_job_id: str
     candidate_id: str
-    source_kind: Literal["upload", "library"]
+    source_kind: Literal["upload", "library", "inline_text"]
     source_filename: str
     library_material_id: Optional[str] = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -583,7 +583,7 @@ class ProblemSourceDraft(BaseModel):
     task_id: str
     owner_id: str
     role: PreparationSourceRole = "problem"
-    source_kind: Literal["upload", "library"]
+    source_kind: Literal["upload", "library", "inline_text"]
     structure_mode: ProblemStructureMode
     extraction_hint: str = ""
     filename: str
