@@ -20,6 +20,14 @@ from backend.db.session import configure_database  # noqa: E402
 @pytest.fixture(autouse=True)
 def isolated_database():
     database_url = os.environ["SMARTAI_DATABASE_URL"]
+    postgres_url = os.environ.get("SMARTAI_TEST_POSTGRES_URL")
+    if postgres_url and database_url == postgres_url:
+        # The focused PostgreSQL suite owns its schema lifecycle through its
+        # ``pg_database`` fixture.  Do not apply the SQLite file reset before
+        # that fixture has a chance to run.
+        yield
+        return
+
     engine = configure_database(database_url)
     # ``create_all`` alone retains rows from the previous test, which makes
     # fixed-id security regressions order-dependent. This suite always uses the
