@@ -77,6 +77,18 @@ select {
   font: inherit;
 }
 
+.grading-advanced-control {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.grading-advanced-control::placeholder {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
 .grading-range {
   --range-progress: 50%;
   height: 22px;

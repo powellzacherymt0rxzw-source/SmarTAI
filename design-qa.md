@@ -112,3 +112,45 @@ final result: passed
 - `npm run build` passed with `937 modules transformed`.
 
 final result: passed
+
+## 2026-07-27 advanced-settings hierarchy refinement
+
+### Evidence and normalization
+
+- User-marked source reference: `/var/folders/_p/v8vvlf6x441989_5zxzsl3y40000gn/T/codex-clipboard-db4a4601-8477-4989-8791-495db09549ef.png` (`2058 × 1134` px).
+- Browser-rendered implementation: `/private/tmp/smartai-advanced-settings-final.png` (`1487 × 1058` px at a `1487 × 1058` CSS viewport, device scale factor `1`).
+- Focused source/implementation comparison input: `/private/tmp/smartai-advanced-settings-comparison.png` (`2200 × 760` px).
+- Responsive implementation evidence: `/private/tmp/smartai-advanced-settings-mobile-focused.png` (`390 × 844` px at a `390 × 844` CSS viewport, device scale factor `1`).
+- Route and state: `/tasks/T_qa_grading_setup/grading-setup`, light theme, Chinese locale, advanced settings expanded, strictness `50`, partial credit enabled, threshold `0.60`.
+- The source is a problem-markup screenshot rather than a pixel-clone target. The comparison therefore evaluates the requested corrections: unify the advanced-settings surface and make field values/placeholders subordinate to their labels.
+
+### Findings
+
+- No actionable P0/P1/P2 mismatch remains in the requested advanced-settings scope.
+- Fonts and typography: field labels are `13px / 600 / 20px`; select values and the textarea placeholder are `12px / 400 / 18px`; helper text is `12px / 18px`. Computed browser styles confirmed the control reset no longer overrides this hierarchy.
+- Spacing and layout rhythm: the former detached 72px disclosure plus blue left rail is replaced by one bordered card with a 56px header, an internal divider, compact 16–20px panel padding, a two-column desktop grid, and one-column mobile stacking.
+- Colors and tokens: the implementation stays on the existing white/card, muted fill, border, foreground, muted-foreground, and primary-blue tokens; no new decorative color or elevation language was introduced.
+- Image quality and asset fidelity: there is no product imagery in this region. The gear and chevrons use the existing Lucide icon family with consistent stroke weight and 18–20px sizing; no custom SVG/CSS substitute was added.
+- Copy and content: all original labels, descriptions, values, placeholder text, counts, and advanced summary remain intact. The summary remains visible in both collapsed and expanded states to reinforce the hierarchy.
+- Accessibility and behavior: the disclosure remains a semantic button with `aria-expanded` and `aria-controls`; all controls retain their labels, focus styles, controlled values, disabled conditions, and handlers.
+
+### Focused and responsive comparison
+
+- The combined comparison clearly shows the requested value hierarchy change for `中性`, `适中`, `中文`, `1 次`, and the teacher-notes placeholder; each is now visually quieter than its corresponding label.
+- At `390 × 844`, the advanced panel measures `306px` wide within the viewport; its selects and textarea measure `274px`, with no target-section clipping or document-level horizontal overflow.
+- At `640 × 900`, the panel measures `524px` wide and retains the same `12px / 400 / 18px` control typography without horizontal overflow.
+
+### Interaction and engineering checks
+
+- Expanded, collapsed, and re-expanded the disclosure; fields hid and returned with the original values preserved.
+- Changed the feedback-tone select from `neutral` to `strict`, then restored `neutral`.
+- Browser console: `0` warnings and `0` errors in the final route state.
+- `npm run lint`, `npm run build`, and `git diff --check` passed.
+
+### Comparison history
+
+- Pass 1 identified two requested P2-level hierarchy problems visible in the source: the expanded panel read as a separate unfinished block, and native-control values/placeholders overpowered their labels.
+- Fixes: unified the disclosure and panel into one card; removed the blue left rail; reduced header height; introduced explicit label/value/helper type roles; and added scoped control typography so the global `font: inherit` reset could not override the intended value size.
+- Pass 2 used `/private/tmp/smartai-advanced-settings-comparison.png` plus desktop/mobile browser evidence. No P0/P1/P2 issue remained.
+
+final result: passed

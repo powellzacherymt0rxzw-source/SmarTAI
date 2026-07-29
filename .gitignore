@@ -26,7 +26,7 @@ frontend/uploaded_files/
 frontend/app/node_modules/
 frontend/app/dist/
 frontend/app/.vite/
-frontend/app/.playwright-cli/
+.playwright-cli/
 frontend/app/*.local
 
 # ─── Secrets & credentials ──────────────────────────────────────────────────
@@ -57,6 +57,7 @@ Thumbs.db
 # ─── Logs / temp ────────────────────────────────────────────────────────────
 *.log
 *.tmp
+/output/
 
 # ─── docs / figs ────────────────────────────────────────────────────────────
 docs/

@@ -409,8 +409,9 @@ function ModelSection({
                   </label>
                 ) : !hasMultiple && selected && expert.enabled ? (
                   <div className="flex w-full items-center gap-4 pl-8 sm:w-auto sm:pl-0">
-                    <span className="inline-flex h-8 items-center rounded-full bg-muted px-3 text-[12px] font-semibold text-foreground">
+                    <span className="inline-flex h-10 min-w-[150px] items-center justify-between gap-4 rounded-[8px] border bg-background px-3 text-[13px] font-semibold text-foreground">
                       {gradingSetupText(locale, "singleMethod")}
+                      <ChevronDown aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
                     </span>
                     <span className="hidden whitespace-nowrap text-[13px] text-muted-foreground md:inline">{gradingSetupText(locale, "singleMethodDescription")}</span>
                   </div>
@@ -759,57 +760,69 @@ function StrategySection({
         </label>
       </div>
 
-      <button type="button" aria-label={gradingSetupText(locale, advancedOpen ? "hideAdvanced" : "showAdvanced")} aria-expanded={advancedOpen} aria-controls="grading-advanced-settings" onClick={onAdvancedToggle} className="mt-2 flex min-h-[72px] w-full items-center justify-between gap-3 rounded-[8px] border bg-card px-5 py-3.5 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:-mx-4 sm:w-[calc(100%+2rem)]">
-        <span className="flex min-w-0 items-center gap-3">
-          <Settings aria-hidden="true" className="h-5 w-5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 md:flex md:items-center md:gap-8">
-            <span className="block shrink-0 text-[14px] font-semibold leading-5 text-foreground">{locale === "zh-CN" ? "高级设置" : "Advanced settings"}</span>
-            {!advancedOpen ? <span className="mt-0.5 block truncate text-[13px] leading-5 text-muted-foreground md:mt-0">{advancedSummary}</span> : null}
+      <div className="mt-2 overflow-hidden rounded-[8px] border bg-card sm:-mx-4">
+        <button
+          type="button"
+          aria-label={gradingSetupText(locale, advancedOpen ? "hideAdvanced" : "showAdvanced")}
+          aria-expanded={advancedOpen}
+          aria-controls="grading-advanced-settings"
+          onClick={onAdvancedToggle}
+          className={cn(
+            "flex min-h-[56px] w-full items-center justify-between gap-3 px-4 py-2.5 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+            advancedOpen && "bg-muted/20",
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-3">
+            <Settings aria-hidden="true" className="h-[18px] w-[18px] shrink-0 text-muted-foreground" />
+            <span className="min-w-0 md:flex md:items-center md:gap-8">
+              <span className="block shrink-0 text-[14px] font-semibold leading-5 text-foreground">{locale === "zh-CN" ? "高级设置" : "Advanced settings"}</span>
+              <span className="mt-0.5 block truncate text-[12px] leading-[18px] text-muted-foreground md:mt-0">{advancedSummary}</span>
+            </span>
           </span>
-        </span>
-        <ChevronRight aria-hidden="true" className={cn("h-5 w-5 shrink-0 text-muted-foreground transition-transform", advancedOpen && "rotate-90")} />
-      </button>
+          <ChevronRight aria-hidden="true" className={cn("h-5 w-5 shrink-0 text-muted-foreground transition-transform", advancedOpen && "rotate-90")} />
+        </button>
 
-      {advancedOpen ? (
-        <div id="grading-advanced-settings" className="mt-4 grid gap-4 border-l-2 border-primary/20 pl-4 sm:grid-cols-2">
-          <SelectField label={gradingSetupText(locale, "feedbackTone")} value={setup.feedback_tone} onChange={(value) => onChange((current) => ({ ...current, feedback_tone: value as GradingFeedbackTone }))}>
-            <option value="encouraging">{gradingSetupText(locale, "toneEncouraging")}</option>
-            <option value="neutral">{gradingSetupText(locale, "toneNeutral")}</option>
-            <option value="strict">{gradingSetupText(locale, "toneStrict")}</option>
-          </SelectField>
-          <SelectField label={gradingSetupText(locale, "feedbackLength")} value={setup.feedback_length} onChange={(value) => onChange((current) => ({ ...current, feedback_length: value as GradingFeedbackLength }))}>
-            <option value="short">{gradingSetupText(locale, "lengthShort")}</option>
-            <option value="medium">{gradingSetupText(locale, "lengthMedium")}</option>
-            <option value="long">{gradingSetupText(locale, "lengthLong")}</option>
-          </SelectField>
-          <SelectField label={gradingSetupText(locale, "feedbackLanguage")} value={setup.feedback_language} onChange={(value) => onChange((current) => ({ ...current, feedback_language: value as GradingFeedbackLanguage }))}>
-            <option value="zh">{gradingSetupText(locale, "languageChinese")}</option>
-            <option value="en">{gradingSetupText(locale, "languageEnglish")}</option>
-          </SelectField>
-          <SelectField
-            label={gradingSetupText(locale, "multiSample")}
-            value={String(setup.multi_sample_n)}
-            disabled={usesSharedPool || multipleModels}
-            description={gradingSetupText(locale, usesSharedPool ? "multiSampleSharedDescription" : multipleModels ? "multiSampleMultipleDescription" : "multiSampleDescription")}
-            onChange={(value) => onChange((current) => ({ ...current, multi_sample_n: Number(value) }))}
-          >
-            {SAMPLE_OPTIONS.map((count) => <option key={count} value={count}>{count}{gradingSetupText(locale, "multiSampleSuffix")}</option>)}
-          </SelectField>
-          <label className="sm:col-span-2">
-            <span className="flex items-center justify-between text-[13px] font-semibold text-foreground"><span>{gradingSetupText(locale, "lowConfidenceThreshold")}</span><span className="text-primary">{setup.low_confidence_threshold.toFixed(2)}</span></span>
-            <input type="range" min={0.3} max={0.8} step={0.05} value={setup.low_confidence_threshold} onChange={(event) => onChange((current) => ({ ...current, low_confidence_threshold: Number(event.target.value) }))} className="grading-range mt-3 w-full" style={{ "--range-progress": `${((setup.low_confidence_threshold - 0.3) / 0.5) * 100}%` } as CSSProperties} />
-            <span className="mt-1.5 block text-[13px] leading-5 text-muted-foreground">{gradingSetupText(locale, "lowConfidenceDescription")}</span>
-          </label>
-          <label className="flex cursor-pointer items-start gap-2 text-[13px] font-medium leading-5 text-foreground sm:col-span-2">
-            <input type="checkbox" checked={setup.suggest_corrections} onChange={(event) => onChange((current) => ({ ...current, suggest_corrections: event.target.checked }))} className="mt-0.5 h-4 w-4 rounded border-border accent-primary" />
-            {gradingSetupText(locale, "suggestCorrections")}
-          </label>
-          <label className="sm:col-span-2">
-            <span className="flex items-center justify-between text-[13px] font-semibold text-foreground"><span>{gradingSetupText(locale, "teacherNotes")}</span><span className="font-normal text-muted-foreground">{setup.teacher_notes.length}/{MAX_NOTES_LENGTH}{gradingSetupText(locale, "charactersSuffix")}</span></span>
-            <textarea maxLength={MAX_NOTES_LENGTH} value={setup.teacher_notes} onChange={(event) => onChange((current) => ({ ...current, teacher_notes: event.target.value }))} placeholder={gradingSetupText(locale, "teacherNotesPlaceholder")} className="mt-2 min-h-[84px] w-full resize-y rounded-[8px] border bg-background px-3 py-2.5 text-[13px] leading-5 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15" />
-          </label>
-        </div>
-      ) : null}
+        {advancedOpen ? (
+          <div id="grading-advanced-settings" className="grid gap-x-5 gap-y-3 border-t bg-muted/20 px-4 py-4 sm:grid-cols-2 sm:px-5">
+            <SelectField label={gradingSetupText(locale, "feedbackTone")} value={setup.feedback_tone} onChange={(value) => onChange((current) => ({ ...current, feedback_tone: value as GradingFeedbackTone }))}>
+              <option value="encouraging">{gradingSetupText(locale, "toneEncouraging")}</option>
+              <option value="neutral">{gradingSetupText(locale, "toneNeutral")}</option>
+              <option value="strict">{gradingSetupText(locale, "toneStrict")}</option>
+            </SelectField>
+            <SelectField label={gradingSetupText(locale, "feedbackLength")} value={setup.feedback_length} onChange={(value) => onChange((current) => ({ ...current, feedback_length: value as GradingFeedbackLength }))}>
+              <option value="short">{gradingSetupText(locale, "lengthShort")}</option>
+              <option value="medium">{gradingSetupText(locale, "lengthMedium")}</option>
+              <option value="long">{gradingSetupText(locale, "lengthLong")}</option>
+            </SelectField>
+            <SelectField label={gradingSetupText(locale, "feedbackLanguage")} value={setup.feedback_language} onChange={(value) => onChange((current) => ({ ...current, feedback_language: value as GradingFeedbackLanguage }))}>
+              <option value="zh">{gradingSetupText(locale, "languageChinese")}</option>
+              <option value="en">{gradingSetupText(locale, "languageEnglish")}</option>
+            </SelectField>
+            <SelectField
+              label={gradingSetupText(locale, "multiSample")}
+              value={String(setup.multi_sample_n)}
+              disabled={usesSharedPool || multipleModels}
+              description={gradingSetupText(locale, usesSharedPool ? "multiSampleSharedDescription" : multipleModels ? "multiSampleMultipleDescription" : "multiSampleDescription")}
+              onChange={(value) => onChange((current) => ({ ...current, multi_sample_n: Number(value) }))}
+            >
+              {SAMPLE_OPTIONS.map((count) => <option key={count} value={count}>{count}{gradingSetupText(locale, "multiSampleSuffix")}</option>)}
+            </SelectField>
+            <label className="border-t pt-3 sm:col-span-2">
+              <span className="flex items-center justify-between gap-4 text-[13px] font-semibold leading-5 text-foreground"><span>{gradingSetupText(locale, "lowConfidenceThreshold")}</span><span className="shrink-0 text-[12px] tabular-nums text-primary">{setup.low_confidence_threshold.toFixed(2)}</span></span>
+              <input type="range" min={0.3} max={0.8} step={0.05} value={setup.low_confidence_threshold} onChange={(event) => onChange((current) => ({ ...current, low_confidence_threshold: Number(event.target.value) }))} className="grading-range mt-2.5 w-full" style={{ "--range-progress": `${((setup.low_confidence_threshold - 0.3) / 0.5) * 100}%` } as CSSProperties} />
+              <span className="mt-1 block text-[12px] leading-[18px] text-muted-foreground">{gradingSetupText(locale, "lowConfidenceDescription")}</span>
+            </label>
+            <label className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-[8px] border bg-card px-3 py-2 text-[13px] font-medium leading-5 text-foreground sm:col-span-2">
+              <input type="checkbox" checked={setup.suggest_corrections} onChange={(event) => onChange((current) => ({ ...current, suggest_corrections: event.target.checked }))} className="h-4 w-4 shrink-0 rounded border-border accent-primary" />
+              {gradingSetupText(locale, "suggestCorrections")}
+            </label>
+            <label className="sm:col-span-2">
+              <span className="flex items-center justify-between gap-4 text-[13px] font-semibold leading-5 text-foreground"><span>{gradingSetupText(locale, "teacherNotes")}</span><span className="shrink-0 text-[12px] font-normal tabular-nums text-muted-foreground">{setup.teacher_notes.length}/{MAX_NOTES_LENGTH}{gradingSetupText(locale, "charactersSuffix")}</span></span>
+              <textarea maxLength={MAX_NOTES_LENGTH} value={setup.teacher_notes} onChange={(event) => onChange((current) => ({ ...current, teacher_notes: event.target.value }))} placeholder={gradingSetupText(locale, "teacherNotesPlaceholder")} className="grading-advanced-control mt-1.5 min-h-[72px] w-full resize-y rounded-[8px] border bg-card px-3 py-2.5 text-[12px] font-normal leading-[18px] text-foreground shadow-sm outline-none placeholder:text-muted-foreground/90 focus:border-primary focus:ring-2 focus:ring-primary/15" />
+            </label>
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -843,14 +856,14 @@ function SelectField({ label, value, disabled = false, description, onChange, ch
 }) {
   return (
     <label className="min-w-0">
-      <span className="block text-[13px] font-semibold text-foreground">{label}</span>
-      <span className="relative mt-2 block">
-        <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className="h-10 w-full min-w-0 appearance-none rounded-[8px] border bg-background px-3 pr-10 text-[13px] text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground">
+      <span className="block text-[13px] font-semibold leading-5 text-foreground">{label}</span>
+      <span className="relative mt-1.5 block">
+        <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className="grading-advanced-control h-10 w-full min-w-0 appearance-none rounded-[8px] border bg-card px-3 pr-10 text-[12px] font-normal leading-[18px] text-foreground shadow-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground">
           {children}
         </select>
         <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       </span>
-      {description ? <span className="mt-1.5 block text-[12px] leading-5 text-muted-foreground">{description}</span> : null}
+      {description ? <span className="mt-1.5 block text-[12px] leading-[18px] text-muted-foreground">{description}</span> : null}
     </label>
   );
 }
