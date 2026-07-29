@@ -8,10 +8,14 @@ import zlib
 import pytest
 from fastapi import HTTPException
 
+from backend.tools import file_processing
 from backend.skills.ocr_ingest import OCRResult
 from backend.tools.file_processing import extract_files_from_archive, extract_text_from_upload
 
-fitz = pytest.importorskip("fitz")
+try:
+    import fitz
+except ImportError:
+    fitz = None
 
 
 class FakeOCRSkill:
@@ -128,6 +132,7 @@ async def test_extract_text_upload_txt_skips_ocr():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(fitz is None, reason="PyMuPDF is not installed")
 async def test_extract_text_upload_native_pdf_skips_ocr():
     ocr = FakeOCRSkill()
     body = _pdf_with_text("This native PDF has enough selectable text. " * 5)
@@ -144,6 +149,7 @@ async def test_extract_text_upload_native_pdf_skips_ocr():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(fitz is None, reason="PyMuPDF is not installed")
 async def test_extract_text_upload_scanned_pdf_uses_ocr():
     ocr = FakeOCRSkill("OCR from scanned PDF")
 
@@ -217,3 +223,38 @@ async def test_unsupported_single_file_returns_clear_error():
 
     assert exc.value.status_code == 415
     assert "Unsupported file type" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_extract_7z_with_current_py7zr_api(tmp_path):
+    py7zr = pytest.importorskip("py7zr")
+    archive_path = tmp_path / "students.7z"
+    with py7zr.SevenZipFile(archive_path, "w") as archive:
+        archive.writestr("姓名：卫六\n答案：A\n", "PB20241669_卫六.txt")
+
+    files = await extract_files_from_archive(
+        archive_path.read_bytes(),
+        archive_path.name,
+    )
+
+    assert files == [{
+        "filename": "PB20241669_卫六.txt",
+        "content": "姓名：卫六\n答案：A\n",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_archive_rejects_parent_path_member():
+    archive = _zip_bytes({"../escape.txt": b"nope"})
+
+    with pytest.raises(ValueError, match="Unsafe path"):
+        await extract_files_from_archive(archive, "students.zip")
+
+
+@pytest.mark.asyncio
+async def test_archive_rejects_oversized_member(monkeypatch):
+    monkeypatch.setattr(file_processing, "SUBMISSION_ARCHIVE_MAX_MEMBER_BYTES", 3)
+    archive = _zip_bytes({"answer.txt": b"four"})
+
+    with pytest.raises(ValueError, match="oversized"):
+        await extract_files_from_archive(archive, "students.zip")

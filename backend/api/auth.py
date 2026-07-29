@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.auth import create_token, get_current_user, hash_password, verify_password
 from backend.config import settings
@@ -26,6 +26,11 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+    @field_validator("username", mode="before")
+    @classmethod
+    def _strip_username(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
 
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=64)
@@ -35,6 +40,19 @@ class RegisterRequest(BaseModel):
     # teacher/student and never admin.
     role: str = "teacher"
     invite_code: Optional[str] = None
+
+    @field_validator("username", "email", mode="before")
+    @classmethod
+    def _strip_identity_fields(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("invite_code", mode="before")
+    @classmethod
+    def _normalize_invite_code(cls, value):
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        return stripped or None
 
 
 def _set_refresh_cookie(response: Response, raw: str) -> None:

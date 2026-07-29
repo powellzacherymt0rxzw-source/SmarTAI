@@ -1,0 +1,53 @@
+import type { Locale } from "@/i18n/messages";
+
+const copy = {
+  title: ["复核批改", "Grading Review"],
+  average: ["平均得分率", "Average score"],
+  lowConfidence: ["低置信题次", "Low-confidence responses"],
+  disagreement: ["专家分歧大", "High expert disagreement"],
+  annotated: ["已复核", "Reviewed"],
+  startReview: ["开始优先复核", "Start priority review"],
+  viewResult: ["查看任一结果", "View a result"],
+  searchPlaceholder: ["SmarTAI 智能搜索：低置信、低于 60 分、专家分歧、学生姓名或 Q2…", "SmarTAI Smart Search: low confidence, below 60, disagreement, student, or Q2…"],
+  searchLabel: ["SmarTAI 智能筛选批改结果", "SmarTAI Smart-filter grading results"],
+  heatmap: ["学生 × 题目复核热力图", "Student × problem review heatmap"],
+  queue: ["待复核队列", "Review queue"],
+  review: ["复核", "Review"],
+  low: ["低", "Low"],
+  ok: ["OK", "OK"],
+  commented: ["批注", "Note"],
+  confirmed: ["已确认", "Confirmed"],
+  noQueue: ["当前没有低置信、专家分歧或后端复核标记。", "No low-confidence, disagreement, or backend review flags were found."],
+  noMatch: ["没有符合当前筛选条件的题次。清空输入可恢复全部结果。", "No responses match this filter. Clear it to restore all results."],
+  clear: ["清空筛选", "Clear filter"],
+  loadError: ["暂时无法读取批改结果", "Grading results could not be loaded"],
+  loadErrorDescription: ["任务数据没有被修改。请刷新后重试，或从历史任务重新进入。", "Task data was not changed. Refresh or reopen it from History."],
+  retry: ["重新读取", "Retry"],
+  missingTask: ["缺少任务信息，请从工作台或历史任务重新进入。", "Task information is missing. Reopen it from Workspace or History."],
+  loading: ["正在读取批改结果…", "Loading grading results…"],
+  empty: ["当前任务没有可显示的批改结果。", "This task has no grading results to display."],
+  viewHistory: ["查看历史任务", "View History"],
+  lowReason: ["作答低置信", "Low-confidence response"],
+  disagreementReason: ["专家分歧", "Expert disagreement"],
+  anomalyReason: ["分数异常", "Score anomaly"],
+  reviewReason: ["需要人工确认", "Needs teacher review"],
+  filtered: ["筛选后 {students} 位学生 · {questions} 道题 · {cells} 个题次", "Filtered to {students} students · {questions} problems · {cells} responses"],
+  studentId: ["学号", "Student ID"],
+  studentName: ["姓名", "Name"],
+  action: ["操作", "Action"],
+  view: ["查看", "View"],
+  viewDetails: ["查看批改详情", "View grading details"],
+  confirmReview: ["确认复核完成", "Confirm review complete"],
+  confirming: ["正在确认…", "Confirming…"],
+  confirmDisabled: ["请先处理待复核题次，再确认复核完成。", "Resolve the review queue before confirming completion."],
+  viewFinalResults: ["查看最终结果", "View final results"],
+  remainingHint: ["还有 {count} 个题次需要复核；可从矩阵或右侧队列直接进入。", "{count} responses still need review. Open one from the matrix or queue."],
+  readyHint: ["所有待复核题次均已处理，可以确认并生成正式结果。", "All flagged responses are resolved. You can confirm and generate final results."],
+  historyHint: ["当前为已完成任务的只读复核记录，可查看批改详情或进入最终结果。", "This is a read-only review record. Open grading details or final results."],
+} as const;
+
+export type ReviewOverviewCopyKey = keyof typeof copy;
+
+export function reviewOverviewText(locale: Locale, key: ReviewOverviewCopyKey): string {
+  return copy[key][locale === "en-US" ? 1 : 0];
+}

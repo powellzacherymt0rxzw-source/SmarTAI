@@ -85,7 +85,10 @@ def delete_document_endpoint(document_id: str, current: User = Depends(get_curre
     document = get_document(document_id, current.id)
     if document is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Knowledge document not found")
-    remove_document(document=document, owner_id=current.id)
+    try:
+        remove_document(document=document, owner_id=current.id)
+    except DomainError as exc:
+        return domain_error_response(exc)
     return {"status": "deleted", "id": document_id}
 
 

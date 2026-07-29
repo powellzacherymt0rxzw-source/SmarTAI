@@ -3,9 +3,9 @@ algorithm (``grade_batch``).
 
 This module only *translates* shapes — it never changes prompts, skills, or
 scoring. It builds the ``problem_store`` / ``student_store`` dicts that
-``grade_batch`` expects from normalized question and revision rows, calls
-``grade_batch(..., task_id=assignment_id)`` so persistent assignment knowledge
-stays reachable through the existing parameter, and maps each returned
+``grade_batch`` expects from normalized question and revision rows, supplies
+the frozen grading-run knowledge scope through the existing ``task_id``
+parameter, and maps each returned
 ``Correction`` into a ``GradeResultDTO``.
 
 Failure semantics (no publishable real zero):
@@ -22,7 +22,7 @@ from typing import Any
 from backend.agents.grading_agent import grade_batch
 from backend.domain import education
 from backend.domain.errors import DomainError
-from backend.models import Correction
+from backend.models import Correction, TaskGradingSetup
 from backend.config import settings
 
 
@@ -169,9 +169,11 @@ async def run_grading(
     questions: list[education.QuestionDTO],
     frozen_revisions: list[tuple[education.SubmissionRevisionDTO, str]],
     registry, language: str = "en", reporter=None,
+    grading_setup: TaskGradingSetup | None = None,
 ) -> list[AdapterOutcome]:
     """Run the unchanged algorithm over normalized inputs and return per-student
-    outcomes. ``task_id=assignment_id`` keeps persistent knowledge in scope.
+    outcomes. A façade run reads only the knowledge ids frozen at run creation;
+    a normalized caller without setup keeps the assignment scope.
 
     Raises on a batch-level failure (the caller marks the run failed); per-
     question failures are mapped to ``needs_review`` results, not dropped.
@@ -180,6 +182,15 @@ async def run_grading(
     student_store = build_student_store(frozen_revisions)
     if not student_store or not problem_store:
         return []
+    knowledge_task_id = (
+        None
+        if grading_setup is not None and grading_setup.knowledge_scope == "none"
+        else (
+            f"grading-run:{run_id}"
+            if grading_setup is not None
+            else assignment_id
+        )
+    )
     if settings.e2e_fake_provider:
         from backend.testing.fake_provider import FakeProvider, fake_grade_batch
 
@@ -188,12 +199,15 @@ async def run_grading(
             problem_store=problem_store,
             provider=FakeProvider(fail_qids={settings.e2e_fail_qid} if settings.e2e_fail_qid else set()),
             language=language,
-            task_id=assignment_id,
+            task_id=knowledge_task_id,
         )
     else:
         raw_results = await grade_batch(
             student_store=student_store, problem_store=problem_store, registry=registry,
-            reporter=reporter, language=language, task_id=assignment_id,
+            reporter=reporter, language=language, task_id=knowledge_task_id,
+            multi_sample_n=grading_setup.multi_sample_n if grading_setup else None,
+            aggregation_method=grading_setup.aggregation_method if grading_setup else None,
+            grading_setup=grading_setup,
         )
     revision_by_student = {sid: rev for rev, sid in frozen_revisions}
     raw_by_student = {raw.get("student_id", ""): raw for raw in raw_results}
@@ -215,35 +229,3 @@ async def run_grading(
             results.append(normalized)
         outcomes.append(AdapterOutcome(student_id=student_id, results=results))
     return outcomes
-
-
-def normalize_results(
-    *,
-    assignment_id: str,
-    run_id: str,
-    student_ids: list[str],
-    questions: list[education.QuestionDTO],
-    frozen_revisions: dict[str, education.SubmissionRevisionDTO | None],
-    corrections: dict[str, list[Correction]],
-) -> list[education.GradeResultDTO]:
-    """Deterministic mapping seam: turn pre-built per-student corrections into
-    GradeResult DTOs without invoking the LLM.
-
-    Used by tests and by any caller that already holds the grade_batch output.
-    Mirrors ``run_grading``'s per-question mapping via ``correction_to_result``
-    so production and test paths share one normalization rule. A student with no
-    frozen revision is skipped (no answer to grade).
-    """
-    del assignment_id  # scope already applied when grade_batch ran; kept for API symmetry
-    results: list[education.GradeResultDTO] = []
-    for sid in student_ids:
-        rev = frozen_revisions.get(sid)
-        if rev is None:
-            continue
-        corr_by_qid = {c.q_id: c for c in corrections.get(sid, [])}
-        for q in questions:
-            results.append(correction_to_result(
-                run_id=run_id, revision_id=rev.id, question=q,
-                student_id=sid, correction=corr_by_qid.get(q.q_id),
-            ))
-    return results

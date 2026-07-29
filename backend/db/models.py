@@ -130,6 +130,13 @@ class ProviderConfigRecord(Base):
     )
     max_concurrent: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     rpm: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    verification_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unverified"
+    )
+    last_checked_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    verification_error_code: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
     created_at: Mapped[float] = mapped_column(Float, nullable=False, default=time.time)
     updated_at: Mapped[float] = mapped_column(
         Float, nullable=False, default=time.time, onupdate=time.time
@@ -266,6 +273,15 @@ class AssignmentKnowledgeDocumentRecord(Base):
     )
     document_id: Mapped[str] = mapped_column(
         ForeignKey("knowledge_documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Presentation provenance required by the Figma grading-setup surface.
+    # Content still lives only in KnowledgeDocumentRecord; this records how the
+    # document was attached and whether it is backed by Course Library metadata.
+    source_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="upload"
+    )
+    library_material_id: Mapped[str | None] = mapped_column(
+        ForeignKey("course_materials.id", ondelete="SET NULL"), nullable=True
     )
     selected_at: Mapped[float] = mapped_column(Float, nullable=False, default=time.time)
 
@@ -505,6 +521,15 @@ class GradeResultRecord(Base):
         default=False, server_default=text("false"), nullable=False
     )
     review_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Immutable audit facts captured when the AI result is first persisted.
+    # Teacher decisions may resolve ``requires_review``/``review_reason`` but
+    # must never erase why the result originally entered the review queue.
+    initial_requires_review: Mapped[bool] = mapped_column(
+        default=False, server_default=text("false"), nullable=False
+    )
+    initial_review_reason: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
+    )
     # graded | failed | needs_review. "failed"/"needs_review" are excluded from
     # totals and from release; the frontend routes them to the review queue.
     result_status: Mapped[str] = mapped_column(String(32), nullable=False, default="graded")
@@ -548,7 +573,22 @@ class TeacherReviewRecord(Base):
     new_score: Mapped[float] = mapped_column(Float, nullable=False)
     new_comment: Mapped[str] = mapped_column(Text, nullable=False, default="")
     comment: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    confirmed: Mapped[bool] = mapped_column(
+        default=False, server_default=text("false"), nullable=False
+    )
+    # Monotonic within one grade result. This is the primary ordering key;
+    # wall-clock timestamps are audit metadata and may move backwards.
+    review_sequence: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
     created_at: Mapped[float] = mapped_column(Float, nullable=False, default=time.time)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "grade_result_id", "review_sequence",
+            name="uq_teacher_reviews_result_sequence",
+        ),
+    )
 
 
 # ─── Stored files ─────────────────────────────────────────────────────────────
@@ -635,3 +675,125 @@ class KnowledgeChunkRecord(Base):
     chunk_metadata: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[float] = mapped_column(Float, nullable=False, default=time.time)
+
+
+# ─── Course library metadata (document/file content stays canonical) ─────────────
+
+
+class CourseMaterialGroupRecord(Base):
+    """Owner-scoped folder metadata for Course Library materials."""
+
+    __tablename__ = "course_material_groups"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id", "normalized_name",
+            name="uq_course_material_groups_owner_normalized_name",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    course_id: Mapped[str | None] = mapped_column(
+        ForeignKey("courses.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[float] = mapped_column(Float, nullable=False, default=time.time)
+    updated_at: Mapped[float] = mapped_column(
+        Float, nullable=False, default=time.time, onupdate=time.time
+    )
+
+
+class CourseMaterialRecord(Base):
+    """Presentation/classification metadata for a canonical knowledge document.
+
+    Bytes, hashes, parse state, and extracted chunks remain owned by
+    ``StoredFileRecord`` / ``KnowledgeDocumentRecord``.  Renaming a library
+    item therefore changes only ``display_name`` and never rewrites the stored
+    object's immutable original filename.
+    """
+
+    __tablename__ = "course_materials"
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('textbook', 'answer', 'lecture', 'rubric', 'other')",
+            name="ck_course_materials_category",
+        ),
+        UniqueConstraint("document_id", name="uq_course_materials_document_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    course_id: Mapped[str | None] = mapped_column(
+        ForeignKey("courses.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    group_id: Mapped[str | None] = mapped_column(
+        ForeignKey("course_material_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    display_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False, default="other")
+    # Bounded presentation leaf: the API enforces <=20 unique labels and <=60
+    # characters per item. Tags used for task history are normalized rows below.
+    labels: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[float] = mapped_column(Float, nullable=False, default=time.time)
+    updated_at: Mapped[float] = mapped_column(
+        Float, nullable=False, default=time.time, onupdate=time.time
+    )
+
+
+# ─── Assignment tags ──────────────────────────────────────────────────────
+
+
+class TagRecord(Base):
+    __tablename__ = "tags"
+    __table_args__ = (
+        CheckConstraint(
+            "color IN ('slate', 'blue', 'teal', 'green', 'amber', 'rose', 'violet')",
+            name="ck_tags_color",
+        ),
+        UniqueConstraint(
+            "owner_id", "normalized_name", name="uq_tags_owner_normalized_name"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    color: Mapped[str] = mapped_column(String(16), nullable=False, default="slate")
+    created_at: Mapped[float] = mapped_column(Float, nullable=False, default=time.time)
+    updated_at: Mapped[float] = mapped_column(
+        Float, nullable=False, default=time.time, onupdate=time.time
+    )
+
+
+class AssignmentTagRecord(Base):
+    """Normalized many-to-many assignment/tag membership."""
+
+    __tablename__ = "assignment_tags"
+    __table_args__ = (
+        UniqueConstraint(
+            "assignment_id", "tag_id", name="uq_assignment_tags_assignment_tag"
+        ),
+    )
+
+    assignment_id: Mapped[str] = mapped_column(
+        ForeignKey("assignments.id", ondelete="CASCADE"), primary_key=True
+    )
+    tag_id: Mapped[str] = mapped_column(
+        ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    assigned_at: Mapped[float] = mapped_column(Float, nullable=False, default=time.time)

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from backend.auth import get_current_user, require_admin, require_teacher
@@ -23,16 +23,16 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 class PatchUserRequest(BaseModel):
-    username: Optional[str] = None
-    email: Optional[str] = None
+    username: Optional[str] = Field(default=None, min_length=3, max_length=64)
+    email: Optional[str] = Field(default=None, max_length=254)
     role: Optional[str] = None
 
 
 class InviteRequest(BaseModel):
-    email: str = ""
+    email: str = Field(default="", max_length=254)
     role: str = "student"
     course_id: Optional[str] = None
-    expires_in_hours: int = 168  # 7 days
+    expires_in_hours: int = Field(default=168, ge=1, le=720)  # 1 hour–30 days
 
 
 def _visible_student_ids(teacher_id: str) -> set[str]:

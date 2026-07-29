@@ -239,8 +239,104 @@ def test_persisted_ai_fields_are_immutable_after_review(setup_assignment):
     assert review.new_score == 9.0
     after = grading_repository.list_results_for_run(run_id=run.id)[0]
     assert after.ai_score == 7.0  # immutable AI original
+    assert after.initial_requires_review is True
+    assert after.initial_review_reason == "low_confidence"
+    assert after.requires_review is False
+    assert after.review_reason is None
     latest = grading_repository.latest_teacher_review(grade_result_id=rid)
     assert latest is not None and latest.new_score == 9.0
+
+
+def test_later_serialized_review_wins_when_clock_moves_backward(
+    setup_assignment, monkeypatch,
+):
+    """The later committed decision wins even if its wall clock is earlier.
+
+    Each call commits separately. Production PostgreSQL serializes concurrent
+    callers on the run row, so commit order receives sequences 1 then 2.
+    """
+    from sqlalchemy import select
+
+    from backend.db.models import GradeResultRecord, TeacherReviewRecord
+    from backend.db.session import session_scope
+
+    run = grading_runs.create_run(
+        teacher_id=setup_assignment["teacher_id"],
+        assignment_id=setup_assignment["assignment_id"],
+    )
+    grading_runs.persist_results(
+        run_id=run.id,
+        worker_id=setup_assignment["teacher_id"],
+        results=[
+            education.GradeResultDTO(
+                id="",
+                grading_run_id=run.id,
+                submission_revision_id=(
+                    grading_repository.list_frozen_submissions(run_id=run.id)[0].id
+                ),
+                question_id=setup_assignment["question_id"],
+                student_id=setup_assignment["student_id"],
+                q_id="q1",
+                ai_score=None,
+                ai_max_score=10.0,
+                requires_review=True,
+                review_reason="low_confidence",
+                result_status=education.GradeResultStatus.NEEDS_REVIEW.value,
+                created_at=0,
+                updated_at=0,
+            )
+        ],
+    )
+    grading_repository.mark_completed(
+        run.id,
+        worker_id=setup_assignment["teacher_id"],
+        completed=1,
+        failed=0,
+    )
+    result_id = grading_repository.list_results_for_run(run_id=run.id)[0].id
+
+    timestamps = iter((200.0, 100.0))
+    monkeypatch.setattr(grading_repository.time, "time", lambda: next(timestamps))
+    first = grading_repository.add_teacher_review(
+        grade_result_id=result_id,
+        teacher_id=setup_assignment["teacher_id"],
+        new_score=6.0,
+        new_comment="first committed decision",
+        confirm=False,
+    )
+    second = grading_repository.add_teacher_review(
+        grade_result_id=result_id,
+        teacher_id=setup_assignment["teacher_id"],
+        new_score=9.0,
+        new_comment="later committed decision",
+        confirm=True,
+    )
+
+    assert first.created_at == 200.0
+    assert second.created_at == 100.0
+    latest = grading_repository.latest_teacher_review(grade_result_id=result_id)
+    assert latest is not None
+    assert latest.id == second.id
+    assert latest.new_score == 9.0
+    effective = grading_repository.list_results_for_run(run_id=run.id)[0]
+    assert effective.effective_score == 9.0
+    assert effective.initial_requires_review is True
+    assert effective.initial_review_reason == "low_confidence"
+
+    with session_scope() as session:
+        rows = session.scalars(
+            select(TeacherReviewRecord)
+            .where(TeacherReviewRecord.grade_result_id == result_id)
+            .order_by(TeacherReviewRecord.review_sequence)
+        ).all()
+        result = session.get(GradeResultRecord, result_id)
+        assert result is not None
+        assert [(row.id, row.review_sequence) for row in rows] == [
+            (first.id, 1),
+            (second.id, 2),
+        ]
+        assert result.initial_requires_review is True
+        assert result.initial_review_reason == "low_confidence"
 
 
 def test_release_blocked_while_failures_unresolved(setup_assignment):
@@ -327,6 +423,25 @@ def test_student_visibility_only_after_release(setup_assignment):
     seen = grading_runs.student_results(student_id=setup_assignment["student_id"], assignment_id=setup_assignment["assignment_id"])
     assert len(seen) == 1
     assert seen[0].ai_score == 8.0
+    # A later submission is input to a future run. It must not hide the result
+    # already published from this run.
+    submission_repository.add_revision(
+        submission_id=setup_assignment["submission_id"],
+        student_id=setup_assignment["student_id"],
+        source=education.SubmissionRevisionSource.ONLINE.value,
+        answers=[{
+            "question_id": setup_assignment["question_id"],
+            "q_id": setup_assignment["q_id"],
+            "type": "short",
+            "content": "updated after release",
+        }],
+    )
+    still_visible = grading_runs.student_results(
+        student_id=setup_assignment["student_id"],
+        assignment_id=setup_assignment["assignment_id"],
+    )
+    assert len(still_visible) == 1
+    assert still_visible[0].id == seen[0].id
     with pytest.raises(InvalidTransition):
         grading_repository.add_teacher_review(
             grade_result_id=seen[0].id,
@@ -466,6 +581,108 @@ def test_release_rechecks_unresolved_results_in_same_transaction(setup_assignmen
     grading_repository.mark_completed(run.id, worker_id="w1", completed=1, failed=1)
     with pytest.raises(ResultNotReleasable):
         grading_runs.release(teacher_id=setup_assignment["teacher_id"], run_id=run.id)
+
+
+def test_release_blocks_when_expected_result_matrix_is_incomplete(setup_assignment):
+    run = grading_runs.create_run(
+        teacher_id=setup_assignment["teacher_id"],
+        assignment_id=setup_assignment["assignment_id"],
+    )
+    grading_repository.claim_lease(
+        run_id=run.id, worker_id="w-incomplete", lease_seconds=60,
+    )
+    grading_repository.mark_completed(
+        run_id=run.id, worker_id="w-incomplete", completed=1, failed=0,
+    )
+
+    with pytest.raises(ResultNotReleasable) as exc_info:
+        grading_runs.release(
+            teacher_id=setup_assignment["teacher_id"], run_id=run.id,
+        )
+    assert exc_info.value.code == "incomplete_result_matrix"
+
+
+def test_reclaimed_worker_recomputes_counters_from_existing_results(
+    setup_assignment, monkeypatch,
+):
+    import time as _time
+
+    from backend.db.models import GradingRunRecord
+    from backend.db.session import session_scope
+
+    run = grading_runs.create_run(
+        teacher_id=setup_assignment["teacher_id"],
+        assignment_id=setup_assignment["assignment_id"],
+    )
+    grading_repository.claim_lease(
+        run_id=run.id, worker_id="w-dead", lease_seconds=60,
+    )
+    revision = submission_repository.get_current_revision_for_run(
+        submission_id=setup_assignment["submission_id"]
+    )
+    question = assignment_repository.get_questions_by_assignment(
+        assignment_id=setup_assignment["assignment_id"]
+    )[0]
+    result = grading_adapter.correction_to_result(
+        run_id=run.id, revision_id=revision.id, question=question,
+        student_id=setup_assignment["student_id"],
+        correction=__import__("backend.models", fromlist=["Correction"]).Correction(
+            q_id=question.q_id, type=question.type, score=8.0,
+            max_score=question.max_score, confidence=1, comment="ok", steps=[],
+        ),
+    )
+    grading_repository.upsert_result(
+        run.id, worker_id="w-dead", grade_result=result,
+    )
+    with session_scope() as session:
+        record = session.get(GradingRunRecord, run.id)
+        assert record is not None
+        record.lease_expiry = _time.time() - 1
+
+    async def replay_existing_result(**_kwargs):
+        return [grading_adapter.AdapterOutcome(
+            student_id=setup_assignment["student_id"], results=[result],
+        )]
+
+    class _Registry:
+        @staticmethod
+        def count():
+            return 1
+
+    monkeypatch.setattr(grading_adapter, "run_grading", replay_existing_result)
+    asyncio.run(grading_runs.process_run(
+        run_id=run.id, worker_id="w-reclaimed", registry=_Registry(),
+    ))
+
+    recovered = grading_repository.get_run(run.id)
+    assert recovered.status == education.GradingRunStatus.COMPLETED.value
+    assert recovered.completed_submissions == 1
+    assert recovered.failed_submissions == 0
+
+
+def test_explicit_e2e_provider_does_not_require_persisted_provider_config(
+    setup_assignment, monkeypatch,
+):
+    run = grading_runs.create_run(
+        teacher_id=setup_assignment["teacher_id"],
+        assignment_id=setup_assignment["assignment_id"],
+    )
+
+    class _EmptyRegistry:
+        @staticmethod
+        def count():
+            return 0
+
+    monkeypatch.setattr(grading_runs.settings, "e2e_fake_provider", True)
+    monkeypatch.setattr(grading_runs.settings, "e2e_fail_qid", "")
+    asyncio.run(grading_runs.process_run(
+        run_id=run.id, worker_id="w-e2e", registry=_EmptyRegistry(),
+    ))
+
+    completed = grading_repository.get_run(run.id)
+    assert completed.status == education.GradingRunStatus.COMPLETED.value
+    assert completed.completed_submissions == 1
+    assert completed.failed_submissions == 0
 
 
 def test_adapter_marks_missing_student_batch_output_for_review(setup_assignment, monkeypatch):

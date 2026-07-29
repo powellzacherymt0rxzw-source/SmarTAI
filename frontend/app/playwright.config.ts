@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const frontendUrl = process.env.SMARTAI_E2E_FRONTEND_URL ?? "http://127.0.0.1:5173";
+
 /**
  * Playwright config for the normalized learning-workflow E2E suite.
  *
@@ -17,13 +19,13 @@ export default defineConfig({
   retries: 0,
   reporter: "list",
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: frontendUrl,
     trace: "on-first-retry",
     ignoreHTTPSErrors: true,
   },
   webServer: {
     command: "npm run dev",
-    url: "http://127.0.0.1:5173",
+    url: frontendUrl,
     reuseExistingServer: true,
     timeout: 60_000,
   },

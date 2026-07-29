@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import posixpath
+import sys
 import tarfile
+import tempfile
+import threading
 import zipfile
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import List, Dict
 
 try:
@@ -37,6 +41,16 @@ from backend.config import settings
 from backend.skills.ocr_ingest import OCRImage, OCRIngestSkill, OCRPurpose
 
 logger = logging.getLogger(__name__)
+
+PDF_MAX_PAGES = 100
+PDF_MAX_CHARACTERS = 500_000
+PDF_EXTRACTION_TIMEOUT_SECONDS = 10.0
+PDF_EXTRACTION_MAX_WORKERS = 2
+_PDF_EXTRACTION_SLOTS = threading.BoundedSemaphore(PDF_EXTRACTION_MAX_WORKERS)
+_PDF_WORKER_PATH = Path(__file__).with_name("_pdf_worker.py")
+SUBMISSION_ARCHIVE_MAX_FILES = 500
+SUBMISSION_ARCHIVE_MAX_EXPANDED_BYTES = 100 * 1024 * 1024
+SUBMISSION_ARCHIVE_MAX_MEMBER_BYTES = 5 * 1024 * 1024
 
 TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".rst"}
 IMAGE_MEDIA_TYPES = {
@@ -64,22 +78,104 @@ async def decode_text_bytes(text_bytes: bytes) -> str:
             )
 
 
-async def extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    """Extract text from a PDF file."""
+async def _extract_pdf_payload(
+    pdf_bytes: bytes,
+    *,
+    max_pages: int = PDF_MAX_PAGES,
+    max_characters: int = PDF_MAX_CHARACTERS,
+    timeout_seconds: float = PDF_EXTRACTION_TIMEOUT_SECONDS,
+) -> tuple[str, int]:
+    """Extract PDF text in a killable subprocess with hard ceilings."""
     if fitz is None:
         raise HTTPException(
             status_code=501,
             detail="PDF processing requires 'PyMuPDF'; pip install PyMuPDF"
         )
+    if not _PDF_EXTRACTION_SLOTS.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail={"code": "pdf_extraction_busy"})
+    process = None
     try:
-        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-            return "".join(page.get_text() for page in doc)
-    except Exception as e:
-        logger.error(f"Error processing PDF with PyMuPDF: {e}")
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(_PDF_WORKER_PATH),
+            str(max_pages),
+            str(max_characters),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            stdout, _ = await asyncio.wait_for(
+                process.communicate(pdf_bytes),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            process.kill()
+            await process.wait()
+            logger.warning("PDF extraction timed out")
+            raise HTTPException(
+                status_code=408,
+                detail={
+                    "code": "pdf_extraction_timeout",
+                    "timeout_seconds": timeout_seconds,
+                },
+            ) from exc
+        try:
+            payload = json.loads(stdout.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "pdf_extraction_failed"},
+            ) from exc
+        worker_status = payload.get("status")
+        if worker_status == "ok":
+            return str(payload.get("text", "")), int(payload.get("page_count", 0))
+        if worker_status == "page_limit":
+            raise HTTPException(
+                status_code=413,
+                detail={"code": "pdf_page_limit_exceeded", "max_pages": max_pages},
+            )
+        if worker_status == "character_limit":
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "code": "pdf_character_limit_exceeded",
+                    "max_characters": max_characters,
+                },
+            )
+        raise HTTPException(status_code=400, detail={"code": "pdf_extraction_failed"})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if process is not None and process.returncode is None:
+            process.kill()
+            await process.wait()
+        logger.warning(
+            "PDF extraction failed; exception_type=%s",
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to extract text from PDF: {e}",
-        )
+            detail={"code": "pdf_extraction_failed"},
+        ) from exc
+    finally:
+        _PDF_EXTRACTION_SLOTS.release()
+
+
+async def extract_text_from_pdf(
+    pdf_bytes: bytes,
+    *,
+    max_pages: int = PDF_MAX_PAGES,
+    max_characters: int = PDF_MAX_CHARACTERS,
+    timeout_seconds: float = PDF_EXTRACTION_TIMEOUT_SECONDS,
+) -> str:
+    text, _ = await _extract_pdf_payload(
+        pdf_bytes,
+        max_pages=max_pages,
+        max_characters=max_characters,
+        timeout_seconds=timeout_seconds,
+    )
+    return text
 
 
 def _ext(name: str) -> str:
@@ -172,9 +268,15 @@ def _render_pdf_pages_for_ocr(pdf_bytes: bytes, filename: str) -> list[OCRImage]
             return images
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error rendering PDF for OCR: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to render PDF for OCR: {e}")
+    except Exception as exc:
+        logger.warning(
+            "PDF rendering for OCR failed; exception_type=%s",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "pdf_ocr_render_failed"},
+        ) from exc
 
 
 async def extract_text_from_upload(
@@ -203,13 +305,7 @@ async def extract_text_from_upload(
                 status_code=501,
                 detail="PDF processing requires 'PyMuPDF'; pip install PyMuPDF"
             )
-        try:
-            with fitz.open(stream=file_bytes, filetype="pdf") as doc:
-                page_count = len(doc)
-                text = "".join(page.get_text() for page in doc)
-        except Exception as e:
-            logger.error(f"Error processing PDF with PyMuPDF: {e}")
-            raise HTTPException(status_code=400, detail=f"Failed to extract text from PDF: {e}")
+        text, page_count = await _extract_pdf_payload(file_bytes)
 
         if not _is_likely_scanned_pdf(text, page_count):
             return text
@@ -270,12 +366,30 @@ def _repair_zip_member_name(name: str) -> str:
     return repaired if _has_cjk(repaired) else name
 
 
-def _clean_member_name(name: str) -> str:
+def _safe_member_name(name: str) -> str:
+    """Return a stable relative member path or reject traversal/absolute input."""
     normalized = name.replace("\\", "/")
-    normalized = posixpath.normpath(normalized).lstrip("/")
-    if normalized in ("", ".") or normalized.startswith("../"):
-        normalized = posixpath.basename(name)
+    path = PurePosixPath(normalized)
+    if path.is_absolute() or any(part == ".." for part in path.parts):
+        raise ValueError("Unsafe path in submission archive")
+    normalized = posixpath.normpath(normalized)
+    if normalized in {"", "."} or normalized.startswith("../"):
+        raise ValueError("Unsafe path in submission archive")
     return normalized
+
+
+def _validate_archive_members(sizes: List[int]) -> None:
+    if len(sizes) > SUBMISSION_ARCHIVE_MAX_FILES:
+        raise ValueError("Submission archive contains too many files")
+    if any(size < 0 or size > SUBMISSION_ARCHIVE_MAX_MEMBER_BYTES for size in sizes):
+        raise ValueError("Submission archive contains an oversized file")
+    if sum(sizes) > SUBMISSION_ARCHIVE_MAX_EXPANDED_BYTES:
+        raise ValueError("Submission archive expands beyond the safe limit")
+
+
+def _validate_extracted_member(data: bytes) -> None:
+    if len(data) > SUBMISSION_ARCHIVE_MAX_MEMBER_BYTES:
+        raise ValueError("Submission archive contains an oversized file")
 
 
 async def extract_files_from_archive(
@@ -296,11 +410,14 @@ async def extract_files_from_archive(
     if lower.endswith(".zip"):
         with zipfile.ZipFile(file_in_memory, "r") as zf:
             valid = [i for i in zf.infolist() if not i.is_dir() and _is_valid_file(i.filename)]
+            _validate_archive_members([i.file_size for i in valid])
 
             async def process(info):
-                clean = _clean_member_name(_repair_zip_member_name(info.filename))
+                clean = _safe_member_name(_repair_zip_member_name(info.filename))
+                data = zf.read(info.filename)
+                _validate_extracted_member(data)
                 content = await extract_text_from_upload(
-                    zf.read(info.filename),
+                    data,
                     clean,
                     ocr_skill=ocr_skill,
                     purpose=purpose,
@@ -316,11 +433,14 @@ async def extract_files_from_archive(
         try:
             with rarfile.RarFile(file_in_memory, "r") as rf:
                 valid = [i for i in rf.infolist() if not i.is_dir() and _is_valid_file(i.filename)]
+                _validate_archive_members([i.file_size for i in valid])
 
                 async def process(info):
-                    clean = _clean_member_name(info.filename)
+                    clean = _safe_member_name(info.filename)
+                    data = rf.read(info.filename)
+                    _validate_extracted_member(data)
                     content = await extract_text_from_upload(
-                        rf.read(info.filename),
+                        data,
                         clean,
                         ocr_skill=ocr_skill,
                         purpose=purpose,
@@ -338,34 +458,56 @@ async def extract_files_from_archive(
         if py7zr is None:
             raise ValueError("Processing .7z files requires 'py7zr'; pip install py7zr")
         with py7zr.SevenZipFile(file_in_memory, "r") as szf:
-            all_files = szf.readall()
-            valid = {n: bio for n, bio in all_files.items() if _is_valid_file(n)}
+            valid = [
+                info
+                for info in szf.list()
+                if info.is_file and not info.is_symlink and _is_valid_file(info.filename)
+            ]
+            _validate_archive_members([int(info.uncompressed) for info in valid])
+            safe_targets = [_safe_member_name(info.filename) for info in valid]
+            with tempfile.TemporaryDirectory(prefix="smartai-submissions-") as temp_dir:
+                root = Path(temp_dir).resolve()
+                szf.extract(path=root, targets=safe_targets)
 
-            async def process(item):
-                n, bio = item
-                clean = _clean_member_name(n)
-                content = await extract_text_from_upload(
-                    bio.read(),
-                    clean,
-                    ocr_skill=ocr_skill,
-                    purpose=purpose,
-                    reporter=reporter,
-                )
-                return {"filename": clean, "content": content}
+                async def process(item):
+                    info, clean = item
+                    extracted = (root / clean).resolve()
+                    try:
+                        extracted.relative_to(root)
+                    except ValueError as exc:
+                        raise ValueError("Unsafe path in submission archive") from exc
+                    if not extracted.is_file() or extracted.is_symlink():
+                        raise ValueError("Unsafe path in submission archive")
+                    extracted.chmod(0o600)
+                    data = extracted.read_bytes()
+                    _validate_extracted_member(data)
+                    content = await extract_text_from_upload(
+                        data,
+                        clean,
+                        ocr_skill=ocr_skill,
+                        purpose=purpose,
+                        reporter=reporter,
+                    )
+                    return {"filename": clean, "content": content}
 
-            files_data.extend(await _gather_limited([process(i) for i in valid.items()]))
+                files_data.extend(await _gather_limited([
+                    process(item) for item in zip(valid, safe_targets)
+                ]))
 
     elif lower.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2")):
         with tarfile.open(fileobj=file_in_memory, mode="r:*") as tf:
             valid = [m for m in tf.getmembers() if m.isfile() and _is_valid_file(m.name)]
+            _validate_archive_members([m.size for m in valid])
 
             async def process(member):
-                clean = _clean_member_name(member.name)
+                clean = _safe_member_name(member.name)
                 obj = tf.extractfile(member)
                 if obj is None:
                     return None
+                data = obj.read()
+                _validate_extracted_member(data)
                 content = await extract_text_from_upload(
-                    obj.read(),
+                    data,
                     clean,
                     ocr_skill=ocr_skill,
                     purpose=purpose,

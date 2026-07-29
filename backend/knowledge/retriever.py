@@ -4,7 +4,11 @@ from typing import Optional
 
 import numpy as np
 
-from backend.db.knowledge_repository import list_chunks, list_selected_documents
+from backend.db.knowledge_repository import (
+    get_document,
+    list_chunks,
+    list_selected_documents,
+)
 from backend.rag.embedder import BM25Embedder
 from backend.rag.store import InMemoryTaskRetriever
 from backend.tools.knowledge import KnowledgeChunk, KnowledgeRetriever
@@ -44,13 +48,52 @@ class CombinedKnowledgeRetriever(InMemoryTaskRetriever):
         self._persistent = PersistentKnowledgeRetriever()
 
     async def retrieve(self, query: str, k: int = 5, *, scope: Optional[str] = None) -> list[KnowledgeChunk]:
-        transient = await super().retrieve(query, k, scope=scope)
+        # A grading-run scope is an immutable, database-backed selection.  Do
+        # not mix in mutable process-local uploads that happen to use the same
+        # string as a scope key after the teacher has started grading.
+        transient = (
+            []
+            if scope and scope.startswith("grading-run:")
+            else await super().retrieve(query, k, scope=scope)
+        )
         persistent = await self._persistent.retrieve(query, k, scope=scope)
         return sorted(transient + persistent, key=lambda item: item.score, reverse=True)[:max(0, int(k))]
 
 
 def list_selected_documents_for_scope(scope: str):
-    """Resolve an assignment scope to its teacher owner without exposing cross-user documents."""
+    """Resolve an assignment or immutable grading-run knowledge scope.
+
+    ``grading-run:<id>`` reads the owner-validated document ids frozen in the
+    run's input manifest.  Assignment scopes retain the setup/edit-preview
+    behavior of resolving the teacher's *current* selection.
+    """
+    if scope.startswith("grading-run:"):
+        run_id = scope.removeprefix("grading-run:")
+        if not run_id:
+            return []
+        from backend.db import grading_repository
+        from backend.db.workflow_repository import get_run_setup
+        from backend.domain.errors import DomainError
+
+        try:
+            run = grading_repository.get_run(run_id)
+        except DomainError:
+            return []
+        frozen_setup = get_run_setup(run_id)
+        if frozen_setup is None or frozen_setup.owner_id != run.teacher_id:
+            return []
+        document_ids = list(dict.fromkeys(
+            (frozen_setup.input_manifest or {}).get("knowledge_document_ids", [])
+        ))
+        documents = [
+            document
+            for document_id in document_ids
+            if isinstance(document_id, str)
+            and (document := get_document(document_id, run.teacher_id)) is not None
+            and document.status == "ready"
+        ]
+        return documents
+
     from backend.db.session import session_scope
     from backend.db.models import AssignmentRecord
     from sqlalchemy import select

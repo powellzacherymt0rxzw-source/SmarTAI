@@ -61,9 +61,143 @@ def test_normalized_tables_exist_after_roundtrip(tmp_path, monkeypatch):
         "grade_results",
         "teacher_reviews",
         "stored_files",
+        "course_material_groups",
+        "course_materials",
+        "tags",
+        "assignment_tags",
+        "assignment_workflows",
+        "task_create_idempotency",
+        "workflow_operations",
+        "assignment_student_presentations",
+        "submission_answer_presentations",
+        "grading_run_setups",
+        "result_artifact_manifests",
     } <= tables
     # Legacy tables must not reappear after the roundtrip.
     assert not ({"tasks", "grading_jobs", "task_knowledge_documents"} & tables)
+
+
+def test_workflow_migration_preserves_existing_review_and_kb_link(
+    tmp_path, monkeypatch,
+):
+    """0003 must backfill real 0002 rows, not only migrate an empty schema."""
+    from sqlalchemy import create_engine, text
+
+    db_url = f"sqlite:///{(tmp_path / 'preserve.db').as_posix()}"
+    cfg = _alembic_config(db_url, monkeypatch)
+    command.upgrade(cfg, "0002_course_library_tags")
+    engine = create_engine(db_url)
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO users "
+            "(id, username, role, password_hash, is_active, created_at, updated_at) "
+            "VALUES ('teacher', 'teacher', 'teacher', 'h', 1, 1, 1), "
+            "('student', 'student', 'student', 'h', 1, 1, 1)"
+        ))
+        connection.execute(text(
+            "INSERT INTO courses "
+            "(id, name, code, description, teacher_id, created_at, updated_at) "
+            "VALUES ('course', 'Course', '', '', 'teacher', 1, 1)"
+        ))
+        connection.execute(text(
+            "INSERT INTO assignments "
+            "(id, course_id, teacher_id, name, description, status, created_at, "
+            "updated_at, version) VALUES "
+            "('assignment', 'course', 'teacher', 'Assignment', '', 'published', 1, 1, 1)"
+        ))
+        connection.execute(text(
+            "INSERT INTO assignment_questions "
+            "(id, assignment_id, q_id, order_index, number, type, stem, criterion, "
+            "max_score, version, created_at, updated_at) VALUES "
+            "('question', 'assignment', 'q1', 0, '1', 'short', 'stem', 'rubric', "
+            "10, 1, 1, 1)"
+        ))
+        connection.execute(text(
+            "INSERT INTO submissions "
+            "(id, assignment_id, student_id, current_revision_id, created_at, updated_at) "
+            "VALUES ('submission', 'assignment', 'student', NULL, 1, 1)"
+        ))
+        connection.execute(text(
+            "INSERT INTO submission_revisions "
+            "(id, submission_id, revision_number, source, file_name, created_at) "
+            "VALUES ('revision', 'submission', 1, 'online', '', 1)"
+        ))
+        connection.execute(text(
+            "UPDATE submissions SET current_revision_id='revision' WHERE id='submission'"
+        ))
+        connection.execute(text(
+            "INSERT INTO grading_runs "
+            "(id, assignment_id, teacher_id, status, total_submissions, "
+            "completed_submissions, failed_submissions, created_at, completed_at) "
+            "VALUES ('run', 'assignment', 'teacher', 'completed', 1, 1, 0, 1, 2)"
+        ))
+        connection.execute(text(
+            "INSERT INTO grade_results "
+            "(id, grading_run_id, submission_revision_id, question_id, student_id, "
+            "q_id, ai_score, ai_max_score, ai_comment, ai_steps, ai_expert_results, "
+            "requires_review, review_reason, result_status, created_at, updated_at) VALUES "
+            "('result', 'run', 'revision', 'question', 'student', 'q1', 8, 10, '', "
+            "'[]', '[]', 1, 'legacy_low_confidence', 'needs_review', 1, 1)"
+        ))
+        connection.execute(text(
+            "INSERT INTO teacher_reviews "
+            "(id, grade_result_id, teacher_id, previous_score, previous_comment, "
+            "new_score, new_comment, comment, created_at) VALUES "
+            "('review', 'result', 'teacher', 8, '', 9, 'confirmed', 'confirmed', 2)"
+        ))
+        connection.execute(text(
+            "INSERT INTO teacher_reviews "
+            "(id, grade_result_id, teacher_id, previous_score, previous_comment, "
+            "new_score, new_comment, comment, created_at) VALUES "
+            "('review-z', 'result', 'teacher', 9, 'confirmed', 9.5, 'later', 'later', 2)"
+        ))
+        connection.execute(text(
+            "INSERT INTO knowledge_documents "
+            "(id, owner_id, title, original_name, size_bytes, sha256, status, "
+            "parser_version, chunk_count, created_at, updated_at) VALUES "
+            "('document', 'teacher', 'Doc', 'doc.pdf', 1, "
+            "'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', "
+            "'ready', 'v1', 1, 1, 1)"
+        ))
+        connection.execute(text(
+            "INSERT INTO assignment_knowledge_documents "
+            "(assignment_id, document_id, selected_at) "
+            "VALUES ('assignment', 'document', 1)"
+        ))
+
+    command.upgrade(cfg, "head")
+    with engine.connect() as connection:
+        reviews = connection.execute(text(
+            "SELECT id, confirmed, review_sequence FROM teacher_reviews "
+            "WHERE grade_result_id='result' ORDER BY review_sequence"
+        )).all()
+        result = connection.execute(text(
+            "SELECT initial_requires_review, initial_review_reason "
+            "FROM grade_results WHERE id='result'"
+        )).one()
+        link = connection.execute(text(
+            "SELECT source_kind, library_material_id "
+            "FROM assignment_knowledge_documents "
+            "WHERE assignment_id='assignment' AND document_id='document'"
+        )).one()
+    assert [(row.id, bool(row.confirmed), row.review_sequence) for row in reviews] == [
+        ("review", True, 1),
+        ("review-z", True, 2),
+    ]
+    assert bool(result.initial_requires_review) is True
+    assert result.initial_review_reason == "legacy_low_confidence"
+    assert link.source_kind == "upload"
+    assert link.library_material_id is None
+
+    command.downgrade(cfg, "0002_course_library_tags")
+    with engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT COUNT(*) FROM teacher_reviews WHERE grade_result_id='result'"
+        )).scalar_one() == 2
+        assert connection.execute(text(
+            "SELECT COUNT(*) FROM assignment_knowledge_documents "
+            "WHERE assignment_id='assignment' AND document_id='document'"
+        )).scalar_one() == 1
 
 
 def _postgresql_sql(monkeypatch, revision: str) -> str:

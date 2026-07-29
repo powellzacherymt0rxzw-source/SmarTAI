@@ -12,7 +12,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Role(str, Enum):
@@ -189,12 +189,27 @@ class GradeResultDTO(BaseModel):
     ai_synthesis_method: str | None = None
     requires_review: bool = False
     review_reason: str | None = None
+    initial_requires_review: bool = False
+    initial_review_reason: str | None = None
     result_status: str = GradeResultStatus.GRADED.value
     effective_score: float | None = None
     effective_comment: str = ""
     teacher_review: dict[str, Any] | None = None
     created_at: float
     updated_at: float
+
+    @model_validator(mode="after")
+    def initialize_review_audit_facts(self) -> "GradeResultDTO":
+        """Default omitted initial facts to the DTO's original live state.
+
+        Adapters constructing a new result need not duplicate the same fields,
+        while repository reads explicitly supply the durable audit values.
+        """
+        if "initial_requires_review" not in self.model_fields_set:
+            self.initial_requires_review = self.requires_review
+        if "initial_review_reason" not in self.model_fields_set:
+            self.initial_review_reason = self.review_reason
+        return self
 
 
 class TeacherReviewDTO(BaseModel):
@@ -206,6 +221,7 @@ class TeacherReviewDTO(BaseModel):
     new_score: float
     new_comment: str = ""
     comment: str = ""
+    confirmed: bool = False
     created_at: float
 
 

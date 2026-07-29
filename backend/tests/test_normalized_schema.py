@@ -42,6 +42,20 @@ RETAINED_TABLES = {
     "knowledge_chunks",
 }
 
+PRESENTATION_TABLES = {
+    "course_material_groups",
+    "course_materials",
+    "tags",
+    "assignment_tags",
+    "assignment_workflows",
+    "task_create_idempotency",
+    "workflow_operations",
+    "assignment_student_presentations",
+    "submission_answer_presentations",
+    "grading_run_setups",
+    "result_artifact_manifests",
+}
+
 LEGACY_TABLES = {"tasks", "grading_jobs", "task_knowledge_documents"}
 
 
@@ -53,7 +67,7 @@ def _inspector():
 
 def test_fresh_database_contains_normalized_and_retained_tables():
     tables = set(_inspector().get_table_names())
-    missing = (EXPECTED_EDUCATION_TABLES | RETAINED_TABLES) - tables
+    missing = (EXPECTED_EDUCATION_TABLES | RETAINED_TABLES | PRESENTATION_TABLES) - tables
     assert not missing, f"missing tables: {sorted(missing)}"
 
 
@@ -109,6 +123,13 @@ def test_submission_answer_unique_constraint():
     uniques = _collect_unique_constraints("submission_answers")
     assert ("revision_id", "question_id") in uniques, (
         "submission_answers must enforce (revision_id, question_id) uniqueness"
+    )
+
+
+def test_teacher_review_sequence_is_unique_per_result():
+    uniques = _collect_unique_constraints("teacher_reviews")
+    assert ("grade_result_id", "review_sequence") in uniques, (
+        "teacher review ordering must remain unambiguous under concurrent writes"
     )
 
 

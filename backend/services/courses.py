@@ -12,6 +12,16 @@ from backend.domain import education
 from backend.domain.errors import Forbidden, NotFound, ValidationError
 
 
+# Assignments created without an explicit catalog course are attached to an
+# internal owner-scoped course so normalized FKs remain intact.  It is plumbing,
+# not a teacher-visible Course Library item.
+_SYSTEM_COURSE_CODE = "__SMARTAI_UNASSIGNED__"
+
+
+def _visible(courses: list[education.CourseDTO]) -> list[education.CourseDTO]:
+    return [course for course in courses if course.code != _SYSTEM_COURSE_CODE]
+
+
 def create_course(*, teacher_id: str, name: str, code: str = "", description: str = "") -> education.CourseDTO:
     if not name.strip():
         raise ValidationError("Course name is required")
@@ -25,11 +35,11 @@ def list_courses_for(actor_id: str, role: str) -> list[education.CourseDTO]:
     courses they own; a student reads courses they are enrolled in."""
     if role == "admin":
         # Admin unscoped read: iterate all teachers' courses via a direct query.
-        return course_repository.list_all_courses()
+        return _visible(course_repository.list_all_courses())
     if role == "teacher":
-        return course_repository.list_courses(actor_id=actor_id)
+        return _visible(course_repository.list_courses(actor_id=actor_id))
     if role == "student":
-        return course_repository.list_student_courses(student_id=actor_id)
+        return _visible(course_repository.list_student_courses(student_id=actor_id))
     raise Forbidden("invalid_role")
 
 

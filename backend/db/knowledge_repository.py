@@ -13,6 +13,7 @@ from backend.db.models import (
     KnowledgeDocumentRecord,
 )
 from backend.db.session import session_scope
+from backend.domain.errors import InvalidTransition
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,67 @@ def list_selected_documents(assignment_id: str, owner_id: str) -> list[Knowledge
         return [_document(record) for record in records]
 
 
+def selected_document_metadata(
+    assignment_id: str, owner_id: str,
+) -> dict[str, dict[str, str | None]]:
+    """Return owner-scoped attachment provenance for presentation adapters."""
+    with session_scope() as session:
+        rows = session.execute(
+            select(AssignmentKnowledgeDocumentRecord)
+            .join(
+                AssignmentRecord,
+                AssignmentRecord.id
+                == AssignmentKnowledgeDocumentRecord.assignment_id,
+            )
+            .where(
+                AssignmentKnowledgeDocumentRecord.assignment_id == assignment_id,
+                AssignmentRecord.teacher_id == owner_id,
+            )
+        ).scalars().all()
+        return {
+            row.document_id: {
+                "source_kind": row.source_kind,
+                "library_material_id": row.library_material_id,
+            }
+            for row in rows
+        }
+
+
+def set_selected_document_metadata(
+    *, assignment_id: str, owner_id: str, document_id: str,
+    source_kind: str, library_material_id: str | None,
+) -> None:
+    if source_kind not in {"upload", "library"}:
+        raise ValueError("Unsupported knowledge attachment source")
+    from backend.db.models import CourseMaterialRecord
+
+    with session_scope() as session:
+        assignment = session.scalar(
+            select(AssignmentRecord).where(
+                AssignmentRecord.id == assignment_id,
+                AssignmentRecord.teacher_id == owner_id,
+            )
+        )
+        row = session.get(
+            AssignmentKnowledgeDocumentRecord,
+            {"assignment_id": assignment_id, "document_id": document_id},
+        )
+        if assignment is None or row is None:
+            raise ValueError("Knowledge attachment not found")
+        if library_material_id is not None:
+            material = session.scalar(
+                select(CourseMaterialRecord).where(
+                    CourseMaterialRecord.id == library_material_id,
+                    CourseMaterialRecord.owner_id == owner_id,
+                    CourseMaterialRecord.document_id == document_id,
+                )
+            )
+            if material is None:
+                raise ValueError("Course material does not match document")
+        row.source_kind = source_kind
+        row.library_material_id = library_material_id
+
+
 def list_chunks(document_ids: list[str]) -> list[KnowledgeChunkRecord]:
     if not document_ids:
         return []
@@ -187,12 +249,56 @@ def set_task_documents(*, assignment_id: str, owner_id: str, document_ids: list[
             )))
             if valid != set(unique_ids):
                 raise ValueError("One or more knowledge documents are unavailable")
+        existing_rows = session.scalars(
+            select(AssignmentKnowledgeDocumentRecord).where(
+                AssignmentKnowledgeDocumentRecord.assignment_id == assignment_id
+            )
+        ).all()
+        existing = {
+            row.document_id: (row.source_kind, row.library_material_id)
+            for row in existing_rows
+        }
         session.execute(delete(AssignmentKnowledgeDocumentRecord).where(
             AssignmentKnowledgeDocumentRecord.assignment_id == assignment_id
         ))
-        session.add_all([AssignmentKnowledgeDocumentRecord(assignment_id=assignment_id, document_id=document_id)
-                         for document_id in unique_ids])
+        session.add_all([
+            AssignmentKnowledgeDocumentRecord(
+                assignment_id=assignment_id,
+                document_id=document_id,
+                source_kind=existing.get(document_id, ("upload", None))[0],
+                library_material_id=existing.get(document_id, ("upload", None))[1],
+            )
+            for document_id in unique_ids
+        ])
     return list_selected_documents(assignment_id, owner_id)
+
+
+def assert_document_not_frozen_by_active_run(
+    session, *, document_id: str, owner_id: str,
+) -> None:
+    """Prevent every deletion path from invalidating a frozen grading input."""
+    from backend.db.models import GradingRunRecord
+    from backend.db.workflow_repository import GradingRunSetupRecord
+
+    active_manifests = session.scalars(
+        select(GradingRunSetupRecord.input_manifest)
+        .join(
+            GradingRunRecord,
+            GradingRunRecord.id == GradingRunSetupRecord.grading_run_id,
+        )
+        .where(
+            GradingRunSetupRecord.owner_id == owner_id,
+            GradingRunRecord.status.in_(("queued", "running")),
+        )
+    ).all()
+    if any(
+        document_id in (manifest or {}).get("knowledge_document_ids", [])
+        for manifest in active_manifests
+    ):
+        raise InvalidTransition(
+            "Knowledge document is frozen by an active grading run.",
+            code="knowledge_document_in_active_grading_run",
+        )
 
 
 def delete_document(document_id: str, owner_id: str) -> KnowledgeDocument | None:
@@ -202,6 +308,13 @@ def delete_document(document_id: str, owner_id: str) -> KnowledgeDocument | None
         ))
         if record is None:
             return None
+        # A queued/running grading run must keep access to the exact immutable
+        # knowledge selection captured in its input manifest.  Unselecting a
+        # document from an assignment is safe; deleting its chunks mid-run is
+        # not, so defer physical deletion until the run is terminal.
+        assert_document_not_frozen_by_active_run(
+            session, document_id=document_id, owner_id=owner_id,
+        )
         result = _document(record)
         session.execute(delete(AssignmentKnowledgeDocumentRecord).where(
             AssignmentKnowledgeDocumentRecord.document_id == document_id
