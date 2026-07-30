@@ -66,11 +66,52 @@ Windows PowerShell 使用：
 Copy-Item .env.example .env
 ```
 
-首次运行前应用数据库迁移：
+#### 配置本地 BYOK 加密主密钥
+
+`.env.example` 中的 `SMARTAI_PROVIDER_ENCRYPTION_KEY` 和 `SMARTAI_JWT_SECRET`
+只是公开占位值，不能直接使用。先运行下面的命令**两次**，分别生成两个至少 32 字节、
+互不相同的随机值：
 
 ```bash
-alembic upgrade head
+python -c "import secrets; print(secrets.token_hex(32))"
 ```
+
+把两次输出分别填入本地 `.env`：
+
+```dotenv
+SMARTAI_PROVIDER_ENCRYPTION_KEY=在这里粘贴第一个随机值
+SMARTAI_JWT_SECRET=在这里粘贴第二个随机值
+```
+
+- `.env` 已被 Git 忽略，不要提交、上传或通过普通聊天发送其中的值。
+- `SMARTAI_PROVIDER_ENCRYPTION_KEY` 是服务器用于加密用户 BYOK 的主密钥，不是
+  Gemini、OpenAI 等服务商的 API key，也不要与 JWT 签名密钥共用。
+- 一旦保存过 BYOK，就必须在后续重启中继续使用同一个值；丢失或更换它会使已有密文
+  无法解密。连接同一个共享数据库的后端实例必须从安全的 Secret Manager 读取同一主密钥。
+- 新建且互不共享的本地数据库可以各自生成独立主密钥。
+
+首次运行前，在**仓库根目录**（该目录应能看到 `alembic.ini`、`backend/` 和
+`frontend/`）应用数据库迁移。请先激活上文创建并已安装后端依赖的 Python 环境，
+例如 Conda `smartai` 或项目 `.venv`；不要在 `frontend/app/` 或未安装依赖的系统
+Python 环境中执行。
+
+```bash
+cd /path/to/SmarTAI
+conda activate smartai  # 使用 .venv 时改为 source .venv/bin/activate
+python -m alembic upgrade head
+```
+
+Windows PowerShell 使用 `.venv` 时，激活命令为：
+
+```powershell
+cd C:\path\to\SmarTAI
+.\.venv\Scripts\Activate.ps1
+python -m alembic upgrade head
+```
+
+看到 `Running upgrade ...` 或数据库已经处于 `head` 即表示完成。以后拉取包含新
+migration 的代码后，也应在启动后端前从仓库根目录重新执行同一命令；正常升级不会
+要求从其他合作者处获取数据库文件。
 
 ### 创建第一个管理员
 
@@ -178,6 +219,11 @@ VITE_SMARTAI_BACKEND_URL=https://your-backend.example.com
 - `SMARTAI_REFRESH_COOKIE_SECURE=true`
 - `SMARTAI_REFRESH_COOKIE_SAMESITE=none`
 - `FRONTEND_URLS`（填写真实前端域名，不带结尾 `/`）
+
+`backend/render.yaml` 中 `SMARTAI_PROVIDER_ENCRYPTION_KEY` 的 `sync: false` 只表示该值
+必须由部署者提供，Render 不会自动生成。请在后端服务的 Environment / Secret Manager
+中设置一个长期稳定的随机值后再部署；连接同一数据库的全部后端实例必须使用同一个值。
+不要把该值写入仓库、构建日志或前端环境变量，并在受控的秘密管理系统中保留恢复备份。
 
 生产环境应设置 `SMARTAI_DATABASE_AUTO_CREATE=false`，并统一通过 `alembic upgrade head` 管理数据库结构。部署完成后，可访问 `/ready` 检查数据库和存储是否可用。
 
