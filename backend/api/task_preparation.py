@@ -48,7 +48,12 @@ from backend.domain.errors import (
 )
 from backend.llm.registry import ExpertRegistry, get_scoped_expert_registry
 from backend.knowledge.service import ingest_document
-from backend.models import ProblemSourceDraft, User, is_programming_question_type
+from backend.models import (
+    ProblemSourceDraft,
+    QuestionScorePolicy,
+    User,
+    is_programming_question_type,
+)
 from backend.progress.tracker import get_or_create_reporter, get_reporter, remove_reporter
 from backend.services import task_facade
 from backend.skills.ocr_ingest import LLMVisionOCRSkill
@@ -68,6 +73,7 @@ class StartQuestionPreparationRequest(BaseModel):
     expected_workflow_revision: int = Field(ge=0)
     replace_confirmed: bool = False
     generation_policy: Literal["complete_required_materials"] = "complete_required_materials"
+    score_policy: QuestionScorePolicy = Field(default_factory=QuestionScorePolicy)
 
 
 class StartMaterialImportRequest(BaseModel):
@@ -97,9 +103,15 @@ def question_preparation_capabilities(
     except DomainError as exc:
         return domain_error_response(exc)
     has_vision = registry.pick_vision() is not None
-    common = {"accepted_extensions": [".pdf", ".txt", ".md"], "course_library": True, "inline_text": True}
+    common = {
+        "accepted_extensions": [
+            ".pdf", ".txt", ".md", ".jpg", ".jpeg", ".png", ".webp",
+        ],
+        "course_library": True,
+        "inline_text": True,
+    }
     return {
-        "contract_version": 1,
+        "contract_version": 2,
         "operation": "question_preparation",
         "stage_sequence": list(QUESTION_PREPARATION_STAGE_SEQUENCE),
         "source_roles": {
@@ -125,6 +137,14 @@ def question_preparation_capabilities(
             "max_file_bytes": MAX_SOURCE_BYTES,
             "max_text_characters": MAX_SOURCE_CHARACTERS,
             "max_inline_rubric_characters": 12_000,
+        },
+        "score_policy": {
+            "supported_modes": ["default_10", "uniform", "per_question"],
+            "default_mode": "default_10",
+            "default_max_score": 10,
+            "maximum_max_score": 10_000,
+            "per_question_text_max_characters": 12_000,
+            "rubric_weight_format": "percentage",
         },
     }
 
@@ -417,6 +437,7 @@ async def start_question_preparation(
             "base_revision": request.expected_workflow_revision,
             "replace_confirmed": request.replace_confirmed,
             "generation_policy": request.generation_policy,
+            "score_policy": request.score_policy.model_dump(mode="json"),
         }, sort_keys=True).encode()).hexdigest()
         replay = task_facade.find_task_operation(
             task_id=task_id, owner_id=current.id,
@@ -457,6 +478,7 @@ async def start_question_preparation(
                 "source_tokens": request.source_tokens,
                 "base_workflow_revision": claim_base_revision,
                 "replace_confirmed": request.replace_confirmed,
+                "score_policy": request.score_policy.model_dump(mode="json"),
             },
             expires_at=time.time() + SOURCE_TTL_SECONDS,
         )
@@ -492,6 +514,7 @@ async def start_question_preparation(
             provider=provider,
             claimed_workflow_revision=claimed_revision,
             replace_confirmed=request.replace_confirmed,
+            score_policy=request.score_policy,
         )
         return {
             "status": "started", "task_id": task_id, "job_id": job.id,
@@ -507,12 +530,14 @@ async def _run_question_preparation(
     *, task_id: str, owner_id: str, job_id: str, job_attempt: int,
     sources: list[tuple[ProblemSourceDraft, str]],
     provider, claimed_workflow_revision: int, replace_confirmed: bool,
+    score_policy: QuestionScorePolicy,
 ) -> None:
     try:
         reporter = get_or_create_reporter(job_id)
         packages = await prepare_question_packages(
             sources, provider, provider_id=provider.provider_id,
             reporter=reporter,
+            score_policy=score_policy,
         )
         await reporter.set_stage_progress(
             "committing_question_packages", total_steps=8, completed_steps=8,

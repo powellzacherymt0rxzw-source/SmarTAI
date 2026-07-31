@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import time
 from typing import List, Optional, Literal, Dict, Any
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ─── Grading result models ────────────────────────────────────────────────────
@@ -196,6 +196,37 @@ class ProblemInfo(BaseModel):
 
 class ProblemSet(BaseModel):
     problems: List[ProblemInfo] = Field(description="List of parsed problems")
+
+
+class QuestionScorePolicy(BaseModel):
+    """Authenticated teacher policy for freezing per-question score scales."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["default_10", "uniform", "per_question"] = "default_10"
+    uniform_max_score: Optional[float] = Field(
+        default=None,
+        gt=0,
+        le=10_000,
+        allow_inf_nan=False,
+    )
+    per_question_text: Optional[str] = Field(default=None, max_length=12_000)
+
+    @model_validator(mode="after")
+    def _validate_mode_fields(self):
+        if self.mode == "uniform":
+            if self.uniform_max_score is None:
+                raise ValueError("uniform_max_score is required in uniform mode")
+            if self.per_question_text not in (None, ""):
+                raise ValueError("per_question_text is only valid in per_question mode")
+        elif self.mode == "per_question":
+            if not (self.per_question_text or "").strip():
+                raise ValueError("per_question_text is required in per_question mode")
+            if self.uniform_max_score is not None:
+                raise ValueError("uniform_max_score is only valid in uniform mode")
+        elif self.uniform_max_score is not None or self.per_question_text not in (None, ""):
+            raise ValueError("default_10 mode does not accept score overrides")
+        return self
 
 
 class StudentAnswerInfo(BaseModel):

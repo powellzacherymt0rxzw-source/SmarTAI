@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
 import time
 import uuid
@@ -314,12 +315,20 @@ def _presentation_status(workflow, questions, submissions, latest_run) -> str:
 
 def _serialize_problem(question) -> dict:
     presentation = dict((question.source or {}).get("presentation") or {})
+    max_score = float(question.max_score)
     return {
         "q_id": question.q_id,
         "number": question.number,
         "type": question.type,
         "stem": question.stem,
         "criterion": question.criterion,
+        "max_score": max_score,
+        "max_score_source": presentation.get("max_score_source") or (
+            "default_10" if max_score == 10 else "legacy"
+        ),
+        "max_score_review_status": presentation.get(
+            "max_score_review_status", "needs_review"
+        ),
         "review_status": presentation.get("review_status", "needs_review"),
         "reference_answer": question.reference_answer,
         "solution_code": presentation.get("solution_code"),
@@ -859,6 +868,14 @@ def _replace_draft_questions(
                 "filename": filename,
                 "presentation": {
                     "review_status": raw.get("review_status", "needs_review"),
+                    "max_score_source": raw.get("max_score_source") or (
+                        "default_10"
+                        if float(raw.get("max_score") or 10) == 10
+                        else "legacy"
+                    ),
+                    "max_score_review_status": raw.get(
+                        "max_score_review_status", "needs_review"
+                    ),
                     "solution_code": raw.get("solution_code"),
                     "material_provenance": raw.get("material_provenance", {}),
                     "ai_completion_provenance": raw.get("ai_completion_provenance", {}),
@@ -1064,10 +1081,13 @@ def apply_question_patches_atomic(
     rolls back the workflow claim, question changes, and operation transition.
     """
     now = time.time()
-    allowed_fields = {"stem", "criterion", "reference_answer", "test_cases"}
+    allowed_fields = {
+        "stem", "criterion", "max_score", "reference_answer", "test_cases"
+    }
     allowed_presentation = {
         "review_status", "solution_code", "material_provenance",
         "ai_completion_provenance", "preparation_issues",
+        "max_score_source", "max_score_review_status",
     }
     with session_scope() as session:
         assignment = session.scalar(select(AssignmentRecord).where(
@@ -1107,6 +1127,14 @@ def apply_question_patches_atomic(
                 presentation_updates
             ).issubset(allowed_presentation):
                 raise ValidationError("Unsupported question patch.")
+            if "max_score" in fields:
+                max_score = float(fields["max_score"])
+                if not math.isfinite(max_score) or not 0 < max_score <= 10_000:
+                    raise ValidationError(
+                        "Question maximum score must be between 0 and 10000.",
+                        code="invalid_max_score",
+                    )
+                fields["max_score"] = max_score
             if require_missing:
                 current_presentation = dict(
                     (question.source or {}).get("presentation") or {}
@@ -1798,13 +1826,39 @@ def update_problem(
         raise NotFound("question")
     source = dict(question.source or {})
     presentation = dict(source.get("presentation") or {})
-    for key in ("review_status", "solution_code", "material_provenance", "ai_completion_provenance", "preparation_issues"):
+    for key in (
+        "review_status", "solution_code", "material_provenance",
+        "ai_completion_provenance", "preparation_issues",
+    ):
         if key in patch:
             presentation[key] = patch[key]
+    if patch.get("review_status") == "confirmed":
+        presentation["max_score_review_status"] = "confirmed"
+        presentation["preparation_issues"] = [
+            issue
+            for issue in presentation.get("preparation_issues", [])
+            if issue.get("field") != "max_score"
+        ]
+    if "max_score" in patch:
+        max_score = float(patch["max_score"])
+        if not math.isfinite(max_score) or not 0 < max_score <= 10_000:
+            raise ValidationError(
+                "Question maximum score must be between 0 and 10000.",
+                code="invalid_max_score",
+            )
+        presentation["max_score_source"] = "teacher_edited"
+        presentation["max_score_review_status"] = "confirmed"
+        presentation["preparation_issues"] = [
+            issue
+            for issue in presentation.get("preparation_issues", [])
+            if issue.get("field") != "max_score"
+        ]
     source["presentation"] = presentation
     fields = {
         key: patch[key]
-        for key in ("stem", "criterion", "reference_answer", "test_cases")
+        for key in (
+            "stem", "criterion", "max_score", "reference_answer", "test_cases"
+        )
         if key in patch
     }
     fields["source"] = source
