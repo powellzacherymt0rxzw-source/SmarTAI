@@ -192,7 +192,7 @@ def test_adapter_preserves_human_review_signal_and_question_max(setup_assignment
     from backend.models import Correction
 
     correction = Correction(
-        q_id="q1", type="short", score=8.0, max_score=100.0, confidence=0.9,
+        q_id="q1", type="short", score=8.0, max_score=10.0, confidence=0.9,
         comment="check", steps=[], requires_human_review=True,
         review_reasons=["high_indecisiveness"],
     )
@@ -204,9 +204,72 @@ def test_adapter_preserves_human_review_signal_and_question_max(setup_assignment
         student_id=setup_assignment["student_id"], correction=correction,
     )
     assert result.result_status == education.GradeResultStatus.NEEDS_REVIEW.value
-    assert result.ai_score is None
+    assert result.ai_score == 8.0
     assert result.ai_max_score == 10.0
     assert result.review_reason == "high_indecisiveness"
+
+
+def test_adapter_normalizes_untrusted_model_scale(setup_assignment):
+    from backend.models import Correction, StepScore
+
+    correction = Correction(
+        q_id="q1", type="short", score=80.0, max_score=100.0, confidence=0.9,
+        comment="scaled", steps=[
+            StepScore(step_no=1, desc="reasoning", is_correct=True, score=60.0),
+            StepScore(step_no=2, desc="answer", is_correct=True, score=20.0),
+        ],
+    )
+    result = grading_adapter.correction_to_result(
+        run_id="run-x", revision_id="rev-x",
+        question=assignment_repository.get_questions_by_assignment(
+            assignment_id=setup_assignment["assignment_id"]
+        )[0],
+        student_id=setup_assignment["student_id"], correction=correction,
+    )
+    assert result.result_status == education.GradeResultStatus.GRADED.value
+    assert result.ai_score == 8.0
+    assert result.ai_max_score == 10.0
+    assert [step["score"] for step in result.ai_steps] == [6.0, 2.0]
+
+
+def test_adapter_treats_degraded_to_single_as_soft_review(setup_assignment):
+    from backend.models import Correction
+
+    correction = Correction(
+        q_id="q1", type="short", score=7.0, max_score=10.0, confidence=0.85,
+        comment="one expert succeeded", steps=[], synthesis_method="degraded_to_single",
+    )
+    result = grading_adapter.correction_to_result(
+        run_id="run-x", revision_id="rev-x",
+        question=assignment_repository.get_questions_by_assignment(
+            assignment_id=setup_assignment["assignment_id"]
+        )[0],
+        student_id=setup_assignment["student_id"], correction=correction,
+    )
+    assert result.result_status == education.GradeResultStatus.NEEDS_REVIEW.value
+    assert result.ai_score == 7.0
+    assert result.requires_review is True
+    assert result.review_reason == "degraded_to_single"
+
+
+def test_adapter_preserves_real_zero_during_soft_review(setup_assignment):
+    from backend.models import Correction
+
+    correction = Correction(
+        q_id="q1", type="short", score=0.0, max_score=10.0, confidence=0.4,
+        comment="review", steps=[], requires_human_review=True,
+        review_reasons=["low_confidence"],
+    )
+    result = grading_adapter.correction_to_result(
+        run_id="run-x", revision_id="rev-x",
+        question=assignment_repository.get_questions_by_assignment(
+            assignment_id=setup_assignment["assignment_id"]
+        )[0],
+        student_id=setup_assignment["student_id"], correction=correction,
+    )
+    assert result.ai_score == 0.0
+    assert result.requires_review is True
+    assert result.review_reason == "low_confidence"
 
 
 def test_persisted_ai_fields_are_immutable_after_review(setup_assignment):

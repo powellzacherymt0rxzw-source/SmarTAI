@@ -15,15 +15,15 @@ class StepScore(BaseModel):
     step_no: int
     desc: str
     is_correct: bool
-    score: float
+    score: float = Field(ge=0, allow_inf_nan=False)
 
 
 class ExpertResult(BaseModel):
     """Result from a single expert (provider) grading a question."""
     provider: str = Field(description="Provider identifier, e.g. 'openai:gpt-4o', 'gemini:gemini-2.5-pro'")
-    score: float
-    max_score: float = 10.0
-    confidence: float
+    score: float = Field(ge=0, allow_inf_nan=False)
+    max_score: float = Field(default=10.0, gt=0, allow_inf_nan=False)
+    confidence: float = Field(ge=0, le=1, allow_inf_nan=False)
     comment: str
     steps: List[StepScore] = []
     hits: Optional[List[str]] = None
@@ -42,9 +42,9 @@ class Correction(BaseModel):
     """Grading result for a single question."""
     q_id: str
     type: str
-    score: float
-    max_score: float
-    confidence: float
+    score: float = Field(ge=0, allow_inf_nan=False)
+    max_score: float = Field(gt=0, allow_inf_nan=False)
+    confidence: float = Field(ge=0, le=1, allow_inf_nan=False)
     comment: str
     steps: List[StepScore]
     hits: Optional[List[str]] = None
@@ -148,6 +148,15 @@ class ProblemInfo(BaseModel):
     type: str = Field(description="Question type: 概念题/计算题/编程题/证明题/推理题/其他")
     stem: str = Field(description="Complete question stem including all text, formulas, and code")
     criterion: str = Field(description="Grading rubric/criteria")
+    max_score: float = Field(
+        default=10.0,
+        gt=0,
+        allow_inf_nan=False,
+        description=(
+            "Authoritative maximum score frozen with the normalized question. "
+            "Model output must never replace this value."
+        ),
+    )
     review_status: Literal["needs_review", "edited", "confirmed"] = "needs_review"
     reference_answer: Optional[str] = Field(
         default=None,

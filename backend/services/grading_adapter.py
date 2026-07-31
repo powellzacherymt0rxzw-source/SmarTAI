@@ -10,7 +10,9 @@ parameter, and maps each returned
 
 Failure semantics (no publishable real zero):
 * ``confidence == 0`` or ``synthesis_method in {all_failed, quota_exhausted}``
-  → ``needs_review`` (the teacher must look; it is not a real 0);
+  → hard failure with no provisional score;
+* low confidence, expert disagreement, or ``degraded_to_single`` → soft
+  review that preserves the provisional score;
 * a missing correction for a submitted question → ``needs_review``;
 * an exception raised by ``grade_batch`` → the whole run fails, not silent zeros.
 """
@@ -24,10 +26,16 @@ from backend.domain import education
 from backend.domain.errors import DomainError
 from backend.models import Correction, TaskGradingSetup
 from backend.config import settings
+from backend.skills.base import (
+    InvalidScoreScale,
+    normalize_expert_result,
+    normalize_score_scale,
+)
 
 
-# synthesis_method values produced by the algorithm when every expert failed.
-_ALL_FAILED_METHODS = frozenset({"all_failed", "quota_exhausted", "degraded_to_single"})
+# Synthesis methods that prove no expert produced a publishable score.
+_HARD_FAILURE_METHODS = frozenset({"all_failed", "quota_exhausted"})
+_SOFT_REVIEW_METHODS = frozenset({"degraded_to_single"})
 
 
 @dataclass
@@ -105,31 +113,63 @@ def correction_to_result(
         )
 
     method = correction.synthesis_method
-    failed = (
-        correction.confidence == 0
-        or method in _ALL_FAILED_METHODS
-        or correction.requires_human_review
-    )
+    hard_failure = correction.confidence == 0 or method in _HARD_FAILURE_METHODS
+    invalid_scale = False
+    try:
+        normalized_score, normalized_steps = normalize_score_scale(
+            score=correction.score,
+            reported_max_score=correction.max_score,
+            authoritative_max_score=question.max_score,
+            steps=correction.steps,
+        )
+    except InvalidScoreScale:
+        normalized_score, normalized_steps = 0.0, []
+        invalid_scale = True
+        hard_failure = True
+
+    review_reasons = list(correction.review_reasons or [])
+    if method in _SOFT_REVIEW_METHODS and method not in review_reasons:
+        review_reasons.append(method)
+    soft_review = correction.requires_human_review or bool(review_reasons)
+    needs_review = hard_failure or soft_review
     result_status = (
-        education.GradeResultStatus.NEEDS_REVIEW.value if failed
+        education.GradeResultStatus.NEEDS_REVIEW.value if needs_review
         else education.GradeResultStatus.GRADED.value
     )
+    if invalid_scale:
+        review_reason = "invalid_score_scale"
+    elif hard_failure:
+        review_reason = "quota_exhausted" if method == "quota_exhausted" else "llm_failed"
+    elif review_reasons:
+        review_reason = ",".join(review_reasons)
+    else:
+        review_reason = None
+
+    normalized_experts = []
+    for expert in correction.expert_results:
+        try:
+            normalized_experts.append(normalize_expert_result(expert, question.max_score))
+        except InvalidScoreScale:
+            normalized_experts.append(expert.model_copy(update={
+                "score": 0.0,
+                "max_score": question.max_score,
+                "confidence": 0.0,
+                "steps": [],
+                "error_kind": "parse_failed",
+            }))
+
     return education.GradeResultDTO(
         id="", grading_run_id=run_id, submission_revision_id=revision_id,
         question_id=question.id, student_id=student_id, q_id=q_id,
-        ai_score=None if failed else correction.score,
+        ai_score=None if hard_failure else normalized_score,
         ai_max_score=question.max_score,
         ai_comment=correction.comment or "",
-        ai_steps=[s.model_dump() for s in correction.steps],
+        ai_steps=[s.model_dump() for s in normalized_steps],
         ai_confidence=correction.confidence,
-        ai_expert_results=[e.model_dump() for e in correction.expert_results],
+        ai_expert_results=[e.model_dump() for e in normalized_experts],
         ai_synthesis_method=method,
-        requires_review=failed,
-        review_reason=(
-            ",".join(correction.review_reasons or [])
-            if correction.requires_human_review and correction.review_reasons
-            else ("llm_failed" if failed else None)
-        ),
+        requires_review=needs_review,
+        review_reason=review_reason,
         result_status=result_status,
         created_at=0, updated_at=0,
     )
