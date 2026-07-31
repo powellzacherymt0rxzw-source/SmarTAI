@@ -6,7 +6,7 @@ from threading import RLock
 from typing import Iterator
 
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.config import settings
@@ -26,12 +26,21 @@ def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
         cursor.close()
 
 
-def _prepare_sqlite_parent(database_url: str) -> None:
-    prefix = "sqlite:///"
-    if not database_url.startswith(prefix) or database_url.endswith(":memory:"):
+def prepare_sqlite_parent(database_url: str) -> None:
+    """Create the parent directory for a file-backed SQLite database."""
+    url = make_url(database_url)
+    is_named_memory = (
+        str(url.query.get("uri", "")).lower() == "true"
+        and str(url.query.get("mode", "")).lower() == "memory"
+    )
+    if (
+        url.get_backend_name() != "sqlite"
+        or not url.database
+        or url.database == ":memory:"
+        or is_named_memory
+    ):
         return
-    raw_path = database_url[len(prefix):]
-    Path(raw_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+    Path(url.database).parent.mkdir(parents=True, exist_ok=True)
 
 
 def validate_database_mode(database_url: str) -> None:
@@ -57,7 +66,7 @@ def configure_database(database_url: str | None = None) -> Engine:
         if _engine is not None:
             _engine.dispose()
         validate_database_mode(url)
-        _prepare_sqlite_parent(url)
+        prepare_sqlite_parent(url)
         connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
         _engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
         if url.startswith("sqlite"):
