@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException, UploadFile
 from pydantic import ValidationError as PydanticValidationError
+from starlette.datastructures import Headers
 
 from backend.api.task_preparation import (
     StartQuestionPreparationRequest,
+    _read_source,
+    _validate_source_upload,
+    preflight_problem_source,
     question_preparation_capabilities,
 )
 from backend.models import QuestionScorePolicy
@@ -209,6 +215,208 @@ def test_question_preparation_capabilities_expose_ocr_images_but_not_test_images
     assert ".webp" in capabilities["source_roles"]["rubric"]["accepted_extensions"]
     assert ".jpg" not in capabilities["source_roles"]["programming_tests"]["accepted_extensions"]
     assert capabilities["reader"]["images"] is True
+
+
+def test_question_preparation_capabilities_hide_images_without_vision():
+    owner_id = "score-no-vision-owner"
+    task_id = "score-no-vision-task"
+    _seed_question_task(owner_id, task_id)
+    registry = MagicMock()
+    registry.pick_vision.return_value = None
+
+    capabilities = question_preparation_capabilities(
+        task_id,
+        current=SimpleNamespace(id=owner_id),
+        registry=registry,
+    )
+
+    for role in ("problem", "reference_answer", "rubric"):
+        assert ".png" not in capabilities["source_roles"][role]["accepted_extensions"]
+    assert capabilities["source_roles"]["programming_tests"]["accepted_extensions"] == [
+        ".pdf", ".txt", ".md", ".markdown", ".json"
+    ]
+    assert capabilities["reader"]["ocr"] is False
+    assert capabilities["reader"]["images"] is False
+    assert capabilities["reader"]["scanned_pdf"] is False
+
+
+@pytest.mark.parametrize(
+    ("role", "filename", "content_type", "has_vision", "error_code"),
+    [
+        ("problem", "questions.png", "image/png", True, None),
+        ("reference_answer", "answers.webp", "image/webp", True, None),
+        ("rubric", "rubric.jpg", "image/jpeg", True, None),
+        ("problem", "questions.png", "image/png", False, "vision_provider_required"),
+        ("programming_tests", "cases.png", "image/png", True, "source_type_not_allowed"),
+        ("programming_tests", "cases.json", "application/json", False, None),
+        ("rubric", "rubric.json", "application/json", True, "source_type_not_allowed"),
+    ],
+)
+def test_source_upload_role_extension_matrix(
+    role, filename, content_type, has_vision, error_code
+):
+    upload = UploadFile(
+        file=io.BytesIO(b"payload"),
+        filename=filename,
+        headers=Headers({"content-type": content_type}),
+    )
+
+    if error_code is None:
+        assert _validate_source_upload(
+            upload, role=role, has_vision=has_vision
+        ) == f".{filename.rsplit('.', 1)[1]}"
+        return
+
+    with pytest.raises(HTTPException) as exc:
+        _validate_source_upload(upload, role=role, has_vision=has_vision)
+    assert exc.value.detail["code"] == error_code
+
+
+def test_source_upload_rejects_declared_mime_mismatch():
+    upload = UploadFile(
+        file=io.BytesIO(b"payload"),
+        filename="questions.png",
+        headers=Headers({"content-type": "text/plain"}),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        _validate_source_upload(upload, role="problem", has_vision=True)
+
+    assert exc.value.status_code == 415
+    assert exc.value.detail["code"] == "source_mime_type_not_allowed"
+
+
+class _FakeVisionProvider:
+    provider_id = "vision-provider"
+    provider_type = "test"
+    supports_vision = True
+    model = "vision-model"
+
+    def __init__(self):
+        self.calls = []
+
+    async def ainvoke_vision(self, prompt, images):
+        self.calls.append({"prompt": prompt, "images": images})
+        return SimpleNamespace(
+            content="Question 1: OCR result",
+            provider=self.provider_id,
+            model=self.model,
+            duration_ms=1,
+            input_tokens=5,
+            output_tokens=5,
+        )
+
+
+class _VisionRegistry:
+    def __init__(self):
+        self.provider = _FakeVisionProvider()
+
+    def pick_default(self):
+        return self.provider
+
+    def pick_vision(self, _preferred=None):
+        return self.provider
+
+
+@pytest.mark.asyncio
+async def test_problem_image_uses_normalized_vision_ocr_path():
+    registry = _VisionRegistry()
+    upload = UploadFile(
+        file=io.BytesIO(b"fake image bytes"),
+        filename="questions.png",
+        headers=Headers({"content-type": "image/png"}),
+    )
+
+    text, descriptor = await _read_source(
+        file=upload,
+        library_material_id=None,
+        inline_text=None,
+        owner_id="ocr-owner",
+        registry=registry,
+        purpose="problems",
+        role="problem",
+    )
+
+    assert text == "Question 1: OCR result"
+    assert descriptor["filename"] == "questions.png"
+    assert len(registry.provider.calls) == 1
+    assert registry.provider.calls[0]["images"][0].media_type == "image/png"
+    assert "OCR" in registry.provider.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_vision_off_image_fails_before_reading_or_creating_operation(monkeypatch):
+    owner_id = "preflight-no-vision-owner"
+    task_id = "preflight-no-vision-task"
+    _seed_question_task(owner_id, task_id)
+    stream = io.BytesIO(b"fake image bytes")
+    upload = UploadFile(
+        file=stream,
+        filename="questions.png",
+        headers=Headers({"content-type": "image/png"}),
+    )
+    registry = MagicMock()
+    registry.pick_default.return_value = None
+    registry.pick_vision.return_value = None
+    create_operation = MagicMock(side_effect=AssertionError("must not enqueue"))
+    monkeypatch.setattr(
+        "backend.api.task_preparation.workflow_repository.create_operation",
+        create_operation,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await preflight_problem_source(
+            task_id=task_id,
+            file=upload,
+            library_material_id=None,
+            inline_text=None,
+            structure_mode="organized",
+            role="problem",
+            extraction_hint="",
+            save_to_library=False,
+            current=SimpleNamespace(id=owner_id),
+            registry=registry,
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "vision_provider_required"
+    assert stream.tell() == 0
+    create_operation.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_vision_off_scanned_pdf_returns_stable_preflight_error():
+    fitz = pytest.importorskip("fitz")
+    document = fitz.open()
+    document.new_page(width=300, height=200)
+    upload = UploadFile(
+        file=io.BytesIO(document.tobytes()),
+        filename="scanned.pdf",
+        headers=Headers({"content-type": "application/pdf"}),
+    )
+    document.close()
+    registry = MagicMock()
+    registry.pick_default.return_value = None
+    registry.pick_vision.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+        await _read_source(
+            file=upload,
+            library_material_id=None,
+            inline_text=None,
+            owner_id="scan-owner",
+            registry=registry,
+            purpose="problems",
+            role="problem",
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == {
+        "code": "vision_provider_required",
+        "role": "problem",
+        "filename": "scanned.pdf",
+        "recovery": "configure_vision_provider",
+    }
 
 
 def test_confirming_question_also_confirms_default_max_score():
