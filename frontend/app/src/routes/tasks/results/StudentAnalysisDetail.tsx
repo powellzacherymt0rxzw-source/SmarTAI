@@ -2,7 +2,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Search, X } from "lucide-rea
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  effectiveCorrectionScore,
+  displayableCorrectionScore,
   formatConfidence,
   formatPercent,
   formatScore,
@@ -246,8 +246,10 @@ function QuestionResultCard({ locale, taskId, student, question, studentReturn, 
   const correction = student.corrections.find((item) => item.q_id === question.id);
   const answer = student.answerByQuestion.get(question.id);
   if (!correction) return <article className="rounded-[9px] border px-4 py-5"><p className="text-[12px] text-muted-foreground">{question.label} · {tx(locale, "当前学生没有该题批改结果。", "No grading result is available for this student.")}</p></article>;
-  const finalScore = effectiveCorrectionScore(correction);
-  const percent = correction.max_score > 0 ? (finalScore / correction.max_score) * 100 : null;
+  const finalScore = displayableCorrectionScore(correction);
+  const percent = finalScore !== null && correction.max_score > 0
+    ? (finalScore / correction.max_score) * 100
+    : null;
   return (
     <article id={`question-${question.id}`} className="scroll-mt-24 rounded-[9px] border px-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">

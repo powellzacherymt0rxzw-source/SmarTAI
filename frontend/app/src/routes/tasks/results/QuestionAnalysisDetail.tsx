@@ -2,7 +2,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Search, UserRound, X } from 
 import { useEffect, useMemo, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  effectiveCorrectionScore,
+  displayableCorrectionScore,
   formatConfidence,
   formatPercent,
   formatScore,
@@ -312,8 +312,10 @@ function SignalList({ signals, empty }: { locale: Locale; signals: CountedSignal
 }
 
 function StudentPreview({ locale, taskId, question, entry }: { locale: Locale; taskId: string; question: QuestionSummary; entry: QuestionEntry }) {
-  const score = effectiveCorrectionScore(entry.correction);
-  const percent = entry.correction.max_score > 0 ? (score / entry.correction.max_score) * 100 : null;
+  const score = displayableCorrectionScore(entry.correction);
+  const percent = score !== null && entry.correction.max_score > 0
+    ? (score / entry.correction.max_score) * 100
+    : null;
   const href = `/tasks/${encodeURIComponent(taskId)}/results/students/${encodeURIComponent(entry.student.id)}?question=${encodeURIComponent(question.id)}#question-${encodeURIComponent(question.id)}`;
   return (
     <div className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1.4fr)_100px_100px_120px_auto] sm:items-center">
@@ -365,7 +367,10 @@ function PanelEmpty({ text }: { text: string }) {
 }
 
 function buildQuestionMetrics(question: QuestionSummary) {
-  const scores = question.entries.map((entry) => effectiveCorrectionScore(entry.correction)).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  const scores = question.entries
+    .map((entry) => displayableCorrectionScore(entry.correction))
+    .filter((value): value is number => value !== null)
+    .sort((a, b) => a - b);
   const confidences = question.entries.map((entry) => normalizeConfidence(entry.correction.confidence)).filter((value): value is number => value !== null);
   const requiredReviewCount = question.entries.filter((entry) => correctionNeedsFormalReview(entry.correction)).length;
   const disagreementCount = question.entries.filter((entry) => correctionHasDisagreement(entry.correction)).length;
@@ -475,7 +480,10 @@ function buildStudentContextHref(taskId: string, studentId: string, questionId: 
 
 function entryPercent(entry: QuestionEntry): number {
   const max = Number(entry.correction.max_score);
-  return max > 0 ? (effectiveCorrectionScore(entry.correction) / max) * 100 : Number.POSITIVE_INFINITY;
+  const score = displayableCorrectionScore(entry.correction);
+  return score !== null && max > 0
+    ? (score / max) * 100
+    : Number.POSITIVE_INFINITY;
 }
 
 function normalizeConfidence(value: number | null | undefined): number | null {

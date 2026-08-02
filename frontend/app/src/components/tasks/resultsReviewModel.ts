@@ -107,7 +107,7 @@ function fallbackQuestion(qId: string): QuestionSummary {
     label: qId,
     entries: [],
     count: 0,
-    avgScore: 0,
+    avgScore: null,
     maxScore: 0,
     avgPercent: null,
     minScore: null,

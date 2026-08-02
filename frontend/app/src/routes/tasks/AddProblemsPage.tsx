@@ -38,6 +38,8 @@ import type {
 } from "@/types";
 
 const SOURCE_ROLES: PreparationSourceRole[] = ["problem", "reference_answer", "rubric", "programming_tests"];
+const DOCUMENT_SOURCE_EXTENSIONS = [".pdf", ".txt", ".md", ".markdown"] as const;
+const IMAGE_SOURCE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
 type SourceDraft = {
   id: string;
@@ -535,6 +537,7 @@ function SourceEditor({
   onRemove: () => void;
 }) {
   const [dragging, setDragging] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const librarySearch = useImeSafeQuery({
     value: source.librarySearch,
     onCommit: (value) => onUpdate({ librarySearch: value }),
@@ -548,16 +551,26 @@ function SourceEditor({
   );
   const libraryItems: ProblemLibraryMaterial[] = libraryQuery.data?.items ?? [];
   const libraryLoading = libraryQuery.isFetching;
-  const accept = (
-    acceptedExtensions?.length
-      ? acceptedExtensions
-      : source.role === "programming_tests"
-        ? [".pdf", ".txt", ".md", ".json"]
-        : [".pdf", ".txt", ".md", ".jpg", ".jpeg", ".png", ".webp"]
-  ).join(",");
+  const accepted = acceptedExtensions?.length
+    ? acceptedExtensions.map((extension) => extension.toLowerCase())
+    : source.role === "programming_tests"
+      ? [...DOCUMENT_SOURCE_EXTENSIONS, ".json"]
+      : [...DOCUMENT_SOURCE_EXTENSIONS];
+  const accept = accepted.join(",");
 
   function selectFile(file?: File) {
     if (!file || disabled) return;
+    const validationError = sourceFileValidationError(
+      file,
+      source.role,
+      accepted,
+      locale,
+    );
+    if (validationError) {
+      setFileError(validationError);
+      return;
+    }
+    setFileError(null);
     onUpdate({ file, sourceMode: "upload", libraryMaterial: null });
   }
 
@@ -590,6 +603,7 @@ function SourceEditor({
 
         {source.sourceMode === "upload" ? (
           <div
+            aria-label={tx(locale, `${roleMeta(source.role, locale).sourceLabel}文件上传`, `${roleMeta(source.role, locale).sourceLabel} file upload`)}
             onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
             onDragOver={(event) => event.preventDefault()}
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
@@ -603,6 +617,7 @@ function SourceEditor({
               {source.file ? tx(locale, "替换文件", "Replace File") : tx(locale, "选择文件", "Choose File")}
               <input id={`problem-source-file-${source.id}`} type="file" accept={accept} className="sr-only" disabled={disabled} onChange={(event: ChangeEvent<HTMLInputElement>) => { selectFile(event.target.files?.[0]); event.target.value = ""; }} />
             </label>
+            {fileError ? <p role="alert" className="mt-2 text-xs font-medium text-danger">{fileError}</p> : null}
           </div>
         ) : source.sourceMode === "inline_text" ? (
           <label className="mt-3 block rounded-[9px] border bg-slate-50/70 p-3 dark:bg-slate-950/20">
@@ -781,6 +796,43 @@ function sourceSummary(source: SourceDraft, locale: string) {
   if (source.sourceMode === "library" && source.libraryMaterial) return source.libraryMaterial.filename;
   if (source.sourceMode === "inline_text" && source.inlineText?.trim()) return tx(locale, "自然语言评分标准", "Natural-language rubric");
   return roleMeta(source.role, locale).sourceLabel;
+}
+
+function sourceFileValidationError(
+  file: File,
+  role: PreparationSourceRole,
+  acceptedExtensions: string[],
+  locale: string,
+) {
+  const normalizedName = file.name.trim().toLowerCase();
+  const extension = normalizedName.includes(".")
+    ? `.${normalizedName.split(".").pop()}`
+    : "";
+  if (extension && acceptedExtensions.includes(extension)) return null;
+
+  if (IMAGE_SOURCE_EXTENSIONS.has(extension)) {
+    if (role === "programming_tests") {
+      return tx(
+        locale,
+        "编程题测试资料不接受图片，请上传 PDF、TXT、Markdown 或 JSON。",
+        "Programming-test materials do not accept images. Upload PDF, TXT, Markdown, or JSON.",
+      );
+    }
+    return tx(
+      locale,
+      "当前模型配置未开放题目图片 OCR。请启用支持视觉识别的模型并刷新，或改用 PDF、TXT、Markdown。",
+      "Question-image OCR is not available with the current model configuration. Enable a vision-capable model and refresh, or use PDF, TXT, or Markdown.",
+    );
+  }
+
+  const formats = acceptedExtensions
+    .map((item) => item.replace(/^\./, "").toUpperCase())
+    .join(" / ");
+  return tx(
+    locale,
+    `不支持 ${extension ? extension.slice(1).toUpperCase() : "无扩展名"} 文件。当前可用格式：${formats}。`,
+    `${extension ? extension.slice(1).toUpperCase() : "Files without an extension are"} not supported. Available formats: ${formats}.`,
+  );
 }
 
 function roleMeta(role: PreparationSourceRole, locale: string) {

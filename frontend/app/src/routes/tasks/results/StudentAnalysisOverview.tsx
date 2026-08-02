@@ -2,7 +2,7 @@ import { ArrowRight, Search, X } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  effectiveCorrectionScore,
+  displayableCorrectionScore,
   formatConfidence,
   formatPercent,
   formatScore,
@@ -214,8 +214,10 @@ function StudentMatrixRow({ locale, taskId, questions, row, returnQuery }: { loc
 
 function QuestionScoreLink({ locale, taskId, studentId, question, correction, returnQuery }: { locale: Locale; taskId: string; studentId: string; question: QuestionSummary; correction?: Correction; returnQuery: string }) {
   if (!correction) return <span className="text-[10px] text-muted-foreground">—</span>;
-  const score = effectiveCorrectionScore(correction);
-  const percent = correction.max_score > 0 ? (score / correction.max_score) * 100 : null;
+  const score = displayableCorrectionScore(correction);
+  const percent = score !== null && correction.max_score > 0
+    ? (score / correction.max_score) * 100
+    : null;
   return <Link to={studentDetailHref(taskId, studentId, question.id, returnQuery)} title={tx(locale, `在学生详情查看 ${question.label}`, `Open ${question.label} in student detail`)} className={cn("inline-flex min-w-[66px] flex-col rounded-[7px] px-2 py-1.5 hover:ring-1 hover:ring-primary/30", percent !== null && percent < 60 ? "bg-rose-50 text-rose-700" : "bg-muted/60 text-foreground")}><strong className="text-[10px]">{formatScore(score)} / {formatScore(correction.max_score)}</strong><span className="mt-0.5 text-[9px] opacity-75">{formatPercent(percent)}</span></Link>;
 }
 

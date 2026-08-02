@@ -31,7 +31,7 @@ export interface QuestionSummary {
   criterion?: string;
   entries: QuestionEntry[];
   count: number;
-  avgScore: number;
+  avgScore: number | null;
   maxScore: number;
   avgPercent: number | null;
   minScore: number | null;
@@ -46,8 +46,8 @@ export interface ResultsModel {
   problems: ProblemInfo[];
   students: StudentSummary[];
   questions: QuestionSummary[];
-  classAverageScore: number;
-  classAverageMax: number;
+  classAverageScore: number | null;
+  classAverageMax: number | null;
   classAveragePercent: number | null;
   lowConfidenceCount: number;
   reviewCount: number;
@@ -91,8 +91,9 @@ export function buildResultsModel(task?: Task, result?: TaskResultResponse): Res
     .sort((a, b) => compareQuestionIds(a, b, problemOrder))
     .map((qId) => buildQuestionSummary(qId, rawProblems[qId], entriesByQuestion.get(qId) ?? []));
 
-  const classAverageScore = average(students.map((student) => student.totalScore));
-  const classAverageMax = average(students.map((student) => student.totalMax));
+  const studentsWithResolvedScores = students.filter((student) => student.totalMax > 0);
+  const classAverageScore = averageOrNull(studentsWithResolvedScores.map((student) => student.totalScore));
+  const classAverageMax = averageOrNull(studentsWithResolvedScores.map((student) => student.totalMax));
   const classAveragePercent = averageOrNull(students.map((student) => student.percent));
   const lowConfidenceCount = students.reduce((sum, student) => sum + student.lowConfidenceCount, 0);
   const reviewCount = students.reduce((sum, student) => sum + student.reviewCount, 0);
@@ -134,17 +135,15 @@ export function formatScore(value: number | null | undefined) {
   return value.toFixed(1);
 }
 
-export function effectiveCorrectionScore(correction: Correction) {
+export function effectiveCorrectionScore(correction: Correction): number | null {
   return typeof correction.teacher_score === "number" && Number.isFinite(correction.teacher_score)
     ? correction.teacher_score
-    : correction.score;
+    : typeof correction.score === "number" && Number.isFinite(correction.score)
+      ? correction.score
+      : null;
 }
 
-/**
- * The task facade currently serializes a missing AI score as numeric zero.
- * Do not present that fallback as a real grade while the item still requires
- * teacher review. A teacher-entered score remains displayable, including 0.
- */
+/** Pending review items are unresolved, even when old payloads contain a score. */
 export function displayableCorrectionScore(correction: Correction): number | null {
   if (typeof correction.teacher_score === "number" && Number.isFinite(correction.teacher_score)) {
     return correction.teacher_score;
@@ -152,9 +151,7 @@ export function displayableCorrectionScore(correction: Correction): number | nul
   if (correction.requires_human_review && correction.review_status !== "confirmed") {
     return null;
   }
-  return typeof correction.score === "number" && Number.isFinite(correction.score)
-    ? correction.score
-    : null;
+  return effectiveCorrectionScore(correction);
 }
 
 export function correctionReviewDraftScore(correction: Correction): string {
@@ -222,8 +219,13 @@ function buildStudentSummary(
   const corrections = [...(result.corrections ?? [])].sort((a, b) => compareQuestionIds(a.q_id, b.q_id, problemOrder));
   const answers = result.student_answers?.length ? result.student_answers : (submission?.stu_ans ?? []);
   const answerByQuestion = new Map(answers.map((answer) => [answer.q_id, answer]));
-  const totalScore = sum(corrections.map((correction) => safeNumber(effectiveCorrectionScore(correction))));
-  const totalMax = sum(corrections.map((correction) => safeNumber(correction.max_score)));
+  const resolvedScores = corrections.flatMap((correction) => {
+    const score = displayableCorrectionScore(correction);
+    const maxScore = safeNumber(correction.max_score);
+    return score === null || maxScore <= 0 ? [] : [{ score, maxScore }];
+  });
+  const totalScore = sum(resolvedScores.map((item) => item.score));
+  const totalMax = sum(resolvedScores.map((item) => item.maxScore));
   const confidenceValues = corrections.map((correction) => safeNumber(correction.confidence));
   const lowConfidenceCount = corrections.filter(isLowConfidence).length;
   const reviewCount = corrections.filter((correction) => correction.requires_human_review).length;
@@ -244,12 +246,15 @@ function buildStudentSummary(
 }
 
 function buildQuestionSummary(qId: string, problem: ProblemInfo | undefined, entries: QuestionEntry[]): QuestionSummary {
-  const scores = entries.map((entry) => safeNumber(effectiveCorrectionScore(entry.correction)));
+  const scores = entries
+    .map((entry) => displayableCorrectionScore(entry.correction))
+    .filter((value): value is number => value !== null);
   const maxScores = entries.map((entry) => safeNumber(entry.correction.max_score)).filter((value) => value > 0);
   const percents = entries
     .map((entry) => {
       const maxScore = safeNumber(entry.correction.max_score);
-      return maxScore > 0 ? (safeNumber(effectiveCorrectionScore(entry.correction)) / maxScore) * 100 : null;
+      const score = displayableCorrectionScore(entry.correction);
+      return score !== null && maxScore > 0 ? (score / maxScore) * 100 : null;
     })
     .filter((value): value is number => value !== null);
 
@@ -262,7 +267,7 @@ function buildQuestionSummary(qId: string, problem: ProblemInfo | undefined, ent
     criterion: problem?.criterion,
     entries,
     count: entries.length,
-    avgScore: average(scores),
+    avgScore: averageOrNull(scores),
     maxScore: maxScores.length ? Math.max(...maxScores) : 0,
     avgPercent: percents.length ? average(percents) : null,
     minScore: scores.length ? Math.min(...scores) : null,

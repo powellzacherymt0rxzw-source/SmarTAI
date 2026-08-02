@@ -136,7 +136,8 @@ export interface ExpertResult {
 export interface Correction {
   q_id: string;
   type: string;
-  score: number;
+  score: number | null;
+  provisional_score?: number | null;
   max_score: number;
   confidence: number;
   comment: string;
@@ -148,6 +149,7 @@ export interface Correction {
   is_score?: number | null;
   requires_human_review: boolean;
   review_reasons: string[];
+  initial_review_reasons?: string[];
   teacher_score?: number | null;
   teacher_comment?: string;
   review_status?: "pending" | "edited" | "confirmed";

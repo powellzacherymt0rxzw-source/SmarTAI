@@ -216,12 +216,15 @@ export interface RecoverableErrorContext {
 const BYOK_CODES = new Set([
   "recognition_provider_not_enabled",
   "provider_not_enabled",
+  "vision_provider_required",
   "shared_pool_kb_requires_byok",
   "no_enabled_expert",
   "expert_verification_auth_failed",
 ]);
 
 const FILE_CODES = new Set([
+  "source_type_not_allowed",
+  "source_mime_type_not_allowed",
   "problem_source_unsupported",
   "problem_source_decode_failed",
   "problem_source_character_limit_exceeded",
