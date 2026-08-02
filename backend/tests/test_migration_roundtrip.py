@@ -8,6 +8,7 @@ retained + education table from an empty database.
 """
 from __future__ import annotations
 
+import json
 from io import StringIO
 from pathlib import Path
 
@@ -154,7 +155,8 @@ def test_workflow_migration_preserves_existing_review_and_kb_link(
             "q_id, ai_score, ai_max_score, ai_comment, ai_steps, ai_expert_results, "
             "requires_review, review_reason, result_status, created_at, updated_at) VALUES "
             "('result', 'run', 'revision', 'question', 'student', 'q1', 8, 10, '', "
-            "'[]', '[]', 1, 'legacy_low_confidence', 'needs_review', 1, 1)"
+            "'[]', '[]', 1, 'legacy_low_confidence, minority_veto', "
+            "'needs_review', 1, 1)"
         ))
         connection.execute(text(
             "INSERT INTO teacher_reviews "
@@ -189,7 +191,7 @@ def test_workflow_migration_preserves_existing_review_and_kb_link(
             "WHERE grade_result_id='result' ORDER BY review_sequence"
         )).all()
         result = connection.execute(text(
-            "SELECT initial_requires_review, initial_review_reason "
+            "SELECT initial_requires_review, review_reasons, initial_review_reasons "
             "FROM grade_results WHERE id='result'"
         )).one()
         link = connection.execute(text(
@@ -202,7 +204,14 @@ def test_workflow_migration_preserves_existing_review_and_kb_link(
         ("review-z", True, 2),
     ]
     assert bool(result.initial_requires_review) is True
-    assert result.initial_review_reason == "legacy_low_confidence"
+    assert json.loads(result.review_reasons) == [
+        "legacy_low_confidence",
+        "minority_veto",
+    ]
+    assert json.loads(result.initial_review_reasons) == [
+        "legacy_low_confidence",
+        "minority_veto",
+    ]
     assert link.source_kind == "upload"
     assert link.library_material_id is None
 
@@ -215,6 +224,9 @@ def test_workflow_migration_preserves_existing_review_and_kb_link(
             "SELECT COUNT(*) FROM assignment_knowledge_documents "
             "WHERE assignment_id='assignment' AND document_id='document'"
         )).scalar_one() == 1
+        assert connection.execute(text(
+            "SELECT review_reason FROM grade_results WHERE id='result'"
+        )).scalar_one() == "legacy_low_confidence,minority_veto"
 
 
 def _postgresql_sql(monkeypatch, revision: str) -> str:

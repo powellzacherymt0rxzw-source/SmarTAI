@@ -77,7 +77,7 @@ def _prepared_task():
         ai_score=6,
         ai_max_score=10,
         requires_review=True,
-        review_reason="low_confidence",
+        review_reasons=["low_confidence"],
         result_status=education.GradeResultStatus.NEEDS_REVIEW.value,
         created_at=0,
         updated_at=0,
