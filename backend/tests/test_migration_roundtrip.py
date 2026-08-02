@@ -9,20 +9,37 @@ retained + education table from an empty database.
 from __future__ import annotations
 
 from io import StringIO
+from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
 def _alembic_config(db_url: str, monkeypatch) -> Config:
-    cfg = Config("alembic.ini")
-    cfg.set_main_option("script_location", "backend/db/migrations")
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option(
+        "script_location", str(REPO_ROOT / "backend/db/migrations")
+    )
     # env.py reads SMARTAI_DATABASE_URL; also force light mode so the SQLite URL
     # passes validate_database_mode(). Use monkeypatch so the env is restored
     # after the test and doesn't leak into other tests' configure_database().
     monkeypatch.setenv("SMARTAI_DATABASE_URL", db_url)
     monkeypatch.setenv("SMARTAI_DATABASE_HEAVY", "OFF")
     return cfg
+
+
+def test_upgrade_creates_missing_sqlite_parent(tmp_path, monkeypatch):
+    database_path = tmp_path / "data" / "nested" / "smartai.db"
+    cfg = _alembic_config("sqlite:///data/nested/smartai.db", monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    assert not database_path.parent.exists()
+    command.upgrade(cfg, "head")
+
+    assert database_path.is_file()
 
 
 def test_migration_downgrade_from_empty_head_then_upgrade(tmp_path, monkeypatch):
