@@ -48,7 +48,8 @@ def _serialize_result(result, review) -> dict:
         "submission_revision_id": result.submission_revision_id,
         "result_status": result.result_status,
         "requires_review": result.requires_review,
-        "review_reason": result.review_reason,
+        "review_reasons": list(result.review_reasons or []),
+        "initial_review_reasons": list(result.initial_review_reasons or []),
         "effective_score": effective_score,
         "effective_comment": effective_comment,
         "teacher_review": review_payload,
@@ -156,6 +157,8 @@ def student_result(assignment_id: str, current: User = Depends(get_current_user)
             "ai_comment": r.ai_comment,
             "teacher_review": r.teacher_review,
             "result_status": r.result_status,
+            "review_reasons": list(r.review_reasons or []),
+            "initial_review_reasons": list(r.initial_review_reasons or []),
         }
         for r in rows
     ]

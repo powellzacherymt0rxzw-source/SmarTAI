@@ -520,15 +520,15 @@ class GradeResultRecord(Base):
     requires_review: Mapped[bool] = mapped_column(
         default=False, server_default=text("false"), nullable=False
     )
-    review_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    review_reasons: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     # Immutable audit facts captured when the AI result is first persisted.
-    # Teacher decisions may resolve ``requires_review``/``review_reason`` but
+    # Teacher decisions may resolve ``requires_review``/``review_reasons`` but
     # must never erase why the result originally entered the review queue.
     initial_requires_review: Mapped[bool] = mapped_column(
         default=False, server_default=text("false"), nullable=False
     )
-    initial_review_reason: Mapped[str | None] = mapped_column(
-        String(128), nullable=True
+    initial_review_reasons: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list
     )
     # graded | failed | needs_review. "failed"/"needs_review" are excluded from
     # totals and from release; the frontend routes them to the review queue.

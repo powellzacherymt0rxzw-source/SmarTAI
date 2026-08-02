@@ -8,7 +8,7 @@ import pytest
 from backend.agents.grading_agent import _grade_single_answer
 from backend.agents.multi_expert import AllExpertsFailed, run_multi_expert
 from backend.models import ExpertResult, ProblemInfo, StepScore, StudentAnswerInfo
-from backend.skills.base import normalize_score_scale
+from backend.skills.base import InvalidScoreScale, normalize_score_scale
 from backend.skills.concept import ConceptSkill
 from backend.skills.proof import ProofSkill
 
@@ -46,6 +46,32 @@ def test_normalize_score_scale_rescales_total_and_steps():
     )
     assert score == 4.0
     assert steps[0].score == 3.0
+
+
+def test_normalize_ten_point_result_to_twenty_point_question():
+    score, steps = normalize_score_scale(
+        score=10.0,
+        reported_max_score=10.0,
+        authoritative_max_score=20.0,
+        steps=[StepScore(step_no=1, desc="complete", is_correct=True, score=10.0)],
+    )
+    assert score == 20.0
+    assert steps[0].score == 20.0
+
+
+def test_normalize_clamps_malicious_score_and_rejects_invalid_scale():
+    score, _steps = normalize_score_scale(
+        score=10_000.0,
+        reported_max_score=10.0,
+        authoritative_max_score=5.0,
+    )
+    assert score == 5.0
+    with pytest.raises(InvalidScoreScale, match="reported_max_score_invalid"):
+        normalize_score_scale(
+            score=1.0,
+            reported_max_score=0.0,
+            authoritative_max_score=5.0,
+        )
 
 
 @pytest.mark.asyncio
