@@ -8,21 +8,39 @@ retained + education table from an empty database.
 """
 from __future__ import annotations
 
+import json
 from io import StringIO
+from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
 def _alembic_config(db_url: str, monkeypatch) -> Config:
-    cfg = Config("alembic.ini")
-    cfg.set_main_option("script_location", "backend/db/migrations")
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option(
+        "script_location", str(REPO_ROOT / "backend/db/migrations")
+    )
     # env.py reads SMARTAI_DATABASE_URL; also force light mode so the SQLite URL
     # passes validate_database_mode(). Use monkeypatch so the env is restored
     # after the test and doesn't leak into other tests' configure_database().
     monkeypatch.setenv("SMARTAI_DATABASE_URL", db_url)
     monkeypatch.setenv("SMARTAI_DATABASE_HEAVY", "OFF")
     return cfg
+
+
+def test_upgrade_creates_missing_sqlite_parent(tmp_path, monkeypatch):
+    database_path = tmp_path / "data" / "nested" / "smartai.db"
+    cfg = _alembic_config("sqlite:///data/nested/smartai.db", monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    assert not database_path.parent.exists()
+    command.upgrade(cfg, "head")
+
+    assert database_path.is_file()
 
 
 def test_migration_downgrade_from_empty_head_then_upgrade(tmp_path, monkeypatch):
@@ -137,7 +155,8 @@ def test_workflow_migration_preserves_existing_review_and_kb_link(
             "q_id, ai_score, ai_max_score, ai_comment, ai_steps, ai_expert_results, "
             "requires_review, review_reason, result_status, created_at, updated_at) VALUES "
             "('result', 'run', 'revision', 'question', 'student', 'q1', 8, 10, '', "
-            "'[]', '[]', 1, 'legacy_low_confidence', 'needs_review', 1, 1)"
+            "'[]', '[]', 1, 'legacy_low_confidence, minority_veto', "
+            "'needs_review', 1, 1)"
         ))
         connection.execute(text(
             "INSERT INTO teacher_reviews "
@@ -172,7 +191,7 @@ def test_workflow_migration_preserves_existing_review_and_kb_link(
             "WHERE grade_result_id='result' ORDER BY review_sequence"
         )).all()
         result = connection.execute(text(
-            "SELECT initial_requires_review, initial_review_reason "
+            "SELECT initial_requires_review, review_reasons, initial_review_reasons "
             "FROM grade_results WHERE id='result'"
         )).one()
         link = connection.execute(text(
@@ -185,7 +204,14 @@ def test_workflow_migration_preserves_existing_review_and_kb_link(
         ("review-z", True, 2),
     ]
     assert bool(result.initial_requires_review) is True
-    assert result.initial_review_reason == "legacy_low_confidence"
+    assert json.loads(result.review_reasons) == [
+        "legacy_low_confidence",
+        "minority_veto",
+    ]
+    assert json.loads(result.initial_review_reasons) == [
+        "legacy_low_confidence",
+        "minority_veto",
+    ]
     assert link.source_kind == "upload"
     assert link.library_material_id is None
 
@@ -198,6 +224,9 @@ def test_workflow_migration_preserves_existing_review_and_kb_link(
             "SELECT COUNT(*) FROM assignment_knowledge_documents "
             "WHERE assignment_id='assignment' AND document_id='document'"
         )).scalar_one() == 1
+        assert connection.execute(text(
+            "SELECT review_reason FROM grade_results WHERE id='result'"
+        )).scalar_one() == "legacy_low_confidence,minority_veto"
 
 
 def _postgresql_sql(monkeypatch, revision: str) -> str:

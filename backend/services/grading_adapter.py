@@ -38,6 +38,17 @@ _HARD_FAILURE_METHODS = frozenset({"all_failed", "quota_exhausted"})
 _SOFT_REVIEW_METHODS = frozenset({"degraded_to_single"})
 
 
+def _stable_review_reasons(*groups: list[str] | tuple[str, ...]) -> list[str]:
+    reasons: list[str] = []
+    for group in groups:
+        for raw in group:
+            for part in str(raw).split(","):
+                reason = part.strip()
+                if reason and reason not in reasons:
+                    reasons.append(reason)
+    return reasons
+
+
 @dataclass
 class AdapterOutcome:
     """One per-student batch outcome, ready to persist as GradeResult rows."""
@@ -108,7 +119,8 @@ def correction_to_result(
             ai_score=None, ai_max_score=question.max_score, ai_comment="",
             ai_steps=[], ai_confidence=None, ai_expert_results=[],
             ai_synthesis_method=None, requires_review=True,
-            review_reason="missing_correction", result_status=education.GradeResultStatus.NEEDS_REVIEW.value,
+            review_reasons=["missing_correction"],
+            result_status=education.GradeResultStatus.NEEDS_REVIEW.value,
             created_at=0, updated_at=0,
         )
 
@@ -127,23 +139,28 @@ def correction_to_result(
         invalid_scale = True
         hard_failure = True
 
-    review_reasons = list(correction.review_reasons or [])
+    review_reasons = _stable_review_reasons(
+        list(correction.review_reasons or [])
+    )
     if method in _SOFT_REVIEW_METHODS and method not in review_reasons:
         review_reasons.append(method)
     soft_review = correction.requires_human_review or bool(review_reasons)
     needs_review = hard_failure or soft_review
-    result_status = (
-        education.GradeResultStatus.NEEDS_REVIEW.value if needs_review
-        else education.GradeResultStatus.GRADED.value
-    )
     if invalid_scale:
-        review_reason = "invalid_score_scale"
+        primary_reasons = ["invalid_score_scale"]
     elif hard_failure:
-        review_reason = "quota_exhausted" if method == "quota_exhausted" else "llm_failed"
-    elif review_reasons:
-        review_reason = ",".join(review_reasons)
+        primary_reasons = [
+            "quota_exhausted" if method == "quota_exhausted" else "llm_failed"
+        ]
     else:
-        review_reason = None
+        primary_reasons = []
+    review_reasons = _stable_review_reasons(primary_reasons, review_reasons)
+    if hard_failure:
+        result_status = education.GradeResultStatus.FAILED.value
+    elif needs_review:
+        result_status = education.GradeResultStatus.NEEDS_REVIEW.value
+    else:
+        result_status = education.GradeResultStatus.GRADED.value
 
     normalized_experts = []
     for expert in correction.expert_results:
@@ -169,7 +186,7 @@ def correction_to_result(
         ai_expert_results=[e.model_dump() for e in normalized_experts],
         ai_synthesis_method=method,
         requires_review=needs_review,
-        review_reason=review_reason,
+        review_reasons=review_reasons,
         result_status=result_status,
         created_at=0, updated_at=0,
     )
@@ -263,7 +280,9 @@ async def run_grading(
             )
             if raw is None:
                 normalized.requires_review = True
-                normalized.review_reason = "missing_student_result"
+                normalized.review_reasons = ["missing_student_result"]
+                normalized.initial_requires_review = True
+                normalized.initial_review_reasons = ["missing_student_result"]
                 normalized.result_status = education.GradeResultStatus.NEEDS_REVIEW.value
                 normalized.ai_score = None
             results.append(normalized)

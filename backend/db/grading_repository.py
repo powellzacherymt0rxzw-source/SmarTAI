@@ -314,9 +314,11 @@ def clone_released_run_for_review(
                 ai_expert_results=list(source_result.ai_expert_results or []),
                 ai_synthesis_method=source_result.ai_synthesis_method,
                 requires_review=False,
-                review_reason=None,
+                review_reasons=[],
                 initial_requires_review=source_result.initial_requires_review,
-                initial_review_reason=source_result.initial_review_reason,
+                initial_review_reasons=list(
+                    source_result.initial_review_reasons or []
+                ),
                 result_status=education.GradeResultStatus.GRADED.value,
                 created_at=now,
                 updated_at=now,
@@ -743,6 +745,33 @@ def upsert_result(run_id: str, *, worker_id: str,
         )
         if question is None:
             raise ValidationError("result_question_not_in_assignment")
+        if (
+            not math.isfinite(grade_result.ai_max_score)
+            or grade_result.ai_max_score <= 0
+            or not math.isclose(
+                grade_result.ai_max_score,
+                question.max_score,
+                rel_tol=1e-9,
+                abs_tol=1e-9,
+            )
+        ):
+            raise ValidationError("result_max_score_mismatch")
+        if grade_result.ai_score is not None and (
+            not math.isfinite(grade_result.ai_score)
+            or grade_result.ai_score < 0
+            or grade_result.ai_score > question.max_score
+        ):
+            raise ValidationError("result_score_out_of_range")
+        if (
+            grade_result.result_status == education.GradeResultStatus.FAILED.value
+            and grade_result.ai_score is not None
+        ):
+            raise ValidationError("failed_result_must_not_have_score")
+        if (
+            grade_result.result_status == education.GradeResultStatus.GRADED.value
+            and grade_result.ai_score is None
+        ):
+            raise ValidationError("graded_result_requires_score")
         existing = session.scalar(
             select(GradeResultRecord).where(
                 GradeResultRecord.grading_run_id == run_id,
@@ -767,9 +796,11 @@ def upsert_result(run_id: str, *, worker_id: str,
             ai_expert_results=list(grade_result.ai_expert_results or []),
             ai_synthesis_method=grade_result.ai_synthesis_method,
             requires_review=grade_result.requires_review,
-            review_reason=grade_result.review_reason,
+            review_reasons=list(grade_result.review_reasons or []),
             initial_requires_review=grade_result.initial_requires_review,
-            initial_review_reason=grade_result.initial_review_reason,
+            initial_review_reasons=list(
+                grade_result.initial_review_reasons or []
+            ),
             result_status=grade_result.result_status,
             created_at=now,
             updated_at=now,
@@ -857,9 +888,9 @@ def _result_to_dto(record: GradeResultRecord,
         ai_expert_results=list(record.ai_expert_results or []),
         ai_synthesis_method=record.ai_synthesis_method,
         requires_review=record.requires_review,
-        review_reason=record.review_reason,
+        review_reasons=list(record.review_reasons or []),
         initial_requires_review=record.initial_requires_review,
-        initial_review_reason=record.initial_review_reason,
+        initial_review_reasons=list(record.initial_review_reasons or []),
         result_status=record.result_status,
         effective_score=review.new_score if review is not None else record.ai_score,
         effective_comment=review.new_comment if review is not None else (record.ai_comment or ""),
@@ -940,11 +971,11 @@ def add_teacher_review(
         if confirm:
             result.result_status = education.GradeResultStatus.GRADED.value
             result.requires_review = False
-            result.review_reason = None
+            result.review_reasons = []
         else:
             result.result_status = education.GradeResultStatus.NEEDS_REVIEW.value
             result.requires_review = True
-            result.review_reason = "teacher_edit_pending_confirmation"
+            result.review_reasons = ["teacher_edit_pending_confirmation"]
         result.updated_at = now
         session.flush()
         return _review_to_dto(review)
