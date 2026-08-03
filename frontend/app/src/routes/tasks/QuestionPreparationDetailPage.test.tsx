@@ -152,6 +152,32 @@ describe("QuestionPreparationDetailPage navigation", () => {
     }));
   });
 
+  it("does not block navigation only because the default maximum score needs review", async () => {
+    const user = userEvent.setup();
+    const router = renderPage();
+
+    await user.click(await screen.findByRole("link", { name: "返回题目资料总览" }));
+
+    expect(await screen.findByText("Question overview destination")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/tasks/task-1/questions");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("blocks navigation only after the teacher makes an unsaved maximum-score edit", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "修改第 1 题满分" }));
+    const input = screen.getByRole("spinbutton", { name: "第 1 题满分" });
+    await user.clear(input);
+    await user.type(input, "8");
+    await user.click(screen.getByRole("link", { name: "返回题目资料总览" }));
+
+    expect(await screen.findByRole("alertdialog", { name: "离开且不保存？" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "继续编辑" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "放弃修改" })).toBeInTheDocument();
+  });
+
   it("uses reviewed English copy and returns to the question material overview", async () => {
     testState.locale = "en-US";
     const user = userEvent.setup();

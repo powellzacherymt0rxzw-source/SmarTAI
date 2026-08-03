@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { Correction } from "@/types";
 import {
+  aiCorrectionScore,
   buildResultsModel,
+  correctionScoreSource,
   correctionReviewDraftScore,
   correctionReviewReasonIds,
   displayableCorrectionScore,
+  effectiveCorrectionScore,
+  reviewConfirmationScore,
+  shouldHideAutomatedScores,
+  summarizeReviewScoreSources,
 } from "./resultsModel";
 
 function correction(patch: Partial<Correction> = {}): Correction {
@@ -26,26 +32,80 @@ function correction(patch: Partial<Correction> = {}): Correction {
 }
 
 describe("review score presentation", () => {
-  it("does not present a provisional or legacy pending score as a formal grade", () => {
+  it("hides a soft-review AI score in review while retaining its effective value", () => {
     const pending = correction();
 
     expect(displayableCorrectionScore(pending)).toBeNull();
     expect(correctionReviewDraftScore(pending)).toBe("");
-    expect(displayableCorrectionScore(correction({ score: 7 }))).toBeNull();
+    expect(aiCorrectionScore(pending)).toBe(7);
+    expect(effectiveCorrectionScore(pending)).toBe(7);
+    expect(reviewConfirmationScore(pending, "")).toBe(7);
+    expect(correctionScoreSource(pending)).toBe("ai_untouched");
+    expect(shouldHideAutomatedScores(pending)).toBe(true);
   });
 
-  it("shows a teacher-entered zero and a confirmed AI score", () => {
-    expect(displayableCorrectionScore(correction({ teacher_score: 0, review_status: "edited" }))).toBe(0);
-    expect(displayableCorrectionScore(correction({ score: 7, requires_human_review: false, review_status: "confirmed" }))).toBe(7);
+  it("does not mistake an auto-confirmed payload for teacher review", () => {
+    const autoConfirmed = correction({
+      score: 7,
+      teacher_score: null,
+      review_status: "confirmed",
+    });
+
+    expect(correctionScoreSource(autoConfirmed)).toBe("ai_untouched");
+    expect(displayableCorrectionScore(autoConfirmed)).toBeNull();
+    expect(shouldHideAutomatedScores(autoConfirmed)).toBe(true);
+  });
+
+  it("distinguishes a same-score confirmation from a teacher override", () => {
+    const confirmed = correction({ score: 6, provisional_score: 6, teacher_score: 6, review_status: "confirmed" });
+    const changed = correction({ score: 8, provisional_score: 6, teacher_score: 8, review_status: "confirmed" });
+
+    expect(effectiveCorrectionScore(confirmed)).toBe(6);
+    expect(correctionScoreSource(confirmed)).toBe("teacher_confirmed_same");
+    expect(effectiveCorrectionScore(changed)).toBe(8);
+    expect(correctionScoreSource(changed)).toBe("teacher_changed");
+  });
+
+  it("keeps a soft-review zero but rejects a legacy hard-failure zero", () => {
+    const realZero = correction({ score: 0, provisional_score: 0 });
+    const hardFailure = correction({
+      score: 0,
+      provisional_score: 0,
+      synthesis_method: "all_failed",
+      review_reasons: ["llm_failed"],
+    });
+
+    expect(effectiveCorrectionScore(realZero)).toBe(0);
+    expect(reviewConfirmationScore(realZero, "")).toBe(0);
+    expect(effectiveCorrectionScore(hardFailure)).toBeNull();
+    expect(reviewConfirmationScore(hardFailure, "")).toBeNull();
+    expect(correctionScoreSource(hardFailure)).toBe("hard_failure");
   });
 
   it("normalizes comma-joined backend review reasons", () => {
     expect(correctionReviewReasonIds(correction())).toEqual(["low_confidence", "high_indecisiveness"]);
   });
+
+  it("counts review sources without treating hard failures as untouched AI scores", () => {
+    const summary = summarizeReviewScoreSources([
+      correction(),
+      correction({ teacher_score: 7, score: 7, review_status: "confirmed" }),
+      correction({ teacher_score: 8, score: 8, provisional_score: 7, review_status: "edited" }),
+      correction({ score: 0, provisional_score: 0, synthesis_method: "all_failed", review_reasons: ["llm_failed"] }),
+    ]);
+
+    expect(summary).toEqual({
+      aiUntouched: 1,
+      teacherConfirmedSame: 1,
+      teacherChanged: 1,
+      hardFailure: 1,
+      total: 4,
+    });
+  });
 });
 
 describe("formal result statistics", () => {
-  it("preserves a confirmed zero and excludes unresolved scores from all score aggregates", () => {
+  it("includes untouched soft-review scores and real zero while excluding only hard failures", () => {
     const model = buildResultsModel(undefined, {
       status: "completed",
       task_id: "task-1",
@@ -75,12 +135,13 @@ describe("formal result statistics", () => {
             correction({
               q_id: "q1",
               score: 0,
+              provisional_score: 0,
               confidence: 0.9,
               requires_human_review: false,
               review_reasons: [],
               review_status: "confirmed",
             }),
-            correction({ q_id: "q2", max_score: 20 }),
+            correction({ q_id: "q2", score: null, provisional_score: 12, max_score: 20 }),
           ],
         },
         {
@@ -95,19 +156,26 @@ describe("formal result statistics", () => {
               review_reasons: [],
               review_status: "confirmed",
             }),
-            correction({ q_id: "q2", max_score: 20, provisional_score: null }),
+            correction({
+              q_id: "q2",
+              score: 0,
+              provisional_score: 0,
+              max_score: 20,
+              synthesis_method: "all_failed",
+              review_reasons: ["llm_failed"],
+            }),
           ],
         },
       ],
     });
 
     expect(model.students[0]).toMatchObject({ totalScore: 5, totalMax: 10, percent: 50 });
-    expect(model.students[1]).toMatchObject({ totalScore: 0, totalMax: 10, percent: 0 });
-    expect(model.classAverageScore).toBe(2.5);
-    expect(model.classAverageMax).toBe(10);
-    expect(model.classAveragePercent).toBe(25);
+    expect(model.students[1]).toMatchObject({ totalScore: 12, totalMax: 30, percent: 40 });
+    expect(model.classAverageScore).toBe(8.5);
+    expect(model.classAverageMax).toBe(20);
+    expect(model.classAveragePercent).toBe(45);
     expect(model.questions[0]).toMatchObject({ avgScore: 2.5, minScore: 0, maxObservedScore: 5 });
-    expect(model.questions[1]).toMatchObject({ avgScore: null, avgPercent: null, minScore: null, maxObservedScore: null });
+    expect(model.questions[1]).toMatchObject({ avgScore: 12, avgPercent: 60, minScore: 12, maxObservedScore: 12 });
   });
 
   it("returns null class averages when every score is unresolved", () => {
@@ -116,7 +184,12 @@ describe("formal result statistics", () => {
       task_id: "task-1",
       results: [{
         student_id: "S1",
-        corrections: [correction()],
+        corrections: [correction({
+          score: null,
+          provisional_score: null,
+          synthesis_method: "all_failed",
+          review_reasons: ["llm_failed"],
+        })],
       }],
     });
 
