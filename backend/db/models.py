@@ -530,8 +530,9 @@ class GradeResultRecord(Base):
     initial_review_reasons: Mapped[list] = mapped_column(
         JSON, nullable=False, default=list
     )
-    # graded | failed | needs_review. "failed"/"needs_review" are excluded from
-    # totals and from release; the frontend routes them to the review queue.
+    # graded | failed | needs_review. Only ``failed`` has no usable score and
+    # blocks release. A scored ``needs_review`` row remains in the review queue
+    # while its AI value is used by default unless the teacher overrides it.
     result_status: Mapped[str] = mapped_column(String(32), nullable=False, default="graded")
     created_at: Mapped[float] = mapped_column(Float, nullable=False, default=time.time)
     updated_at: Mapped[float] = mapped_column(

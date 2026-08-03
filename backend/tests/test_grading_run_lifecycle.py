@@ -7,8 +7,8 @@ result so the lifecycle is deterministic without an LLM. Covers:
 * frozen submission revisions captured at run creation;
 * atomic lease claim, heartbeat by current owner only, expired-lease reclaim;
 * late worker rejection via the lease-owner terminal-write predicate;
-* result normalization (successful Correction → graded; failure modes →
-  needs_review / failed, never a real zero score);
+* result normalization (successful Correction → graded; soft warnings →
+  scored needs_review; hard failures → failed with no fabricated zero);
 * partial failure; teacher-only review; immutable AI fields;
 * release blocking while failures are unresolved;
 * student visibility only after release.
@@ -262,6 +262,8 @@ def test_task_facade_keeps_null_distinct_from_real_zero():
          "result_max_score_mismatch"),
         (0.0, 10.0, education.GradeResultStatus.FAILED.value,
          "failed_result_must_not_have_score"),
+        (None, 10.0, education.GradeResultStatus.NEEDS_REVIEW.value,
+         "soft_review_result_requires_score"),
     ],
 )
 def test_repository_rejects_non_authoritative_result_rows(
@@ -436,7 +438,7 @@ def test_later_serialized_review_wins_when_clock_moves_backward(
                 question_id=setup_assignment["question_id"],
                 student_id=setup_assignment["student_id"],
                 q_id="q1",
-                ai_score=None,
+                ai_score=8.0,
                 ai_max_score=10.0,
                 requires_review=True,
                 review_reasons=["low_confidence"],
@@ -522,7 +524,7 @@ def test_release_blocked_while_failures_unresolved(setup_assignment):
         grading_runs.release(teacher_id=setup_assignment["teacher_id"], run_id=run.id)
 
 
-def test_release_succeeds_after_review_resolves_failure(setup_assignment):
+def test_release_uses_scored_soft_review_without_teacher_action(setup_assignment):
     run = grading_runs.create_run(
         teacher_id=setup_assignment["teacher_id"], assignment_id=setup_assignment["assignment_id"]
     )
@@ -542,18 +544,51 @@ def test_release_succeeds_after_review_resolves_failure(setup_assignment):
     )
     grading_repository.claim_lease(run_id=run.id, worker_id=setup_assignment["teacher_id"], lease_seconds=60)
     grading_repository.mark_completed(run_id=run.id, worker_id=setup_assignment["teacher_id"], completed=1, failed=0)
-    # Still blocked while the needs_review result is unresolved.
-    with pytest.raises(ResultNotReleasable):
-        grading_runs.release(teacher_id=setup_assignment["teacher_id"], run_id=run.id)
-    # Resolve via teacher review (which sets a display score).
-    rid = grading_repository.list_results_for_run(run_id=run.id)[0].id
-    grading_repository.add_teacher_review(
-        grade_result_id=rid, teacher_id=setup_assignment["teacher_id"], new_score=6.0, new_comment="ok"
-    )
-    # Mark the result resolved (graded) so it leaves the review queue.
-    grading_runs.resolve_review(grade_result_id=rid, teacher_id=setup_assignment["teacher_id"])
+    # A valid AI zero is still a real score. The warning stays in the review
+    # queue, but no per-item teacher confirmation is required for release.
     released = grading_runs.release(teacher_id=setup_assignment["teacher_id"], run_id=run.id)
     assert released.released_at is not None
+    seen = grading_runs.student_results(
+        student_id=setup_assignment["student_id"],
+        assignment_id=setup_assignment["assignment_id"],
+    )
+    assert len(seen) == 1
+    assert seen[0].ai_score == 0.0
+    assert seen[0].effective_score == 0.0
+    review_queue = grading_runs.list_review_queue(
+        assignment_id=setup_assignment["assignment_id"],
+        teacher_id=setup_assignment["teacher_id"],
+    )
+    assert [row.id for row in review_queue] == [seen[0].id]
+
+    # The normalized result API must use the same effective-score semantics:
+    # the warning stays countable as review work while the real zero remains a
+    # score in totals instead of being dropped as a falsy value.
+    from types import SimpleNamespace
+
+    from backend.api.results import _summary, per_question_aggregates
+
+    summary = _summary(
+        setup_assignment["assignment_id"],
+        setup_assignment["teacher_id"],
+    )
+    assert summary["graded_count"] == 1
+    assert summary["needs_review_count"] == 1
+    assert summary["students"] == [{
+        "student_id": setup_assignment["student_id"],
+        "total": 0.0,
+    }]
+    assert per_question_aggregates(
+        setup_assignment["assignment_id"],
+        current=SimpleNamespace(id=setup_assignment["teacher_id"]),
+    ) == [{
+        "q_id": "q1",
+        "count": 1,
+        "max_score": 10.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+    }]
 
 
 def test_student_visibility_only_after_release(setup_assignment):
@@ -648,6 +683,12 @@ def test_teacher_review_resolves_failure_and_validates_score(setup_assignment):
     # Review is only allowed on a terminal, unreleased run — close the run first
     # so the review invariant (completed/partial_failed, not released) is met.
     grading_repository.mark_completed(run_id=run.id, worker_id="w1", completed=1, failed=0)
+    with pytest.raises(ValidationError):
+        grading_runs.add_teacher_review(
+            grade_result_id=persisted.id,
+            teacher_id=setup_assignment["teacher_id"],
+            new_score=11,
+        )
     review = grading_runs.add_teacher_review(
         grade_result_id=persisted.id,
         teacher_id=setup_assignment["teacher_id"],
@@ -659,12 +700,17 @@ def test_teacher_review_resolves_failure_and_validates_score(setup_assignment):
     assert resolved.result_status == education.GradeResultStatus.GRADED.value
     assert resolved.requires_review is False
     assert resolved.ai_score is None
-    with pytest.raises(ValidationError):
-        grading_runs.add_teacher_review(
-            grade_result_id=persisted.id,
-            teacher_id=setup_assignment["teacher_id"],
-            new_score=11,
-        )
+    released = grading_runs.release(
+        teacher_id=setup_assignment["teacher_id"],
+        run_id=run.id,
+    )
+    assert released.released_at is not None
+    visible = grading_runs.student_results(
+        student_id=setup_assignment["student_id"],
+        assignment_id=setup_assignment["assignment_id"],
+    )
+    assert len(visible) == 1
+    assert visible[0].effective_score == 7.0
 
 
 def test_teacher_review_rejected_while_run_still_running(setup_assignment):
@@ -844,7 +890,7 @@ def test_explicit_e2e_provider_does_not_require_persisted_provider_config(
     assert completed.failed_submissions == 0
 
 
-def test_adapter_marks_missing_student_batch_output_for_review(setup_assignment, monkeypatch):
+def test_adapter_marks_missing_student_batch_output_as_hard_failure(setup_assignment, monkeypatch):
     async def empty_batch(**_kwargs):
         return []
 
@@ -862,7 +908,10 @@ def test_adapter_marks_missing_student_batch_output_for_review(setup_assignment,
         registry=None,
     ))
     assert len(outcomes) == 1
-    assert outcomes[0].results[0].result_status == education.GradeResultStatus.NEEDS_REVIEW.value
+    result = outcomes[0].results[0]
+    assert result.result_status == education.GradeResultStatus.FAILED.value
+    assert result.ai_score is None
+    assert result.review_reasons == ["missing_student_result"]
 
 
 def test_student_results_use_only_latest_released_run(setup_assignment):
