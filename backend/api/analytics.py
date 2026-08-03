@@ -32,6 +32,7 @@ from backend.db.models import (
     UserRecord,
 )
 from backend.db.session import session_scope
+from backend.domain import education
 from backend.llm.registry import (
     ExpertRegistry,
     SharedPoolLimitError,
@@ -98,7 +99,10 @@ class _ResultFact:
 
     @property
     def is_scored(self) -> bool:
-        return self.result_status == "graded" and self.score is not None
+        return (
+            self.result_status not in education.NON_SCOREABLE_RESULT_STATUSES
+            and self.score is not None
+        )
 
 
 @dataclass(frozen=True)

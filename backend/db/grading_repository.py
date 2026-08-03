@@ -12,9 +12,9 @@ invariants in SQL plus conditional UPDATEs:
   the ``lease_owner`` predicate so a late worker cannot overwrite another.
 
 AI-original ``grade_results`` columns are immutable once written; a teacher
-review is a separate ``teacher_reviews`` row, never an overwrite. Release
-blocking (unresolved failed/needs_review results) is checked before flipping a
-run to a releasable terminal state.
+review is a separate ``teacher_reviews`` row, never an overwrite. Only hard
+failures block release; scored soft-review rows keep their warning and use the
+AI score by default.
 """
 from __future__ import annotations
 
@@ -666,8 +666,9 @@ def persisted_result_counters(run_id: str) -> tuple[int, int]:
 
     ``completed`` counts frozen revisions with every expected question result.
     ``failed`` counts incomplete revisions or complete revisions containing a
-    non-graded result. Thus an expired-lease retry that encounters only duplicate
-    rows still reports work committed by the previous worker.
+    non-scoreable hard failure. A complete revision containing only scored soft
+    reviews is completed, not failed. Thus an expired-lease retry that encounters
+    only duplicate rows still reports work committed by the previous worker.
     """
     with session_scope() as session:
         run = session.get(GradingRunRecord, run_id)
@@ -695,7 +696,7 @@ def persisted_result_counters(run_id: str) -> tuple[int, int]:
             if complete:
                 completed += 1
             if not complete or any(
-                status in education.NON_GRADED_RESULT_STATUSES
+                status in education.NON_SCOREABLE_RESULT_STATUSES
                 for status in statuses.values()
             ):
                 failed += 1
@@ -772,6 +773,11 @@ def upsert_result(run_id: str, *, worker_id: str,
             and grade_result.ai_score is None
         ):
             raise ValidationError("graded_result_requires_score")
+        if (
+            grade_result.result_status == education.GradeResultStatus.NEEDS_REVIEW.value
+            and grade_result.ai_score is None
+        ):
+            raise ValidationError("soft_review_result_requires_score")
         existing = session.scalar(
             select(GradeResultRecord).where(
                 GradeResultRecord.grading_run_id == run_id,
@@ -829,10 +835,9 @@ def list_results_for_review(assignment_id: str) -> list[education.GradeResultDTO
             .join(GradingRunRecord, GradingRunRecord.id == GradeResultRecord.grading_run_id)
             .where(
                 GradingRunRecord.assignment_id == assignment_id,
-                GradeResultRecord.result_status.in_([
-                    education.GradeResultStatus.FAILED.value,
-                    education.GradeResultStatus.NEEDS_REVIEW.value,
-                ]),
+                GradeResultRecord.result_status.in_(
+                    education.REVIEW_QUEUE_RESULT_STATUSES
+                ),
             )
             .order_by(GradeResultRecord.created_at)
         ).all()
@@ -998,15 +1003,28 @@ def latest_teacher_review(grade_result_id: str) -> education.TeacherReviewDTO | 
         return _review_to_dto(record)
 
 
-def has_unresolved_failures(run_id: str) -> bool:
+def has_review_queue_items(run_id: str) -> bool:
+    """Return whether this run still has hard failures or soft review signals."""
     with session_scope() as session:
         return session.scalar(
             select(func.count()).select_from(GradeResultRecord).where(
                 GradeResultRecord.grading_run_id == run_id,
-                GradeResultRecord.result_status.in_([
-                    education.GradeResultStatus.FAILED.value,
-                    education.GradeResultStatus.NEEDS_REVIEW.value,
-                ]),
+                GradeResultRecord.result_status.in_(
+                    education.REVIEW_QUEUE_RESULT_STATUSES
+                ),
+            )
+        ) > 0
+
+
+def has_unresolved_failures(run_id: str) -> bool:
+    """Return whether this run contains a release-blocking hard failure."""
+    with session_scope() as session:
+        return session.scalar(
+            select(func.count()).select_from(GradeResultRecord).where(
+                GradeResultRecord.grading_run_id == run_id,
+                GradeResultRecord.result_status.in_(
+                    education.NON_SCOREABLE_RESULT_STATUSES
+                ),
             )
         ) > 0
 
@@ -1014,11 +1032,11 @@ def has_unresolved_failures(run_id: str) -> bool:
 def release(run_id: str, *, teacher_id: str) -> education.GradingRunDTO:
     """Mark a completed run released so students see results.
 
-    Blocking: a run with unresolved failed/needs_review results cannot be
-    released — the teacher must review them first (or the system would publish
-    non-scores as if they were real grades). The release is a single conditional
-    UPDATE that requires a terminal status AND no prior release; it stamps
-    ``released_at`` so the student read model can gate visibility on it.
+    Blocking: a run with a hard failure cannot be released until the teacher
+    supplies a valid score. A scored ``needs_review`` row remains visible in the
+    review queue but uses its AI score by default. The release is a single
+    conditional UPDATE that requires a terminal status AND no prior release; it
+    stamps ``released_at`` so the student read model can gate visibility on it.
     """
     now = time.time()
     with session_scope() as session:
@@ -1038,10 +1056,9 @@ def release(run_id: str, *, teacher_id: str) -> education.GradingRunDTO:
         unresolved = exists(
             select(GradeResultRecord.id).where(
                 GradeResultRecord.grading_run_id == run_id,
-                GradeResultRecord.result_status.in_([
-                    education.GradeResultStatus.FAILED.value,
-                    education.GradeResultStatus.NEEDS_REVIEW.value,
-                ]),
+                GradeResultRecord.result_status.in_(
+                    education.NON_SCOREABLE_RESULT_STATUSES
+                ),
             )
         )
         if session.scalar(select(unresolved)):

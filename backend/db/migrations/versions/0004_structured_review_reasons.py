@@ -137,9 +137,23 @@ def upgrade() -> None:
     else:
         _backfill_arrays_online()
 
+    # Before the soft/hard split, an unresolved missing result was represented
+    # as ``needs_review`` with no AI score. It has no usable default and must
+    # remain release-blocking under the new semantics. A row with a persisted
+    # teacher review is different: the review supplies its effective score, so
+    # preserve that valid saved-decision state even when it was not explicitly
+    # confirmed by the old client.
+    op.execute(sa.text(
+        "UPDATE grade_results SET result_status = 'failed' "
+        "WHERE result_status = 'needs_review' AND ai_score IS NULL "
+        "AND NOT EXISTS ("
+        "SELECT 1 FROM teacher_reviews "
+        "WHERE teacher_reviews.grade_result_id = grade_results.id)"
+    ))
+
     # Legacy failed rows sometimes stored zero as a failure sentinel.  Only the
     # explicit hard-failure state is normalized; a genuine zero in graded or
-    # soft-review rows remains untouched.
+    # scored soft-review rows remains untouched.
     op.execute(sa.text(
         "UPDATE grade_results SET ai_score = NULL WHERE result_status = 'failed'"
     ))
@@ -150,6 +164,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Schema fields are reversible, but the semantic cleanup above is not:
+    # after upgrade there is no reliable way to distinguish a legacy failure
+    # sentinel from an original NULL/zero value. Operators who may need exact
+    # pre-upgrade row restoration must retain a database backup.
     op.add_column(
         "grade_results",
         sa.Column("review_reason", sa.String(length=128), nullable=True),

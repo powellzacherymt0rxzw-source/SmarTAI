@@ -219,7 +219,7 @@ def _seed_graded_assignment(owner: User, label: str = "owner") -> dict[str, obje
             (7.0, "graded", False, [], "AI comment one", 0.8),
             (
                 4.0,
-                "graded",
+                "needs_review",
                 True,
                 ["minority_veto", "high_indecisiveness"],
                 "AI comment two",
@@ -227,7 +227,7 @@ def _seed_graded_assignment(owner: User, label: str = "owner") -> dict[str, obje
             ),
             (
                 None,
-                "needs_review",
+                "failed",
                 True,
                 ["low_confidence"],
                 "Unavailable",

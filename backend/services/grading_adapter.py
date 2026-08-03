@@ -13,7 +13,7 @@ Failure semantics (no publishable real zero):
   → hard failure with no provisional score;
 * low confidence, expert disagreement, or ``degraded_to_single`` → soft
   review that preserves the provisional score;
-* a missing correction for a submitted question → ``needs_review``;
+* a missing correction/student result → hard failure with no provisional score;
 * an exception raised by ``grade_batch`` → the whole run fails, not silent zeros.
 """
 from __future__ import annotations
@@ -108,8 +108,8 @@ def correction_to_result(
     """Map a single Correction (or its absence) to a GradeResultDTO.
 
     A real graded answer keeps its score. A confidence-0 / all-failed / missing
-    correction becomes ``needs_review`` rather than a publishable zero, so the
-    teacher review queue — never the released score — receives it.
+    correction becomes ``failed`` rather than a publishable zero, so it blocks
+    release until the teacher supplies a valid score.
     """
     q_id = question.q_id
     if correction is None:
@@ -120,7 +120,7 @@ def correction_to_result(
             ai_steps=[], ai_confidence=None, ai_expert_results=[],
             ai_synthesis_method=None, requires_review=True,
             review_reasons=["missing_correction"],
-            result_status=education.GradeResultStatus.NEEDS_REVIEW.value,
+            result_status=education.GradeResultStatus.FAILED.value,
             created_at=0, updated_at=0,
         )
 
@@ -283,7 +283,7 @@ async def run_grading(
                 normalized.review_reasons = ["missing_student_result"]
                 normalized.initial_requires_review = True
                 normalized.initial_review_reasons = ["missing_student_result"]
-                normalized.result_status = education.GradeResultStatus.NEEDS_REVIEW.value
+                normalized.result_status = education.GradeResultStatus.FAILED.value
                 normalized.ai_score = None
             results.append(normalized)
         outcomes.append(AdapterOutcome(student_id=student_id, results=results))
