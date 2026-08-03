@@ -59,9 +59,14 @@ class GradeResultStatus(str, Enum):
     NEEDS_REVIEW = "needs_review"
 
 
-# Results in these states are excluded from totals and from release; they route
-# to the teacher review queue instead of being shown as a real score.
-NON_GRADED_RESULT_STATUSES = frozenset(
+# Only hard failures lack a usable score and therefore block totals/release.
+# ``needs_review`` is a soft warning state: its validated AI score remains the
+# effective default unless a teacher explicitly confirms or changes it.
+NON_SCOREABLE_RESULT_STATUSES = frozenset({GradeResultStatus.FAILED.value})
+
+# Both hard failures and soft warnings stay discoverable in the teacher review
+# queue even though only the former block publication.
+REVIEW_QUEUE_RESULT_STATUSES = frozenset(
     {GradeResultStatus.FAILED.value, GradeResultStatus.NEEDS_REVIEW.value}
 )
 
