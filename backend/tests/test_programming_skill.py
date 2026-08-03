@@ -9,7 +9,7 @@ Coverage:
   - LLM returns 20 cases             → only 8 actually run
 
 Run with:
-    /opt/anaconda3/envs/smartai/bin/python -m pytest backend/tests/test_programming_skill.py -v
+    python -m pytest backend/tests/test_programming_skill.py -v
 """
 from __future__ import annotations
 

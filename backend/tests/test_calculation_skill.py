@@ -8,7 +8,7 @@ Coverage:
   - Unparseable student answer             → sympy_failed footer
 
 Run with:
-    /opt/anaconda3/envs/smartai/bin/python -m pytest backend/tests/test_calculation_skill.py -v
+    python -m pytest backend/tests/test_calculation_skill.py -v
 """
 from __future__ import annotations
 
