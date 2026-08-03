@@ -16,6 +16,9 @@ from backend.security.secrets import EncryptedSecret, decrypt_secret, encrypt_se
 class StoredProviderConfig:
     id: str
     config: ProviderConfig
+    verification_status: str = "unverified"
+    last_checked_at: float | None = None
+    verification_error_code: str | None = None
 
 
 def _associated_data(owner_id: str, record_id: str) -> str:
@@ -70,6 +73,9 @@ def upsert_provider_config(owner_id: str, config: ProviderConfig, *, master_key:
         record.enabled = config.enabled
         record.max_concurrent = max(1, config.max_concurrent)
         record.rpm = max(0, config.rpm)
+        record.verification_status = "unverified"
+        record.last_checked_at = None
+        record.verification_error_code = None
         record.updated_at = now
         return record
 
@@ -78,7 +84,16 @@ def list_provider_configs(owner_id: str, *, master_key: str) -> list[StoredProvi
     with session_scope() as session:
         records = list(session.scalars(select(ProviderConfigRecord).where(
             ProviderConfigRecord.owner_id == owner_id).order_by(ProviderConfigRecord.created_at)))
-    return [StoredProviderConfig(id=record.id, config=_to_config(record, master_key)) for record in records]
+    return [
+        StoredProviderConfig(
+            id=record.id,
+            config=_to_config(record, master_key),
+            verification_status=record.verification_status,
+            last_checked_at=record.last_checked_at,
+            verification_error_code=record.verification_error_code,
+        )
+        for record in records
+    ]
 
 
 def get_provider_config(owner_id: str, provider_id: str, *, master_key: str) -> StoredProviderConfig | None:
@@ -89,7 +104,87 @@ def get_provider_config(owner_id: str, provider_id: str, *, master_key: str) -> 
         ))
     if record is None:
         return None
-    return StoredProviderConfig(id=record.id, config=_to_config(record, master_key))
+    return StoredProviderConfig(
+        id=record.id,
+        config=_to_config(record, master_key),
+        verification_status=record.verification_status,
+        last_checked_at=record.last_checked_at,
+        verification_error_code=record.verification_error_code,
+    )
+
+
+def update_provider_config(
+    owner_id: str,
+    provider_id: str,
+    config: ProviderConfig,
+    *,
+    master_key: str,
+) -> StoredProviderConfig | None:
+    """Replace one owner-scoped record while preserving its stable id.
+
+    Callers that want to keep an omitted API key first load the existing
+    encrypted record and pass the recovered key in ``config``. The plaintext is
+    never written to logs or returned by public API serializers.
+    """
+    now = time.time()
+    with session_scope() as session:
+        record = session.scalar(select(ProviderConfigRecord).where(
+            ProviderConfigRecord.id == provider_id,
+            ProviderConfigRecord.owner_id == owner_id,
+        ))
+        if record is None:
+            return None
+        encrypted = encrypt_secret(
+            config.api_key,
+            master_key=master_key,
+            associated_data=_associated_data(owner_id, record.id),
+        )
+        record.provider_type = config.provider_type
+        record.model = config.model
+        record.base_url = config.base_url
+        record.display_name = config.display_name
+        record.encrypted_api_key = encrypted.ciphertext
+        record.nonce = encrypted.nonce
+        record.key_version = encrypted.key_version
+        record.enabled = config.enabled
+        record.max_concurrent = max(1, config.max_concurrent)
+        record.rpm = max(0, config.rpm)
+        record.verification_status = "unverified"
+        record.last_checked_at = None
+        record.verification_error_code = None
+        record.updated_at = now
+        session.flush()
+        return StoredProviderConfig(
+            id=record.id,
+            config=config.model_copy(deep=True),
+            verification_status=record.verification_status,
+            last_checked_at=record.last_checked_at,
+            verification_error_code=record.verification_error_code,
+        )
+
+
+def set_provider_verification(
+    owner_id: str,
+    provider_id: str,
+    *,
+    verification_status: str,
+    checked_at: float,
+    error_code: str | None = None,
+) -> bool:
+    with session_scope() as session:
+        record = session.scalar(
+            select(ProviderConfigRecord).where(
+                ProviderConfigRecord.id == provider_id,
+                ProviderConfigRecord.owner_id == owner_id,
+            )
+        )
+        if record is None:
+            return False
+        record.verification_status = verification_status
+        record.last_checked_at = checked_at
+        record.verification_error_code = error_code
+        record.updated_at = checked_at
+        return True
 
 
 def set_provider_enabled(owner_id: str, provider_id: str, enabled: bool) -> bool:

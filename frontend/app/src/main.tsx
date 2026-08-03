@@ -1,35 +1,23 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
-import { RequireRoleSession } from "@/components/auth/RequireRoleSession";
-import { homeForRole } from "@/components/layout/nav";
+import { RequireTeacherSession } from "@/components/auth/RequireTeacherSession";
 import { AppShell } from "@/components/layout/AppShell";
+import { useI18n } from "@/i18n/I18nProvider";
 import { Providers } from "@/providers/Providers";
-import { useCurrentUser } from "@/api/hooks";
-import { AdminPlaceholder } from "@/routes/admin/AdminPlaceholder";
-import { AdminUsersPage } from "@/routes/admin/AdminUsersPage";
-import { AdminInvitesPage } from "@/routes/admin/AdminInvitesPage";
-import { AdminSystemPage } from "@/routes/admin/AdminSystemPage";
-import { StudentDashboardPage } from "@/routes/student/StudentDashboardPage";
-import { StudentCoursesPage } from "@/routes/student/StudentCoursesPage";
-import { StudentCourseDetailPage } from "@/routes/student/StudentCourseDetailPage";
-import { StudentAssignmentPage } from "@/routes/student/StudentAssignmentPage";
-import { StudentResultPage } from "@/routes/student/StudentResultPage";
-import { TeacherDashboardPage } from "@/routes/teacher/TeacherDashboardPage";
-import { TeacherCoursesPage } from "@/routes/teacher/TeacherCoursesPage";
-import { TeacherCourseDetailPage } from "@/routes/teacher/TeacherCourseDetailPage";
-import { TeacherAssignmentDetailPage } from "@/routes/teacher/TeacherAssignmentDetailPage";
-import { TeacherGradingPage } from "@/routes/teacher/TeacherGradingPage";
-import { AssignmentEditorPage } from "@/routes/teacher/AssignmentEditorPage";
-import { TeacherSubmissionsPage } from "@/routes/teacher/TeacherSubmissionsPage";
-import { TeacherResultsPage } from "@/routes/teacher/TeacherResultsPage";
+import { StudentUnavailablePage } from "@/routes/StudentUnavailablePage";
 import "@/styles/globals.css";
 
+const DashboardPage = React.lazy(() =>
+  import("@/routes/DashboardPage").then((module) => ({ default: module.DashboardPage })),
+);
 const ExpertsPage = React.lazy(() => import("@/routes/ExpertsPage").then((module) => ({ default: module.ExpertsPage })));
+const HistoryPage = React.lazy(() => import("@/routes/HistoryPage").then((module) => ({ default: module.HistoryPage })));
 const KnowledgeBasePage = React.lazy(() =>
   import("@/routes/KnowledgeBasePage").then((module) => ({ default: module.KnowledgeBasePage })),
 );
 const LoginPage = React.lazy(() => import("@/routes/LoginPage").then((module) => ({ default: module.LoginPage })));
+const NewTaskPage = React.lazy(() => import("@/routes/NewTaskPage").then((module) => ({ default: module.NewTaskPage })));
 const NotFoundPage = React.lazy(() =>
   import("@/routes/NotFoundPage").then((module) => ({ default: module.NotFoundPage })),
 );
@@ -37,11 +25,73 @@ const RegisterPage = React.lazy(() => import("@/routes/RegisterPage").then((modu
 const SettingsPage = React.lazy(() =>
   import("@/routes/SettingsPage").then((module) => ({ default: module.SettingsPage })),
 );
+const FinalResultsWorkspacePage = React.lazy(() =>
+  import("@/routes/tasks/FinalResultsWorkspacePage").then((module) => ({ default: module.FinalResultsWorkspacePage })),
+);
+const TaskEntryRedirect = React.lazy(() =>
+  import("@/routes/tasks/TaskEntryRedirect").then((module) => ({ default: module.TaskEntryRedirect })),
+);
+const AddProblemsPage = React.lazy(() =>
+  import("@/routes/tasks/AddProblemsPage").then((module) => ({ default: module.AddProblemsPage })),
+);
+const AddSubmissionsPage = React.lazy(() =>
+  import("@/routes/tasks/AddSubmissionsPage").then((module) => ({ default: module.AddSubmissionsPage })),
+);
+const SubmissionRecognitionProgressPage = React.lazy(() =>
+  import("@/routes/tasks/SubmissionRecognitionProgressPage").then((module) => ({ default: module.SubmissionRecognitionProgressPage })),
+);
+const SubmissionReviewOverviewPage = React.lazy(() =>
+  import("@/routes/tasks/SubmissionReviewOverviewPage").then((module) => ({ default: module.SubmissionReviewOverviewPage })),
+);
+const StudentAnswerReviewPage = React.lazy(() =>
+  import("@/routes/tasks/StudentAnswerReviewPage").then((module) => ({ default: module.StudentAnswerReviewPage })),
+);
+const ProblemRecognitionProgressPage = React.lazy(() =>
+  import("@/routes/tasks/ProblemRecognitionProgressPage").then((module) => ({ default: module.ProblemRecognitionProgressPage })),
+);
+const QuestionPreparationOverviewPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionPreparationOverviewPage").then((module) => ({ default: module.QuestionPreparationOverviewPage })),
+);
+const QuestionPreparationDetailPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionPreparationDetailPage").then((module) => ({ default: module.QuestionPreparationDetailPage })),
+);
+const QuestionMaterialImportPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionMaterialImportPage").then((module) => ({ default: module.QuestionMaterialImportPage })),
+);
+const QuestionMaterialImportProgressPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionMaterialImportProgressPage").then((module) => ({ default: module.QuestionMaterialImportProgressPage })),
+);
+const QuestionMaterialImportReviewPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionMaterialImportReviewPage").then((module) => ({ default: module.QuestionMaterialImportReviewPage })),
+);
+const QuestionAICompletionPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionAICompletionPage").then((module) => ({ default: module.QuestionAICompletionPage })),
+);
+const QuestionAICompletionProgressPage = React.lazy(() =>
+  import("@/routes/tasks/QuestionAICompletionProgressPage").then((module) => ({ default: module.QuestionAICompletionProgressPage })),
+);
+const GradingSetupPage = React.lazy(() =>
+  import("@/routes/tasks/GradingSetupPage").then((module) => ({ default: module.GradingSetupPage })),
+);
+const GradingPreflightPage = React.lazy(() =>
+  import("@/routes/tasks/GradingPreflightPage").then((module) => ({ default: module.GradingPreflightPage })),
+);
+const GradingProgressPage = React.lazy(() =>
+  import("@/routes/tasks/GradingProgressPage").then((module) => ({ default: module.GradingProgressPage })),
+);
+const ReviewOverviewPage = React.lazy(() =>
+  import("@/routes/tasks/ReviewOverviewPage").then((module) => ({ default: module.ReviewOverviewPage })),
+);
+const ReviewDetailPage = React.lazy(() =>
+  import("@/routes/tasks/ReviewDetailPage").then((module) => ({ default: module.ReviewDetailPage })),
+);
 
 function RouteFallback() {
+  const { t } = useI18n();
+
   return (
     <div className="flex min-h-[50vh] items-center justify-center text-sm font-medium text-slate-500">
-      Loading...
+      {t("loading")}
     </div>
   );
 }
@@ -50,84 +100,61 @@ function routeElement(element: React.ReactNode) {
   return <React.Suspense fallback={<RouteFallback />}>{element}</React.Suspense>;
 }
 
-/**
- * Root redirect: send the authenticated user to their role home; anonymous
- * users land on /login. Replaces the legacy shared "/" teacher dashboard so
- * every role's nav is self-consistent (teacher → /teacher, etc.).
- */
-function RootRedirect() {
-  const currentUser = useCurrentUser();
-  if (currentUser.isLoading) {
-    return <RouteFallback />;
-  }
-  if (currentUser.isError || !currentUser.data) {
-    return <Navigate to="/login" replace />;
-  }
-  return <Navigate to={homeForRole(currentUser.data.role)} replace />;
-}
-
 const router = createBrowserRouter([
   { path: "/login", element: routeElement(<LoginPage />) },
   { path: "/register", element: routeElement(<RegisterPage />) },
-  { path: "/", element: <RootRedirect /> },
+  { path: "/student", element: <StudentUnavailablePage /> },
   {
-    // Admin workspace.
-    path: "/admin",
+    path: "/",
     element: (
-      <RequireRoleSession allowed="admin" homeFor={homeForRole}>
+      <RequireTeacherSession>
         <AppShell />
-      </RequireRoleSession>
+      </RequireTeacherSession>
     ),
     children: [
-      { index: true, element: routeElement(<AdminPlaceholder />) },
-      { path: "users", element: routeElement(<AdminUsersPage />) },
-      { path: "invites", element: routeElement(<AdminInvitesPage />) },
-      { path: "system", element: routeElement(<AdminSystemPage />) },
-      { path: "*", element: routeElement(<NotFoundPage />) },
-    ],
-  },
-  {
-    // Student workspace.
-    path: "/student",
-    element: (
-      <RequireRoleSession allowed="student" homeFor={homeForRole}>
-        <AppShell />
-      </RequireRoleSession>
-    ),
-    children: [
-      { index: true, element: routeElement(<StudentDashboardPage />) },
-      { path: "courses", element: routeElement(<StudentCoursesPage />) },
-      { path: "courses/:courseId", element: routeElement(<StudentCourseDetailPage />) },
-      { path: "assignments/:assignmentId", element: routeElement(<StudentAssignmentPage />) },
-      { path: "results", element: routeElement(<StudentResultPage />) },
-      { path: "*", element: routeElement(<NotFoundPage />) },
-    ],
-  },
-  {
-    // Teacher workspace (admin may also view): normalized course→assignment→
-    // question→grading workflow. Shared experts/knowledge-base/settings live here.
-    path: "/teacher",
-    element: (
-      <RequireRoleSession allowed={["teacher", "admin"]} homeFor={homeForRole}>
-        <AppShell />
-      </RequireRoleSession>
-    ),
-    children: [
-      { index: true, element: routeElement(<TeacherDashboardPage />) },
-      { path: "courses", element: routeElement(<TeacherCoursesPage />) },
-      { path: "courses/:courseId", element: routeElement(<TeacherCourseDetailPage />) },
-      { path: "assignments/:assignmentId", element: routeElement(<TeacherAssignmentDetailPage />) },
-      { path: "assignments/:assignmentId/edit", element: routeElement(<AssignmentEditorPage />) },
-      { path: "assignments/:assignmentId/grading", element: routeElement(<TeacherGradingPage />) },
-      { path: "assignments/:assignmentId/submissions", element: routeElement(<TeacherSubmissionsPage />) },
-      { path: "assignments/:assignmentId/results", element: routeElement(<TeacherResultsPage />) },
+      { index: true, element: routeElement(<DashboardPage />) },
+      { path: "dashboard", element: <Navigate to="/" replace /> },
+      { path: "history", element: routeElement(<HistoryPage />) },
       { path: "knowledge-base", element: routeElement(<KnowledgeBasePage />) },
-      { path: "experts", element: routeElement(<ExpertsPage />) },
-      { path: "settings", element: routeElement(<SettingsPage />) },
+      { path: "tasks/new", element: routeElement(<NewTaskPage />) },
+      { path: "tasks/:taskId/edit", element: routeElement(<NewTaskPage />) },
+      { path: "tasks/:taskId", element: routeElement(<TaskEntryRedirect />) },
+      { path: "tasks/:taskId/setup", element: routeElement(<TaskEntryRedirect />) },
+      { path: "tasks/:taskId/upload/problems", element: routeElement(<AddProblemsPage />) },
+      { path: "tasks/:taskId/submissions/upload", element: routeElement(<AddSubmissionsPage />) },
+      { path: "tasks/:taskId/submissions/progress", element: routeElement(<SubmissionRecognitionProgressPage />) },
+      { path: "tasks/:taskId/submissions", element: routeElement(<SubmissionReviewOverviewPage />) },
+      { path: "tasks/:taskId/students/:studentId", element: routeElement(<StudentAnswerReviewPage />) },
+      { path: "tasks/:taskId/upload/submissions", element: routeElement(<TaskEntryRedirect />) },
+      { path: "tasks/:taskId/upload/:kind", element: routeElement(<TaskEntryRedirect />) },
+      { path: "tasks/:taskId/problems/progress", element: routeElement(<ProblemRecognitionProgressPage />) },
+      { path: "tasks/:taskId/questions", element: routeElement(<QuestionPreparationOverviewPage />) },
+      { path: "tasks/:taskId/questions/import", element: routeElement(<QuestionMaterialImportPage />) },
+      { path: "tasks/:taskId/questions/import/progress/:jobId", element: routeElement(<QuestionMaterialImportProgressPage />) },
+      { path: "tasks/:taskId/questions/import/review/:jobId", element: routeElement(<QuestionMaterialImportReviewPage />) },
+      { path: "tasks/:taskId/questions/ai-complete", element: routeElement(<QuestionAICompletionPage />) },
+      { path: "tasks/:taskId/questions/ai-complete/progress/:jobId", element: routeElement(<QuestionAICompletionProgressPage />) },
+      { path: "tasks/:taskId/questions/:questionId", element: <Navigate to="content" replace /> },
+      { path: "tasks/:taskId/questions/:questionId/:section", element: routeElement(<QuestionPreparationDetailPage />) },
+      { path: "tasks/:taskId/grading-setup", element: routeElement(<GradingSetupPage />) },
+      { path: "tasks/:taskId/grading/preflight", element: routeElement(<GradingPreflightPage />) },
+      { path: "tasks/:taskId/grading/progress", element: routeElement(<GradingProgressPage />) },
+      { path: "tasks/:taskId/review", element: routeElement(<ReviewOverviewPage />) },
+      { path: "tasks/:taskId/review/:studentId/:questionId", element: routeElement(<ReviewDetailPage />) },
+      { path: "tasks/:taskId/results", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/questions", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/students", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/visualizations", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/reports", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/students/:studentId", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "tasks/:taskId/results/questions/:questionId", element: routeElement(<FinalResultsWorkspacePage />) },
+      { path: "settings/account", element: routeElement(<SettingsPage />) },
+      { path: "settings/byok", element: routeElement(<ExpertsPage />) },
+      { path: "experts", element: <Navigate to="/settings/byok" replace /> },
+      { path: "settings", element: <Navigate to="/settings/account" replace /> },
       { path: "*", element: routeElement(<NotFoundPage />) },
     ],
   },
-  { path: "*", element: routeElement(<NotFoundPage />) },
 ]);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

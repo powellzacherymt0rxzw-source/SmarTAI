@@ -46,7 +46,9 @@ def create_app() -> FastAPI:
         )
     logger.info(f"Starting SmarTAI with GRADING_ENGINE={engine}")
     if settings.http_proxy:
-        logger.info(f"Proxy enabled: {settings.http_proxy}")
+        # Proxy URLs can contain credentials.  Keep startup diagnostics useful
+        # without copying the configured value into ordinary logs.
+        logger.info("HTTP proxy enabled")
 
     # ── Wire up task-scoped knowledge retriever (RAG MVP) ─────────────
     # Replaces the default NoOpRetriever set in backend/tools/knowledge.py.
@@ -58,13 +60,9 @@ def create_app() -> FastAPI:
     set_retriever(CombinedKnowledgeRetriever())
 
     # ── V2: new agents/skills/tools architecture ──────────────────────
-    # The normalized redesign (docs/superpowers/plans/2026-07-20-normalized-
-    # learning-workflow.md) replaces the legacy task/grading/students/analytics/
-    # human_edit/ingest/knowledge routers. They are removed from registration
-    # here while their replacement services/APIs are built (Task 4–8); the files
-    # are deleted in Task 8. Only identity, admin, and experts routers remain
-    # wired at this stage; courses/assignments/results/grading-runs/submissions
-    # routers are registered by their respective tasks.
+    # Resource-oriented normalized routers remain canonical.  The /tasks façade
+    # below is a presentation adapter over those same repositories for the Figma
+    # teacher workflow; it does not restore the removed TaskStore/JobStore.
     from backend.api.auth import router as auth_router
     from backend.api.users import router as users_router
     from backend.api.admin import router as admin_router
@@ -75,6 +73,11 @@ def create_app() -> FastAPI:
     from backend.api.grading_runs import router as grading_runs_router
     from backend.api.results import router as results_router
     from backend.api.experts import router as experts_router
+    from backend.api.tasks import router as tasks_router
+    from backend.api.task_preparation import router as task_preparation_router
+    from backend.api.materials import router as materials_router
+    from backend.api.tags import router as tags_router
+    from backend.api.analytics import router as analytics_router
 
     app.include_router(auth_router)
     app.include_router(users_router)
@@ -87,8 +90,17 @@ def create_app() -> FastAPI:
     app.include_router(grading_runs_router)
     app.include_router(results_router)
     app.include_router(experts_router)
+    app.include_router(tasks_router)
+    app.include_router(task_preparation_router)
+    app.include_router(materials_router)
+    app.include_router(tags_router)
+    app.include_router(analytics_router)
 
-    logger.info("V2 routers loaded: auth, users, admin, courses, assignments, submissions, knowledge, grading-runs, results, experts")
+    logger.info(
+        "V2 routers loaded: auth, users, admin, courses, assignments, submissions, "
+        "knowledge, grading-runs, results, experts, tasks, task-preparation, "
+        "course-materials, tags, analytics"
+    )
 
     # ─── CORS ─────────────────────────────────────────────────────────────
     origins = settings.frontend_urls.split(",")
@@ -179,11 +191,15 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def _stop_grading_worker():
+        import asyncio as _asyncio
+
         task = _grading_worker.get("task")
         if task is not None:
             task.cancel()
             try:
                 await task
+            except _asyncio.CancelledError:
+                pass
             except Exception:
                 pass
 

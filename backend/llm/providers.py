@@ -167,7 +167,12 @@ class BaseProvider(ABC):
                 return LLMResponse(content=content, provider=self.provider_id, model=self.model, duration_ms=duration_ms)
             except Exception as e:
                 duration_ms = (time.perf_counter() - t0) * 1000
-                logger.warning(f"LLM call failed on {self.provider_id} after {duration_ms:.0f}ms: {e}")
+                logger.warning(
+                    "LLM call failed on %s after %.0fms; exception_type=%s",
+                    self.provider_id,
+                    duration_ms,
+                    type(e).__name__,
+                )
                 raise
 
     async def ainvoke_vision(self, prompt: str, images: List[VisionImage]) -> LLMResponse:
@@ -231,7 +236,12 @@ class GeminiProvider(BaseProvider):
                 return LLMResponse(content=content, provider=self.provider_id, model=self.model, duration_ms=duration_ms)
             except Exception as e:
                 duration_ms = (time.perf_counter() - t0) * 1000
-                logger.warning(f"LLM call failed on {self.provider_id} after {duration_ms:.0f}ms: {e}")
+                logger.warning(
+                    "LLM call failed on %s after %.0fms; exception_type=%s",
+                    self.provider_id,
+                    duration_ms,
+                    type(e).__name__,
+                )
                 raise
 
 

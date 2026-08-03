@@ -46,7 +46,7 @@ export function useLogout() {
     mutationFn: authApi.logout,
     onSettled: () => {
       clearAuthToken();
-      queryClient.removeQueries({ queryKey: authKeys.me });
+      queryClient.clear();
     },
   });
 }

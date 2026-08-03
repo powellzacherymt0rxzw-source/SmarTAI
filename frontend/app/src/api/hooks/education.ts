@@ -3,7 +3,7 @@ import * as edu from "@/api/education";
 import type { GradingRun } from "@/types/education";
 import {
   assignmentKeys,
-  courseKeys,
+  educationCourseKeys,
   gradingRunKeys,
   resultKeys,
   submissionKeys,
@@ -12,12 +12,14 @@ import {
 // ─── courses ────────────────────────────────────────────────────────────────
 
 export function useCourses() {
-  return useQuery({ queryKey: courseKeys.list(), queryFn: edu.listCourses });
+  return useQuery({ queryKey: educationCourseKeys.list(), queryFn: edu.listCourses });
 }
 
 export function useCourse(courseId: string | undefined) {
   return useQuery({
-    queryKey: courseId ? courseKeys.detail(courseId) : ["courses", "detail", "none"],
+    queryKey: courseId
+      ? educationCourseKeys.detail(courseId)
+      : ["education", "courses", "detail", "none"],
     queryFn: () => edu.getCourse(courseId!),
     enabled: Boolean(courseId),
   });
@@ -27,7 +29,7 @@ export function useCreateCourse() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: edu.createCourse,
-    onSuccess: () => qc.invalidateQueries({ queryKey: courseKeys.all }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: educationCourseKeys.all }),
   });
 }
 
@@ -36,7 +38,7 @@ export function useEnrollStudents() {
   return useMutation({
     mutationFn: ({ courseId, studentIds }: { courseId: string; studentIds: string[] }) =>
       edu.enrollStudents(courseId, studentIds),
-    onSuccess: () => qc.invalidateQueries({ queryKey: courseKeys.all }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: educationCourseKeys.all }),
   });
 }
 
@@ -44,7 +46,7 @@ export function useDeleteCourse() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: edu.deleteCourse,
-    onSuccess: () => qc.invalidateQueries({ queryKey: courseKeys.all }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: educationCourseKeys.all }),
   });
 }
 
@@ -59,7 +61,9 @@ export function useAssignments(courseId?: string) {
 
 export function useAssignment(assignmentId: string | undefined) {
   return useQuery({
-    queryKey: assignmentId ? assignmentKeys.detail(assignmentId) : ["assignments", "detail", "none"],
+    queryKey: assignmentId
+      ? assignmentKeys.detail(assignmentId)
+      : ["education", "assignments", "detail", "none"],
     queryFn: () => edu.getAssignment(assignmentId!),
     enabled: Boolean(assignmentId),
   });
@@ -77,7 +81,9 @@ export function useCreateAssignment() {
 
 export function useQuestions(assignmentId: string | undefined) {
   return useQuery({
-    queryKey: assignmentId ? assignmentKeys.questions(assignmentId) : ["assignments", "questions", "none"],
+    queryKey: assignmentId
+      ? assignmentKeys.questions(assignmentId)
+      : ["education", "assignments", "questions", "none"],
     queryFn: () => edu.listQuestions(assignmentId!),
     enabled: Boolean(assignmentId),
   });
@@ -123,7 +129,9 @@ export function usePublishAssignment() {
 
 export function useSubmissions(assignmentId: string | undefined) {
   return useQuery({
-    queryKey: assignmentId ? submissionKeys.list(assignmentId) : ["submissions", "list", "none"],
+    queryKey: assignmentId
+      ? submissionKeys.list(assignmentId)
+      : ["education", "submissions", "list", "none"],
     queryFn: () => edu.listSubmissions(assignmentId!),
     enabled: Boolean(assignmentId),
   });
@@ -184,7 +192,9 @@ export function useTeacherImport() {
 
 export function useGradingRuns(assignmentId: string | undefined) {
   return useQuery({
-    queryKey: assignmentId ? gradingRunKeys.list(assignmentId) : ["grading-runs", "list", "none"],
+    queryKey: assignmentId
+      ? gradingRunKeys.list(assignmentId)
+      : ["education", "grading-runs", "list", "none"],
     queryFn: () => edu.listGradingRuns(assignmentId!),
     enabled: Boolean(assignmentId),
     refetchInterval: (query) => {
@@ -206,7 +216,9 @@ export function useStartGradingRun() {
 
 export function useReviewQueue(assignmentId: string | undefined) {
   return useQuery({
-    queryKey: assignmentId ? gradingRunKeys.reviewQueue(assignmentId) : ["grading-runs", "review", "none"],
+    queryKey: assignmentId
+      ? gradingRunKeys.reviewQueue(assignmentId)
+      : ["education", "grading-runs", "review", "none"],
     queryFn: () => edu.reviewQueue(assignmentId!),
     enabled: Boolean(assignmentId),
   });
@@ -246,7 +258,9 @@ export function useReleaseGradingRun() {
 
 export function useTeacherSummary(assignmentId: string | undefined) {
   return useQuery({
-    queryKey: assignmentId ? resultKeys.summary(assignmentId) : ["results", "summary", "none"],
+    queryKey: assignmentId
+      ? resultKeys.summary(assignmentId)
+      : ["education", "results", "summary", "none"],
     queryFn: () => edu.teacherSummary(assignmentId!),
     enabled: Boolean(assignmentId),
   });
@@ -254,7 +268,9 @@ export function useTeacherSummary(assignmentId: string | undefined) {
 
 export function usePerQuestionAggregates(assignmentId: string | undefined) {
   return useQuery({
-    queryKey: assignmentId ? resultKeys.perQuestion(assignmentId) : ["results", "per-question", "none"],
+    queryKey: assignmentId
+      ? resultKeys.perQuestion(assignmentId)
+      : ["education", "results", "per-question", "none"],
     queryFn: () => edu.perQuestionAggregates(assignmentId!),
     enabled: Boolean(assignmentId),
   });
@@ -262,7 +278,9 @@ export function usePerQuestionAggregates(assignmentId: string | undefined) {
 
 export function useMyStudentResult(assignmentId: string | undefined) {
   return useQuery({
-    queryKey: assignmentId ? resultKeys.me(assignmentId) : ["results", "me", "none"],
+    queryKey: assignmentId
+      ? resultKeys.me(assignmentId)
+      : ["education", "results", "me", "none"],
     queryFn: () => edu.studentResult(assignmentId!),
     enabled: Boolean(assignmentId),
   });

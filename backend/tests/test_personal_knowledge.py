@@ -143,6 +143,81 @@ async def test_persistent_bm25_retriever_only_uses_selected_documents():
     assert all("secret" not in item.content for item in results)
 
 
+@pytest.mark.asyncio
+async def test_grading_run_retriever_uses_frozen_owner_scoped_selection():
+    from backend.db import grading_repository
+    from backend.db.knowledge_repository import (
+        create_document,
+        delete_document,
+        replace_document_chunks,
+        set_task_documents,
+    )
+    from backend.db.models import AssignmentRecord, CourseRecord, UserRecord
+    from backend.db.session import session_scope
+    from backend.knowledge.retriever import PersistentKnowledgeRetriever
+    from backend.domain.errors import InvalidTransition
+
+    owner_id = "frozen-kb-owner"
+    assignment_id = "frozen-kb-assignment"
+    with session_scope() as session:
+        session.add(UserRecord(
+            id=owner_id, username=owner_id, password_hash="hash",
+            role="teacher", is_active=True,
+        ))
+        session.flush()
+        session.add(CourseRecord(id="frozen-kb-course", name="C", teacher_id=owner_id))
+        session.flush()
+        session.add(AssignmentRecord(
+            id=assignment_id, course_id="frozen-kb-course", teacher_id=owner_id,
+            name="A", status="draft", version=1,
+        ))
+
+    frozen = create_document(
+        document_id="frozen-kb-doc", owner_id=owner_id, stored_file_id=None,
+        title="Frozen", original_name="frozen.txt", content_type="text/plain",
+        size_bytes=1, sha256="d" * 64,
+    )
+    later = create_document(
+        document_id="later-kb-doc", owner_id=owner_id, stored_file_id=None,
+        title="Later", original_name="later.txt", content_type="text/plain",
+        size_bytes=1, sha256="e" * 64,
+    )
+    replace_document_chunks(frozen.id, ["Newton frozen knowledge force"])
+    replace_document_chunks(later.id, ["Newton later selection force"])
+    set_task_documents(
+        assignment_id=assignment_id, owner_id=owner_id,
+        document_ids=[frozen.id],
+    )
+    run = grading_repository.create_run_bundle(
+        assignment_id,
+        teacher_id=owner_id,
+        revision_ids=[],
+        setup={"knowledge_scope": "all_task_docs"},
+        setup_fingerprint="frozen-setup",
+        input_manifest={"knowledge_document_ids": [frozen.id]},
+    )
+
+    # Editing the assignment selection after the run is queued must not widen
+    # or replace the knowledge visible to that grading run.
+    set_task_documents(
+        assignment_id=assignment_id, owner_id=owner_id,
+        document_ids=[later.id],
+    )
+    results = await PersistentKnowledgeRetriever().retrieve(
+        "Newton force", k=5, scope=f"grading-run:{run.id}",
+    )
+
+    assert results
+    assert {item.source for item in results} == {"frozen.txt"}
+    assert all("later" not in item.content for item in results)
+
+    with pytest.raises(InvalidTransition) as exc:
+        delete_document(frozen.id, owner_id)
+    assert exc.value.code == "knowledge_document_in_active_grading_run"
+    grading_repository.cancel(run.id, teacher_id=owner_id)
+    assert delete_document(frozen.id, owner_id) is not None
+
+
 def test_personal_knowledge_api_upload_list_download_and_delete():
     from backend.auth import create_token
     from backend.db.models import UserRecord

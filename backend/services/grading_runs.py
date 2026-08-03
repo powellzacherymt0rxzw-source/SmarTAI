@@ -29,31 +29,74 @@ from backend.db import (
 from backend.db.models import GradingRunRecord, UserRecord
 from backend.db.session import session_scope
 from backend.domain import education
-from backend.domain.errors import DomainError, NotFound, VersionConflict
-from backend.llm.registry import _build_scoped_registry, get_expert_registry
-from backend.models import User
+from backend.domain.errors import DomainError, NotFound, ValidationError, VersionConflict
+from backend.llm.registry import _build_scoped_registry
+from backend.models import TaskGradingSetup, User
+from backend.progress.tracker import get_or_create_reporter
 from backend.services import grading_adapter
 
 logger = logging.getLogger(__name__)
 
 
+def _questions_for_run(
+    *, assignment_id: str, frozen_setup,
+) -> list[education.QuestionDTO]:
+    """Return immutable question inputs for a façade grading run.
+
+    New runs persist full QuestionDTO payloads in ``input_manifest``.  Older
+    manifests containing only ids/versions remain readable only while the
+    current rows still match those versions; a later edit fails closed instead
+    of grading silently changed questions.
+    """
+    current = assignment_repository.get_questions_by_assignment(
+        assignment_id=assignment_id
+    )
+    if frozen_setup is None:
+        return current
+    items = list((frozen_setup.input_manifest or {}).get("questions", []))
+    if not items:
+        raise ValidationError("grading_question_snapshot_missing")
+    if all(
+        isinstance(item, dict)
+        and {
+            "id", "assignment_id", "q_id", "order_index", "type",
+            "created_at", "updated_at", "version",
+        }.issubset(item)
+        for item in items
+    ):
+        try:
+            frozen = [education.QuestionDTO.model_validate(item) for item in items]
+        except Exception as exc:
+            raise ValidationError("grading_question_snapshot_invalid") from exc
+        if any(question.assignment_id != assignment_id for question in frozen):
+            raise ValidationError("grading_question_snapshot_invalid")
+        return frozen
+
+    expected = [
+        (str(item.get("id")), int(item.get("version", -1)))
+        for item in items
+        if isinstance(item, dict)
+    ]
+    actual = [(question.id, question.version) for question in current]
+    if expected != actual:
+        raise VersionConflict("grading_inputs_changed")
+    return current
+
+
 def _registry_for(teacher_id: str):
-    """Build a BYOK-scoped registry for the run's teacher, falling back to the
-    global registry if no provider encryption key is configured (dev). The
-    grading algorithm only consumes the registry; this never changes prompts."""
+    """Build the run owner's BYOK/shared-pool registry.
+
+    Never fall back to another process-global registry: doing so can reuse the
+    first teacher's decrypted credentials for a later teacher.
+    """
     with session_scope() as session:
         record = session.get(UserRecord, teacher_id)
         if record is None:
-            return get_expert_registry()
+            raise NotFound("grading_run_teacher")
         user = User(id=record.id, username=record.username, email=record.email or "",
                     role=record.role, password_hash=record.password_hash,
                     created_at=record.created_at, is_active=record.is_active)
-    try:
-        return _build_scoped_registry(user)
-    except Exception:
-        # A misconfigured encryption key or empty BYOK should not crash the
-        # worker; fall back to the global registry so grading can still run.
-        return get_expert_registry()
+    return _build_scoped_registry(user)
 
 
 def poll_queued_runs() -> list[str]:
@@ -86,8 +129,8 @@ async def worker_loop(*, worker_id: str, poll_seconds: int | None = None,
     while True:
         try:
             for run_id in poll_queued_runs():
-                run = grading_repository.get_run(run_id=run_id)
-                registry = registry or _registry_for(run.teacher_id)
+                # The injected registry is test-only. Production builds a fresh
+                # owner-scoped registry inside process_run for every run.
                 await process_run(run_id=run_id, worker_id=worker_id, registry=registry)
         except asyncio.CancelledError:
             raise
@@ -96,7 +139,14 @@ async def worker_loop(*, worker_id: str, poll_seconds: int | None = None,
         await asyncio.sleep(interval)
 
 
-def start_run(*, assignment_id: str, teacher_id: str) -> education.GradingRunDTO:
+def start_run(
+    *,
+    assignment_id: str,
+    teacher_id: str,
+    grading_setup: dict | None = None,
+    setup_fingerprint: str | None = None,
+    input_manifest: dict | None = None,
+) -> education.GradingRunDTO:
     """Create a run and freeze the current revisions to grade.
 
     Freezing at creation means a regrade of a later revision cannot retroactively
@@ -123,15 +173,27 @@ def start_run(*, assignment_id: str, teacher_id: str) -> education.GradingRunDTO
         if sub.current_revision_id is None:
             continue
         frozen_revision_ids.append(sub.current_revision_id)
-    run = grading_repository.create_run(
-        assignment_id=assignment_id, teacher_id=teacher_id,
-        total_submissions=len(frozen_revision_ids),
-    )
-    if frozen_revision_ids:
-        grading_repository.add_frozen_submissions(run_id=run.id, revision_ids=frozen_revision_ids)
-    grading_repository.record_event(
-        run_id=run.id, level="info", message="run_created",
-        payload={"frozen_revisions": len(frozen_revision_ids), "questions": len(questions)},
+    if input_manifest is not None:
+        expected_question_ids = [str(item.get("id")) for item in input_manifest.get("questions", [])]
+        if expected_question_ids != [question.id for question in questions]:
+            raise VersionConflict("grading_inputs_changed")
+        expected_question_versions = [
+            int(item.get("version", -1))
+            for item in input_manifest.get("questions", [])
+        ]
+        if expected_question_versions != [question.version for question in questions]:
+            raise VersionConflict("grading_inputs_changed")
+        expected_revisions = list(input_manifest.get("submission_revision_ids", []))
+        if any(revision_id not in frozen_revision_ids for revision_id in expected_revisions):
+            raise VersionConflict("grading_inputs_changed")
+        frozen_revision_ids = expected_revisions
+    run = grading_repository.create_run_bundle(
+        assignment_id=assignment_id,
+        teacher_id=teacher_id,
+        revision_ids=frozen_revision_ids,
+        setup=grading_setup,
+        setup_fingerprint=setup_fingerprint,
+        input_manifest=input_manifest,
     )
     return run
 
@@ -147,7 +209,7 @@ def list_runs(*, assignment_id: str, actor_id: str, role: str) -> list[dict]:
     return [_serialize_run(r) for r in runs]
 
 
-async def process_run(*, run_id: str, worker_id: str, registry, language: str = "en") -> None:
+async def process_run(*, run_id: str, worker_id: str, registry=None, language: str = "en") -> None:
     """Claim and grade one queued run. Idempotent: if the lease cannot be claimed
     (already taken by another worker, or terminal), this is a no-op.
 
@@ -174,7 +236,49 @@ async def process_run(*, run_id: str, worker_id: str, registry, language: str = 
 
     try:
         heartbeat_task = asyncio.create_task(_heartbeat())
-        questions = assignment_repository.get_questions_by_assignment(assignment_id=run.assignment_id)
+        run_registry = registry or _registry_for(run.teacher_id)
+        grading_setup = None
+        from backend.db.workflow_repository import get_run_setup
+
+        # A normalized caller that does not use the Figma façade has no setup
+        # row and retains the main default behavior. Database/read failures are
+        # deliberately not swallowed: silently widening the provider selection
+        # would violate the teacher-approved cost and privacy boundary.
+        frozen_setup = get_run_setup(run_id)
+        if frozen_setup is not None:
+            grading_setup = TaskGradingSetup.model_validate(frozen_setup.setup)
+            from backend.services.grading_input_security import (
+                provider_configuration_fingerprint,
+            )
+            frozen_provider_fingerprint = (
+                frozen_setup.input_manifest or {}
+            ).get("provider_configuration_fingerprint")
+            if not frozen_provider_fingerprint or (
+                provider_configuration_fingerprint(
+                    owner_id=run.teacher_id,
+                    selected_provider_ids=grading_setup.selected_provider_ids,
+                )
+                != frozen_provider_fingerprint
+            ):
+                raise ValidationError(
+                    "Provider configuration changed after run confirmation.",
+                    code="grading_provider_configuration_changed",
+                )
+            try:
+                run_registry = run_registry.select(
+                    grading_setup.selected_provider_ids,
+                    primary_provider_id=grading_setup.primary_provider_id,
+                )
+            except ValueError as exc:
+                raise ValidationError("grading_provider_selection_invalid") from exc
+            language = grading_setup.feedback_language
+        # The explicitly enabled E2E provider is injected inside the adapter,
+        # so it does not appear in a teacher-scoped production registry.
+        if run_registry.count() == 0 and not settings.e2e_fake_provider:
+            raise ValidationError("no_provider_configured")
+        questions = _questions_for_run(
+            assignment_id=run.assignment_id, frozen_setup=frozen_setup,
+        )
         frozen_rows = grading_repository.list_frozen_submissions(run_id=run_id)
         frozen_revisions: list[tuple[education.SubmissionRevisionDTO, str]] = []
         for fr in frozen_rows:
@@ -185,30 +289,36 @@ async def process_run(*, run_id: str, worker_id: str, registry, language: str = 
             run_id=run_id, level="info", message="grading_started",
             payload={"students": len(frozen_revisions), "questions": len(questions)},
         )
+        reporter = get_or_create_reporter(
+            run_id,
+            total_students=len(frozen_revisions),
+            total_questions=len(questions),
+        )
+
+        def _persist_progress(event, payload):
+            grading_repository.record_event(
+                run_id=run_id,
+                level=event.level,
+                message="grading_progress",
+                payload=payload,
+            )
+
+        reporter.set_event_sink(_persist_progress)
         outcomes = await grading_adapter.run_grading(
             run_id=run_id, assignment_id=run.assignment_id, teacher_id=run.teacher_id,
             questions=questions, frozen_revisions=frozen_revisions,
-            registry=registry, language=language,
+            registry=run_registry, language=language, reporter=reporter,
+            grading_setup=grading_setup,
         )
-        completed = 0
-        failed = 0
         for outcome in outcomes:
-            persisted = 0
-            student_failed = False
             for res in outcome.results:
                 try:
                     grading_repository.upsert_result(
                         run_id=run_id, worker_id=worker_id, grade_result=res
                     )
-                    persisted += 1
-                    if res.result_status in education.NON_GRADED_RESULT_STATUSES:
-                        student_failed = True
                 except VersionConflict:
                     pass
-            if persisted:
-                completed += 1
-                if student_failed:
-                    failed += 1
+        completed, failed = grading_repository.persisted_result_counters(run_id)
         grading_repository.mark_completed(
             run_id=run_id, worker_id=worker_id, completed=completed, failed=failed
         )
@@ -216,13 +326,17 @@ async def process_run(*, run_id: str, worker_id: str, registry, language: str = 
             run_id=run_id, level="info", message="run_completed",
             payload={"completed": completed, "needs_review": failed},
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("Grading run %s failed", run_id)
         try:
-            grading_repository.mark_failed(run_id=run_id, worker_id=worker_id, error_message=str(exc))
+            grading_repository.mark_failed(
+                run_id=run_id,
+                worker_id=worker_id,
+                error_message="grading_failed",
+            )
             grading_repository.record_event(
                 run_id=run_id, level="error", message="run_failed",
-                payload={"error": str(exc)},
+                payload={"code": "grading_failed"},
             )
         except DomainError:
             pass  # lease already lost; another worker will reclaim
@@ -242,11 +356,13 @@ def list_review_queue(*, assignment_id: str, teacher_id: str) -> list[education.
     return grading_repository.list_results_for_review(assignment_id=assignment_id)
 
 
-def add_teacher_review(*, grade_result_id: str, teacher_id: str, new_score: float,
-                       new_comment: str = "") -> education.TeacherReviewDTO:
+def add_teacher_review(
+    *, grade_result_id: str, teacher_id: str, new_score: float,
+    new_comment: str = "", confirm: bool = True,
+) -> education.TeacherReviewDTO:
     return grading_repository.add_teacher_review(
         grade_result_id=grade_result_id, teacher_id=teacher_id,
-        new_score=new_score, new_comment=new_comment,
+        new_score=new_score, new_comment=new_comment, confirm=confirm,
     )
 
 
@@ -337,16 +453,16 @@ def student_results(*, student_id: str, assignment_id: str) -> list[education.Gr
     Only results from a *released* run are returned, so draft grades and
     provider traces never reach students. Non-graded rows are filtered out by
     the caller's display layer; this returns the raw graded rows for the
-    student's current revision across released runs."""
+    student's frozen revision in the latest released run.
+
+    A later submission revision must not make an already-published result
+    disappear: release freezes the visible result set, while the new revision
+    belongs to a future grading run.
+    """
     from sqlalchemy import select as _select
-    from backend.db.models import GradeResultRecord, GradingRunRecord, SubmissionRecord
+    from backend.db.models import GradeResultRecord, GradingRunRecord
     from backend.db.session import session_scope
 
-    sub = submission_repository.get_submission_for_student(
-        assignment_id=assignment_id, student_id=student_id
-    )
-    if sub is None or sub.current_revision_id is None:
-        return []
     with session_scope() as session:
         latest_run_id = session.scalar(
             _select(GradingRunRecord.id)
@@ -362,7 +478,6 @@ def student_results(*, student_id: str, assignment_id: str) -> list[education.Gr
         rows = session.scalars(
             _select(GradeResultRecord)
             .where(GradeResultRecord.student_id == student_id,
-                   GradeResultRecord.submission_revision_id == sub.current_revision_id,
                    GradeResultRecord.grading_run_id == latest_run_id,
                    GradeResultRecord.result_status == education.GradeResultStatus.GRADED.value)
             .order_by(GradeResultRecord.q_id)

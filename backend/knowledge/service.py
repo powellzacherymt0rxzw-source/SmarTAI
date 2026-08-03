@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from sqlalchemy.exc import IntegrityError
+
 from backend.db.file_repository import StoredFile, delete_file_record, get_file, save_file
 from backend.db.knowledge_repository import (
     KnowledgeDocument,
@@ -26,16 +28,35 @@ async def ingest_document(*, owner_id: str, original_name: str, content: bytes,
     if existing is not None:
         return existing
 
-    document_id = f"doc_{digest[:16]}"
+    # ``knowledge_documents`` de-duplicates by (owner_id, sha256), so its PK
+    # must be owner-aware as well. A digest-only ID collided when two teachers
+    # uploaded identical bytes even though the SQL uniqueness rule permits it.
+    identity = hashlib.sha256(f"{owner_id}\0{digest}".encode("utf-8")).hexdigest()
+    document_id = f"doc_{identity[:16]}"
     stored: StoredFile | None = None
     try:
         # Create the document row first (stored_file_id=None) so the subsequent
         # stored_files row can reference it via knowledge_document_id under
         # SQLite's immediate FK check; we back-fill stored_file_id after saving.
-        document = create_document(document_id=document_id, owner_id=owner_id, stored_file_id=None,
-                                   title=(title or Path(safe_name).stem or safe_name)[:512],
-                                   original_name=safe_name, content_type=content_type,
-                                   size_bytes=len(content), sha256=digest)
+        try:
+            document = create_document(
+                document_id=document_id,
+                owner_id=owner_id,
+                stored_file_id=None,
+                title=(title or Path(safe_name).stem or safe_name)[:512],
+                original_name=safe_name,
+                content_type=content_type,
+                size_bytes=len(content),
+                sha256=digest,
+            )
+        except IntegrityError:
+            # A concurrent upload by the same owner may win the unique
+            # (owner_id, sha256) race. Return that canonical record instead of
+            # creating a second object-storage copy.
+            concurrent = get_document_by_hash(owner_id, digest)
+            if concurrent is not None:
+                return concurrent
+            raise
         stored = save_file(storage=get_storage(), owner_id=owner_id, kind="personal_knowledge",
                            original_name=safe_name, content=content, content_type=content_type,
                            storage_prefix=f"users/{owner_id}/knowledge/{document_id}",

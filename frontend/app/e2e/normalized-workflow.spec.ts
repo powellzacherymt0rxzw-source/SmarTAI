@@ -1,11 +1,20 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 
-const backend = "http://127.0.0.1:8000";
+const backend = process.env.SMARTAI_E2E_BACKEND_URL ?? "http://127.0.0.1:8000";
 
-async function loginAs(page: Page, role: "teacher" | "student" | "admin", name: string) {
+async function loginAs(
+  page: Page,
+  role: "teacher" | "student" | "admin",
+  name: string,
+  target = "/",
+) {
   const token = `demo-${role}-${name}`;
-  await page.addInitScript((t) => window.localStorage.setItem("smartai_token", t), token);
-  await page.goto("/");
+  await page.goto("/login");
+  await page.evaluate((t) => {
+    window.localStorage.setItem("smartai_token", t);
+    window.localStorage.setItem("smartai_locale", "en-US");
+  }, token);
+  await page.goto(target);
 }
 
 async function api(
@@ -25,20 +34,25 @@ async function api(
   return body ? JSON.parse(body) : null;
 }
 
-test("role demo login lands on each role workspace", async ({ page }) => {
+test("production router keeps the Figma teacher surface and normalized workspaces dormant", async ({ page }) => {
   await loginAs(page, "teacher", "e2e-teacher");
-  await expect(page).toHaveURL(/\/teacher/);
-  await expect(page.getByRole("heading", { name: /教师/ })).toBeVisible({ timeout: 15000 });
-  await expect(page.getByRole("link", { name: "课程", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Workspace" })).toBeVisible({ timeout: 15000 });
 
-  await loginAs(page, "student", "e2e-student");
+  await loginAs(page, "student", "e2e-student", "/student");
   await expect(page).toHaveURL(/\/student/);
-  await expect(page.getByRole("heading", { name: /学生/ })).toBeVisible({ timeout: 15000 });
-  await expect(page.getByRole("link", { name: "我的成绩" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Student workspace is not available yet" }),
+  ).toBeVisible({ timeout: 15000 });
 
-  await loginAs(page, "admin", "e2e-admin");
+  await loginAs(page, "admin", "e2e-admin", "/admin");
   await expect(page).toHaveURL(/\/admin/);
-  await expect(page.getByRole("heading", { name: /总览|Dashboard/ })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText("Page not found")).toBeVisible({ timeout: 15000 });
+
+  await loginAs(page, "teacher", "e2e-teacher", "/teacher");
+  await expect(page.getByText("Page not found")).toBeVisible({ timeout: 15000 });
+  await page.goto("/teacher/courses");
+  await expect(page.getByText("Page not found")).toBeVisible({ timeout: 15000 });
 });
 
 test("three-role normalized workflow persists released result", async ({ page, request }) => {
@@ -91,6 +105,9 @@ test("three-role normalized workflow persists released result", async ({ page, r
   // A second read proves the released state is durable and not held only in UI state.
   const reread = await api(request, studentToken, `/results/assignment/${assignment.id}/me`);
   expect(reread).toEqual(result);
-  await loginAs(page, "student", "e2e-flow-student");
+  await loginAs(page, "student", "e2e-flow-student", "/student");
   await expect(page).toHaveURL(/\/student/);
+  await expect(
+    page.getByRole("heading", { name: "Student workspace is not available yet" }),
+  ).toBeVisible();
 });

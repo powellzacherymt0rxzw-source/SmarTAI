@@ -3,7 +3,6 @@ import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { cn } from "@/lib/cn";
-import { normalizeMarkdownMath } from "./normalizeMarkdownMath";
 
 const markdownMathComponents: Components = {
   p: ({ children }) => <p className="mb-2 whitespace-pre-wrap last:mb-0">{children}</p>,
@@ -15,11 +14,10 @@ const markdownMathComponents: Components = {
 };
 
 export function MarkdownMath({ children, className }: { children?: string | null; className?: string }) {
-  const rawContent = children?.trim();
-  if (!rawContent) {
+  const content = children?.trim();
+  if (!content) {
     return null;
   }
-  const content = normalizeMarkdownMath(rawContent);
 
   return (
     <div

@@ -69,6 +69,22 @@ class Settings(BaseSettings):
     llm_rate_limit_max_wait: int = 60
     context_window_threshold_chars: int = 200_000
 
+    # ─── History natural-language filter shared-pool safety ──────────────
+    # Deterministic parsing is always enabled. Optional LLM enhancement is a
+    # kill-switched shared-pool feature and stays OFF until explicitly enabled.
+    history_query_llm_enabled: bool = False
+    history_query_llm_daily_limit: int = 20
+    history_query_llm_cooldown_seconds: float = 10.0
+
+    # ─── Shared environment model pool safety ───────────────────────
+    # BYOK remains the default.  Environment keys are invisible to ordinary
+    # teachers unless this explicit kill switch is enabled.  When enabled,
+    # every actual provider invocation is charged to an in-process per-owner
+    # daily request + estimated-token budget.
+    shared_pool_enabled: bool = False
+    shared_pool_daily_request_limit: int = 100
+    shared_pool_daily_estimated_token_limit: int = 100_000
+
     # ─── Human-in-the-loop ─────────────────────────────────────────────────────
     confidence_threshold: float = 0.6  # below this, trigger human review
 
