@@ -1613,10 +1613,16 @@ async def async_task_state(*, task_id: str, owner_id: str) -> dict:
     if active_job_id and (reporter := get_reporter(active_job_id)) is not None:
         payload["progress"] = (await reporter.snapshot()).model_dump(mode="json")
     grading_job_id = payload.get("grading_job_id")
-    if payload.get("status") == "grading" and grading_job_id:
-        payload["progress"] = _grading_progress(grading_job_id, owner_id)
-        payload["active_job_id"] = grading_job_id
-        payload["active_operation"] = "grading"
+    if payload.get("status") in {"grading", "error"} and grading_job_id:
+        grading_progress = _grading_progress(grading_job_id, owner_id)
+        # A reporter can reach ``done`` before result persistence finishes.
+        # Prefer the durable failed-run projection so clients never render a
+        # stale success phase after the database marks the run failed.
+        if payload.get("status") == "grading" or grading_progress.get("phase") == "error":
+            payload["progress"] = grading_progress
+            payload["active_job_id"] = grading_job_id
+            payload["active_operation"] = "grading"
+            payload["error"] = payload.get("error") or grading_progress.get("error_detail")
     return payload
 
 
