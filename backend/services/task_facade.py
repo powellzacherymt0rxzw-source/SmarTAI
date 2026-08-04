@@ -224,7 +224,7 @@ def get_task(*, task_id: str, owner_id: str, full: bool = True) -> dict:
     attention = bool(
         workflow.error_code
         or (latest_run and latest_run.status in {"failed", "partial_failed"})
-        or (latest_run and grading_repository.has_unresolved_failures(latest_run.id))
+        or (latest_run and grading_repository.has_review_queue_items(latest_run.id))
     )
     final_version = max(
         workflow.final_result_version,
@@ -1771,7 +1771,8 @@ def _serialize_correction(result) -> dict:
         "result_id": result.id,
         "q_id": result.q_id,
         "type": "",
-        "score": score if score is not None else 0,
+        "score": score,
+        "provisional_score": result.ai_score,
         "max_score": result.ai_max_score,
         "confidence": result.ai_confidence or 0,
         "comment": result.ai_comment,
@@ -1781,7 +1782,8 @@ def _serialize_correction(result) -> dict:
         "synthesis_method": result.ai_synthesis_method,
         "is_score": None,
         "requires_human_review": result.requires_review,
-        "review_reasons": [result.review_reason] if result.review_reason else [],
+        "review_reasons": list(result.review_reasons or []),
+        "initial_review_reasons": list(result.initial_review_reasons or []),
         "teacher_score": review.get("new_score") if review else None,
         "teacher_comment": review.get("new_comment", "") if review else "",
         "review_status": review_status,
@@ -1991,16 +1993,16 @@ def finalization(*, task_id: str, owner_id: str) -> dict:
                 review = result.teacher_review or {}
                 if (
                     result.result_status
-                    not in education.NON_GRADED_RESULT_STATUSES
+                    not in education.NON_SCOREABLE_RESULT_STATUSES
                     and review.get("confirmed") is True
                 ):
                     confirmed_required_count += 1
-            if result.result_status in education.NON_GRADED_RESULT_STATUSES:
+            if result.result_status in education.NON_SCOREABLE_RESULT_STATUSES:
                 presentation = workflow_repository.list_student_presentations(task_id).get(result.student_id)
                 remaining.append({
                     "student_id": presentation.display_student_id if presentation else result.student_id,
                     "q_id": result.q_id,
-                    "reasons": [result.review_reason] if result.review_reason else [],
+                    "reasons": list(result.review_reasons or []),
                     "confirmed": False,
                 })
     released = bool(run and run.released_at is not None)
