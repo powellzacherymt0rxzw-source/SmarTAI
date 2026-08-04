@@ -12,6 +12,7 @@ from starlette.datastructures import Headers
 from backend.api.task_preparation import (
     StartQuestionPreparationRequest,
     _read_source,
+    _source_role_ocr_purpose,
     _validate_source_upload,
     preflight_problem_source,
     question_preparation_capabilities,
@@ -318,12 +319,21 @@ class _VisionRegistry:
         return self.provider
 
 
+@pytest.mark.parametrize(
+    ("role", "filename", "prompt_fragment"),
+    [
+        ("problem", "questions.png", "数理题目 OCR"),
+        ("reference_answer", "answers.png", "数理参考答案 OCR"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_problem_image_uses_normalized_vision_ocr_path():
+async def test_source_image_uses_role_specific_normalized_vision_ocr_path(
+    role, filename, prompt_fragment
+):
     registry = _VisionRegistry()
     upload = UploadFile(
         file=io.BytesIO(b"fake image bytes"),
-        filename="questions.png",
+        filename=filename,
         headers=Headers({"content-type": "image/png"}),
     )
 
@@ -333,15 +343,18 @@ async def test_problem_image_uses_normalized_vision_ocr_path():
         inline_text=None,
         owner_id="ocr-owner",
         registry=registry,
-        purpose="problems",
-        role="problem",
+        role=role,
     )
 
     assert text == "Question 1: OCR result"
-    assert descriptor["filename"] == "questions.png"
+    assert descriptor["filename"] == filename
     assert len(registry.provider.calls) == 1
     assert registry.provider.calls[0]["images"][0].media_type == "image/png"
-    assert "OCR" in registry.provider.calls[0]["prompt"]
+    assert prompt_fragment in registry.provider.calls[0]["prompt"]
+
+
+def test_scanned_programming_test_document_uses_test_case_ocr_prompt():
+    assert _source_role_ocr_purpose("programming_tests") == "test_cases"
 
 
 @pytest.mark.asyncio
@@ -406,7 +419,6 @@ async def test_vision_off_scanned_pdf_returns_stable_preflight_error():
             inline_text=None,
             owner_id="scan-owner",
             registry=registry,
-            purpose="problems",
             role="problem",
         )
 

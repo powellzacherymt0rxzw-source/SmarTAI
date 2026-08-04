@@ -56,7 +56,7 @@ from backend.models import (
 )
 from backend.progress.tracker import get_or_create_reporter, get_reporter, remove_reporter
 from backend.services import task_facade
-from backend.skills.ocr_ingest import LLMVisionOCRSkill
+from backend.skills.ocr_ingest import LLMVisionOCRSkill, OCRPurpose
 from backend.tools.file_processing import IMAGE_MEDIA_TYPES, extract_text_from_upload
 
 
@@ -75,6 +75,12 @@ _SOURCE_ROLE_EXTENSIONS = {
     "reference_answer": _DOCUMENT_SOURCE_EXTENSIONS,
     "rubric": _DOCUMENT_SOURCE_EXTENSIONS,
     "programming_tests": (*_DOCUMENT_SOURCE_EXTENSIONS, ".json"),
+}
+_SOURCE_ROLE_OCR_PURPOSE: dict[str, OCRPurpose] = {
+    "problem": "problems",
+    "reference_answer": "reference",
+    "rubric": "problems",
+    "programming_tests": "test_cases",
 }
 _SOURCE_MIME_TYPES = {
     ".pdf": frozenset({"application/pdf", "application/x-pdf"}),
@@ -112,6 +118,18 @@ def _material_import_source_role(targets: list[str]) -> str:
     if targets == ["criterion"]:
         return "rubric"
     return "problem"
+
+
+def _source_role_ocr_purpose(role: str) -> OCRPurpose:
+    """Keep OCR instructions aligned with the uploaded material's role."""
+
+    try:
+        return _SOURCE_ROLE_OCR_PURPOSE[role]
+    except KeyError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "invalid_source_role", "role": role},
+        ) from exc
 
 
 def _validate_source_upload(
@@ -335,7 +353,7 @@ async def preflight_problem_source(
         text, descriptor = await _read_source(
             file=file, library_material_id=library_material_id,
             inline_text=inline_text, owner_id=current.id, registry=registry,
-            purpose="problems", role=role,
+            role=role,
         )
         saved_material = await _save_source_to_library(
             save=save_to_library,
@@ -396,7 +414,7 @@ async def preflight_problem_source(
 async def _read_source(
     *, file: UploadFile | None, library_material_id: str | None,
     inline_text: str | None, owner_id: str, registry: ExpertRegistry,
-    purpose: str, role: str,
+    role: str,
 ) -> tuple[str, dict]:
     _accepted_source_extensions(
         role, has_vision=registry.pick_vision() is not None
@@ -417,7 +435,7 @@ async def _read_source(
         try:
             text = await extract_text_from_upload(
                 body, file.filename or "source", ocr_skill=ocr_skill,
-                purpose=purpose, reporter=None,
+                purpose=_source_role_ocr_purpose(role), reporter=None,
             )
         except HTTPException as exc:
             _stable_vision_error(
@@ -736,7 +754,6 @@ async def preflight_material_import(
         text, descriptor = await _read_source(
             file=file, library_material_id=library_material_id,
             inline_text=None, owner_id=current.id, registry=registry,
-            purpose="problems",
             role=_material_import_source_role(requested_targets),
         )
         target_role = (
@@ -1435,7 +1452,6 @@ async def _apply_auxiliary_upload(
             inline_text=None,
             owner_id=current.id,
             registry=registry,
-            purpose="problems",
             role=(
                 "reference_answer"
                 if target == "reference_answer"
