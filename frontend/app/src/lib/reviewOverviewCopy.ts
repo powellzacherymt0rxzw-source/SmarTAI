@@ -2,10 +2,10 @@ import type { Locale } from "@/i18n/messages";
 
 const copy = {
   title: ["复核批改", "Grading Review"],
-  average: ["平均得分率", "Average score"],
+  average: ["平均得分率", "Average percentage"],
   lowConfidence: ["低置信题次", "Low-confidence responses"],
   disagreement: ["专家分歧大", "High model disagreement"],
-  annotated: ["复核信号已由教师处理", "Review signals handled by teacher"],
+  annotated: ["教师已处理复核项", "Teacher-handled review items"],
   startReview: ["开始优先复核", "Start priority review"],
   viewResult: ["查看任一结果", "View a result"],
   searchPlaceholder: ["SmarTAI 智能搜索：低置信、低于 60 分、专家分歧、学生姓名或 Q2…", "SmarTAI Smart Search: low confidence, below 60, disagreement, student, or Q2…"],
@@ -19,7 +19,7 @@ const copy = {
   edited: ["教师已修改", "Teacher changed"],
   confirmed: ["已确认", "Confirmed"],
   hard: ["无有效分数", "No valid score"],
-  aiDefault: ["AI 分未人工处理", "AI score not reviewed"],
+  aiDefault: ["AI 分未人工复核", "AI score not teacher-reviewed"],
   noQueue: ["当前没有低置信、专家分歧或后端复核标记。", "No low-confidence, disagreement, or backend review flags were found."],
   noMatch: ["没有符合当前筛选条件的题次。清空输入可恢复全部结果。", "No responses match this filter. Clear it to restore all results."],
   clear: ["清空筛选", "Clear filter"],
