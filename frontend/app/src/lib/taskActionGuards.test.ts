@@ -62,3 +62,18 @@ describe("question source recovery guidance", () => {
     expect(info.actionLabel).toBe("重新选择文件");
   });
 });
+
+describe("background task failure guidance", () => {
+  it("keeps a stable grading failure code and job id visible", () => {
+    const info = classifyRecoverableError("grading_failed", {
+      locale: "zh-CN",
+      phase: "error",
+      jobId: "run-1",
+    });
+
+    expect(info.title).toBe("本次批改没有完成");
+    expect(info.description).toContain("任务资料仍然保留");
+    expect(info.technicalDetails).toContainEqual({ label: "错误代码", value: "grading_failed" });
+    expect(info.technicalDetails).toContainEqual({ label: "任务编号", value: "run-1" });
+  });
+});
