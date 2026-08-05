@@ -199,4 +199,3 @@ available locally (Docker is unavailable); the PostgreSQL DDL is covered by
 the dialect-rendered regression test and the E2E readiness command is covered
 by the workflow regression test.
 
-翻译本文
